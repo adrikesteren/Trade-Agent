@@ -1,4 +1,5 @@
 import { MarketCandleChart } from "@/components/market-candle-chart";
+import { getChartDisplayTimeZone } from "@/lib/markets/chart-display-timezone";
 import { aggregateOhlcvToTarget } from "@/lib/markets/aggregate-ohlcv";
 import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
@@ -81,6 +82,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
 
   const baseCandles = (candleRows ?? []).map(mapCandleRow);
   const initialCandles = aggregateOhlcvToTarget(baseCandles, CHART_DEFAULT_TF);
+  const chartDisplayTz = getChartDisplayTimeZone();
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-1">
@@ -131,16 +133,19 @@ export default async function MarketDetailPage({ params }: PageProps) {
         initialCandles={initialCandles}
       />
       <p className="text-xs text-zinc-500">
-        Timeframe buttons load aggregated OHLCV for this market. Axis and crosshair times are shown in{" "}
-        <strong>UTC</strong> so they line up with <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">open_time</code>{" "}
-        / <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code> in Supabase (timestamptz). If the
-        chart is empty, refresh listings from{" "}
+        Timeframe buttons load aggregated OHLCV for this market. Axis, crosshair, and hover labels use{" "}
+        <strong className="font-mono text-zinc-600 dark:text-zinc-400">{chartDisplayTz}</strong> (
+        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>
+        , default Europe/Amsterdam). Bars stay the same UTC instants as Supabase{" "}
+        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">open_time</code> /{" "}
+        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code>. If the chart is empty, refresh
+        listings from{" "}
         <Link href="/dashboard/assets" className="text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300">
           Markets &amp; assets
         </Link>
-        . Gaps usually mean no row for that 5m slot; use{" "}
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">supabase/snippets/audit_candle_gaps.sql</code> in the
-        SQL editor to list gaps longer than 6 minutes.
+        . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
+        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code> values (difference{">"} 6 minutes)
+        to find missing bars.
       </p>
     </div>
   );
