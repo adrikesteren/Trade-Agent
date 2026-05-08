@@ -9,8 +9,9 @@ function parseIntervalMs(envVal: string | undefined, fallback: number): number {
   return n;
 }
 
+/** Default 0: market sync is manual-only; set env to a positive ms only if you use an external cron and want ETA UI. */
 export function getMarketsSyncIntervalMs(): number {
-  return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_MARKETS_SYNC_INTERVAL_MS, 3_600_000);
+  return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_MARKETS_SYNC_INTERVAL_MS, 0);
 }
 
 export function getCandlesSyncIntervalMs(): number {

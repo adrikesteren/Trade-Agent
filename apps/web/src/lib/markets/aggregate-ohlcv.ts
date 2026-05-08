@@ -1,5 +1,6 @@
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
 
 const MINUTES: Record<ChartTimeframe, number> = {
   "5m": 5,
@@ -17,7 +18,9 @@ const SOURCE = CATALOG_STORAGE_TIMEFRAME as ChartTimeframe;
  */
 export function aggregateOhlcvToTarget(rows: CandleRowJson[], target: ChartTimeframe): CandleRowJson[] {
   if (target === SOURCE) {
-    return [...rows].sort((a, b) => new Date(a.openTime).getTime() - new Date(b.openTime).getTime());
+    return [...rows].sort(
+      (a, b) => candleTimeToUnixSeconds(a.openTime) - candleTimeToUnixSeconds(b.openTime),
+    );
   }
 
   if (MINUTES[target] < MINUTES[SOURCE]) {
@@ -25,12 +28,14 @@ export function aggregateOhlcvToTarget(rows: CandleRowJson[], target: ChartTimef
   }
 
   const periodMs = MINUTES[target] * 60_000;
-  const sorted = [...rows].sort((a, b) => new Date(a.openTime).getTime() - new Date(b.openTime).getTime());
+  const sorted = [...rows].sort(
+    (a, b) => candleTimeToUnixSeconds(a.openTime) - candleTimeToUnixSeconds(b.openTime),
+  );
   if (!sorted.length) return [];
 
   const buckets = new Map<number, CandleRowJson[]>();
   for (const row of sorted) {
-    const t = new Date(row.openTime).getTime();
+    const t = candleTimeToUnixSeconds(row.openTime) * 1000;
     const bucketStart = Math.floor(t / periodMs) * periodMs;
     const list = buckets.get(bucketStart);
     if (list) list.push(row);

@@ -2,9 +2,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { barsForRetention, CANDLE_RETENTION_HOURS } from "@/lib/markets/candle-retention";
 import {
+  beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   type BitvavoSyncTriggerSource,
-  recordBitvavoSyncSuccess,
+  recordBitvavoSyncCompleted,
+  recordBitvavoSyncFailed,
+  resolveLatestRunningBitvavoRunId,
 } from "@/lib/markets/record-bitvavo-sync-status";
 import { syncBitvavoCandlesChunk } from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { NextResponse } from "next/server";
@@ -16,6 +19,8 @@ type Body = {
   marketOffset?: number;
   marketBatchSize?: number;
   delayMsBetweenMarkets?: number;
+  /** Same logical EUR sweep across chunked POSTs. */
+  syncRunId?: string | null;
 };
 
 /**
@@ -52,8 +57,26 @@ export async function POST(request: Request) {
   const marketOffset = Math.max(body.marketOffset ?? 0, 0);
   const marketBatchSize = Math.min(Math.max(body.marketBatchSize ?? 25, 1), 80);
   const delayMsBetweenMarkets = Math.min(Math.max(body.delayMsBetweenMarkets ?? 120, 0), 2000);
+  const isEurQuote = quote === null || String(quote).toUpperCase() === "EUR";
 
   const admin = createServiceRoleClient();
+  let runId: string | null = body.syncRunId ?? null;
+
+  if (isEurQuote) {
+    if (marketOffset === 0 && !runId) {
+      try {
+        runId = await beginBitvavoSyncRun(admin, BITVAVO_SYNC_JOB_CANDLES_EUR, source);
+      } catch {
+        /* non-fatal */
+      }
+    } else if (marketOffset > 0 && !runId) {
+      try {
+        runId = await resolveLatestRunningBitvavoRunId(admin, BITVAVO_SYNC_JOB_CANDLES_EUR);
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
 
   try {
     const result = await syncBitvavoCandlesChunk(admin, {
@@ -66,10 +89,13 @@ export async function POST(request: Request) {
     });
 
     const isFullSweepDone = result.nextMarketOffset == null;
-    const isEurQuote = quote === null || String(quote).toUpperCase() === "EUR";
     if (isFullSweepDone && isEurQuote) {
       try {
-        await recordBitvavoSyncSuccess(admin, BITVAVO_SYNC_JOB_CANDLES_EUR, source);
+        await recordBitvavoSyncCompleted(admin, {
+          runId,
+          jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+          source,
+        });
       } catch {
         /* non-fatal */
       }
@@ -82,6 +108,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       ...result,
+      syncRunId: runId,
       planningNotes: {
         approxBytesPerRowAssumed: approxBytesPerRow,
         approxMbThisChunk: Math.round(approxMbStored * 1000) / 1000,
@@ -91,6 +118,17 @@ export async function POST(request: Request) {
       },
     });
   } catch (e) {
+    if (isEurQuote) {
+      try {
+        await recordBitvavoSyncFailed(admin, {
+          runId,
+          jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+          source,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
     const message = e instanceof Error ? e.message : "sync failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }

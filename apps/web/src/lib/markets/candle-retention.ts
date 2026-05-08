@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** How far back we keep closed candles (wall clock, UTC). */
-export const CANDLE_RETENTION_HOURS = 120;
+export const CANDLE_RETENTION_HOURS = 72; // 3 days — lighter on DB/disk for dev
 
 /** Bitvavo allows at most 1440 candles per REST call. */
 const BITVAVO_MAX_LIMIT = 1440;

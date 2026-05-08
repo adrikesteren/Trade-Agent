@@ -2,6 +2,7 @@
 
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME, CHART_TIMEFRAMES } from "@/lib/markets/chart-types";
+import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
 import { createClient } from "@/lib/supabase/client";
 import {
   CandlestickSeries,
@@ -12,12 +13,32 @@ import {
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+function formatUtcChartTime(t: Time): string {
+  if (typeof t !== "number" || !Number.isFinite(t)) return String(t);
+  try {
+    return (
+      new Intl.DateTimeFormat(undefined, {
+        timeZone: "UTC",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(new Date(t * 1000)) + " UTC"
+    );
+  } catch {
+    return new Date(t * 1000).toISOString();
+  }
+}
+
 function toCandlestick(row: CandleRowJson): CandlestickData<UTCTimestamp> {
-  const t = Math.floor(new Date(row.openTime).getTime() / 1000) as UTCTimestamp;
+  const t = candleTimeToUnixSeconds(row.openTime) as UTCTimestamp;
   return {
     time: t,
     open: row.open,
@@ -28,7 +49,7 @@ function toCandlestick(row: CandleRowJson): CandlestickData<UTCTimestamp> {
 }
 
 function toVolume(row: CandleRowJson, prevClose: number): HistogramData<UTCTimestamp> {
-  const t = Math.floor(new Date(row.openTime).getTime() / 1000) as UTCTimestamp;
+  const t = candleTimeToUnixSeconds(row.openTime) as UTCTimestamp;
   const up = row.close >= prevClose;
   return {
     time: t,
@@ -40,7 +61,7 @@ function toVolume(row: CandleRowJson, prevClose: number): HistogramData<UTCTimes
 function computeChange(rows: CandleRowJson[]): number | null {
   if (rows.length < 2) return null;
   const sorted = [...rows].sort(
-    (a, b) => new Date(a.openTime).getTime() - new Date(b.openTime).getTime(),
+    (a, b) => candleTimeToUnixSeconds(a.openTime) - candleTimeToUnixSeconds(b.openTime),
   );
   const first = sorted[0]!;
   const last = sorted[sorted.length - 1]!;
@@ -105,8 +126,9 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
     const vs = volSeriesRef.current;
     if (!cs || !vs) return;
 
-    const sorted = [...rows].sort(
-      (a, b) => new Date(a.openTime).getTime() - new Date(b.openTime).getTime(),
+    const sane = rows.filter((r) => Number.isFinite(candleTimeToUnixSeconds(r.openTime)));
+    const sorted = [...sane].sort(
+      (a, b) => candleTimeToUnixSeconds(a.openTime) - candleTimeToUnixSeconds(b.openTime),
     );
     const candleData = sorted.map(toCandlestick);
     (cs as { setData: (d: CandlestickData<UTCTimestamp>[]) => void }).setData(candleData);
@@ -128,6 +150,9 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
     const chart = createChart(el, {
       width: el.clientWidth,
       height: 420,
+      localization: {
+        timeFormatter: formatUtcChartTime,
+      },
       layout: {
         background: { type: ColorType.Solid, color: isDark ? "#09090b" : "#ffffff" },
         textColor: isDark ? "#a1a1aa" : "#52525b",
