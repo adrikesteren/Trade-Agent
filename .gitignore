@@ -1,0 +1,12 @@
+node_modules
+.turbo
+.next
+dist
+.env
+.env.local
+.vercel
+*.log
+.DS_Store
+
+# Supabase CLI local metadata (do not commit)
+supabase/.temp/

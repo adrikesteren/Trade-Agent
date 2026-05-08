@@ -1,0 +1,16 @@
+{
+  "name": "@repo/redis",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {},
+  "dependencies": {
+    "@upstash/redis": "^1.35.0"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
