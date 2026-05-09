@@ -10,8 +10,14 @@ export type BackfillMissingCandlesResult = {
   error?: string;
 };
 
+/** Same as sync-bitvavo-candles-chunk: align Bitvavo ISO with Postgres timestamptz text. */
 function keyForTs(openIso: string, closeIso: string): string {
-  return `${openIso}\0${closeIso}`;
+  const o = Date.parse(openIso);
+  const c = Date.parse(closeIso);
+  if (!Number.isFinite(o) || !Number.isFinite(c)) {
+    return `invalid:${openIso}\0${closeIso}`;
+  }
+  return `${o}\0${c}`;
 }
 
 /**

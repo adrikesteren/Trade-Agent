@@ -41,8 +41,14 @@ export type SyncCandlesChunkResult = {
   syncMode: CandleSyncMode;
 };
 
+/** Stable map key: same instant may appear as `…T…Z` (Bitvavo) vs `… +00` (Postgres). */
 function keyForTs(openIso: string, closeIso: string): string {
-  return `${openIso}\0${closeIso}`;
+  const o = Date.parse(openIso);
+  const c = Date.parse(closeIso);
+  if (!Number.isFinite(o) || !Number.isFinite(c)) {
+    return `invalid:${openIso}\0${closeIso}`;
+  }
+  return `${o}\0${c}`;
 }
 
 const BITVAVO_MAX_LIMIT = 1440;
