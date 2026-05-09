@@ -1,6 +1,7 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   Alert,
   Card,
@@ -22,8 +23,25 @@ type SignalRow = {
   intent: string;
   confidence: number | string | null;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
+
+type CatalogMarketRow = {
+  id: string;
+  market_symbol?: string | null;
+  assets?: unknown;
+};
+
+type MarketCatalogExtra = {
+  /** `catalog.markets.market_symbol` (e.g. BTC-EUR) */
+  marketSymbol: string;
+  /** `catalog.assets.code` when market_symbol is empty */
+  assetCode: string;
+  mcapN: number;
+};
+
+const MARKET_ID_IN_CHUNK = 120;
 
 function agentSlugFromSignalRow(row: SignalRow): string | null {
   const rel = row.signal_agents;
@@ -32,8 +50,41 @@ function agentSlugFromSignalRow(row: SignalRow): string | null {
   return first?.agent_id ?? null;
 }
 
-function mcapFromMaps(marketId: string, mcapByMarketId: Map<string, number>): number {
-  return mcapByMarketId.get(marketId) ?? Number.NEGATIVE_INFINITY;
+function marketSymbolFromMetadata(row: SignalRow): string | null {
+  const m = row.metadata;
+  if (!m || typeof m !== "object") return null;
+  const sym = m.market_symbol;
+  return typeof sym === "string" && sym.trim() ? sym.trim() : null;
+}
+
+function parseAssetFromMarketRow(m: CatalogMarketRow): {
+  code: string;
+  mcapN: number;
+} {
+  const rawA = m.assets as unknown;
+  const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
+    code?: string | null;
+    coingecko_market_cap_usd?: number | string | null;
+  } | null;
+  const code = String(asset?.code ?? "").trim();
+  return {
+    code,
+    mcapN: numericOrNegInf(asset?.coingecko_market_cap_usd ?? null),
+  };
+}
+
+function mcapFromExtras(marketId: string, catalogByMarketId: Map<string, MarketCatalogExtra>): number {
+  return catalogByMarketId.get(marketId)?.mcapN ?? Number.NEGATIVE_INFINITY;
+}
+
+/** Label: market table symbol first, then base asset code from the same row, then worker metadata, then id. */
+function resolveMarketLabel(row: SignalRow, catalogByMarketId: Map<string, MarketCatalogExtra>): string {
+  const c = catalogByMarketId.get(row.market_id);
+  if (c?.marketSymbol) return c.marketSymbol;
+  if (c?.assetCode) return c.assetCode;
+  const meta = marketSymbolFromMetadata(row);
+  if (meta) return meta;
+  return row.market_id.slice(0, 8) + "…";
 }
 
 /** ENTER first, EXIT second, all other intents last (each block sorted by mcap desc, then newest). */
@@ -43,10 +94,14 @@ function intentSortGroup(intent: string): number {
   return 2;
 }
 
-function compareSignals(a: SignalRow, b: SignalRow, mcapByMarketId: Map<string, number>): number {
+function compareSignals(
+  a: SignalRow,
+  b: SignalRow,
+  catalogByMarketId: Map<string, MarketCatalogExtra>,
+): number {
   const g = intentSortGroup(a.intent) - intentSortGroup(b.intent);
   if (g !== 0) return g;
-  const mc = mcapFromMaps(b.market_id, mcapByMarketId) - mcapFromMaps(a.market_id, mcapByMarketId);
+  const mc = mcapFromExtras(b.market_id, catalogByMarketId) - mcapFromExtras(a.market_id, catalogByMarketId);
   if (mc !== 0) return mc;
   return Date.parse(b.created_at) - Date.parse(a.created_at);
 }
@@ -82,14 +137,40 @@ function intentClass(intent: string): string {
   return "";
 }
 
-function mcapFromMarketRow(m: {
-  assets?: unknown;
-}): number {
-  const rawA = m.assets as unknown;
-  const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
-    coingecko_market_cap_usd?: number | string | null;
-  } | null;
-  return numericOrNegInf(asset?.coingecko_market_cap_usd ?? null);
+async function fetchCatalogExtrasByMarketId(
+  supabase: SupabaseClient,
+  marketIds: string[],
+): Promise<Map<string, MarketCatalogExtra>> {
+  const catalogByMarketId = new Map<string, MarketCatalogExtra>();
+  if (marketIds.length === 0) return catalogByMarketId;
+
+  const rows: CatalogMarketRow[] = [];
+  for (let i = 0; i < marketIds.length; i += MARKET_ID_IN_CHUNK) {
+    const chunk = marketIds.slice(i, i + MARKET_ID_IN_CHUNK);
+    const { data, error } = await supabase
+      .schema("catalog")
+      .from("markets")
+      .select("id, market_symbol, assets ( code, coingecko_market_cap_usd )")
+      .in("id", chunk);
+    if (error) {
+      console.error("signals page: markets batch:", error.message);
+      continue;
+    }
+    rows.push(...((data ?? []) as CatalogMarketRow[]));
+  }
+
+  for (const m of rows) {
+    const id = m.id as string;
+    const { code, mcapN } = parseAssetFromMarketRow(m);
+    const marketSymbol = String(m.market_symbol ?? "").trim();
+    catalogByMarketId.set(id, {
+      marketSymbol,
+      assetCode: code,
+      mcapN,
+    });
+  }
+
+  return catalogByMarketId;
 }
 
 export default async function SignalsPage() {
@@ -97,32 +178,15 @@ export default async function SignalsPage() {
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("signals")
-    .select("id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, created_at, signal_agents ( agent_id )");
+    .select(
+      "id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, created_at, metadata, signal_agents ( agent_id )",
+    );
 
   const raw = (rows ?? []) as SignalRow[];
   const marketIds = [...new Set(raw.map((r) => r.market_id))];
+  const catalogByMarketId = await fetchCatalogExtrasByMarketId(supabase, marketIds);
 
-  const mcapByMarketId = new Map<string, number>();
-  const symbolByMarketId = new Map<string, string>();
-
-  if (marketIds.length > 0) {
-    const { data: mkts, error: mkErr } = await supabase
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, assets ( coingecko_market_cap_usd )")
-      .in("id", marketIds);
-
-    if (mkErr) {
-      console.error("signals page: markets batch:", mkErr.message);
-    }
-    for (const m of mkts ?? []) {
-      const id = m.id as string;
-      symbolByMarketId.set(id, String(m.market_symbol ?? ""));
-      mcapByMarketId.set(id, mcapFromMarketRow(m as { assets?: unknown }));
-    }
-  }
-
-  const sorted = [...raw].sort((a, b) => compareSignals(a, b, mcapByMarketId));
+  const sorted = [...raw].sort((a, b) => compareSignals(a, b, catalogByMarketId));
   const list = topSignalPerMarket(sorted);
 
   const sortLineParts = [
@@ -178,15 +242,15 @@ export default async function SignalsPage() {
               </thead>
               <tbody>
                 {list.map((row) => {
-                  const sym = symbolByMarketId.get(row.market_id)?.trim() || null;
+                  const label = resolveMarketLabel(row, catalogByMarketId);
                   const agentSlug = agentSlugFromSignalRow(row);
-                  const mcapN = mcapFromMaps(row.market_id, mcapByMarketId);
+                  const mcapN = mcapFromExtras(row.market_id, catalogByMarketId);
                   const mcapDisplay = Number.isFinite(mcapN) ? mcapN : null;
                   return (
                     <tr key={row.id}>
                       <Td>
                         <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
-                          {sym ?? row.market_id.slice(0, 8) + "…"}
+                          {label}
                         </Link>
                       </Td>
                       <Td className="text-right font-mono">{formatUsdMetric(mcapDisplay)}</Td>
