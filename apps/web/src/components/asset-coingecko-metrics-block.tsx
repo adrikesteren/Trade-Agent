@@ -1,5 +1,27 @@
 import Link from "next/link";
 
+/** Columns on `public.assets` filled by CoinGecko sync (subset used by UI). */
+export type AssetLiveCoingeckoDb = {
+  coingecko_fetched_at: string | null;
+  coingecko_coin_id: string | null;
+  coingecko_price_usd: number | string | null;
+  coingecko_market_cap_usd: number | string | null;
+  coingecko_fdv_usd: number | string | null;
+  coingecko_total_volume_usd: number | string | null;
+  coingecko_high_24h_usd: number | string | null;
+  coingecko_low_24h_usd: number | string | null;
+  coingecko_price_change_24h_usd: number | string | null;
+  coingecko_price_change_24h_pct: number | string | null;
+  coingecko_price_change_7d_pct: number | string | null;
+  coingecko_market_cap_rank: number | null;
+  coingecko_circulating_supply: number | string | null;
+  coingecko_total_supply: number | string | null;
+  coingecko_max_supply: number | string | null;
+  coingecko_ath_usd: number | string | null;
+  coingecko_ath_change_pct: number | string | null;
+};
+
+/** Live CoinGecko fields stored on `public.assets` (updated each sync). */
 export type AssetCoingeckoMetricsRow = {
   fetched_at: string;
   coingecko_id: string;
@@ -66,6 +88,33 @@ function fmtSupply(v: number | string | null | undefined): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n);
 }
 
+export function buildAssetCoingeckoMetricsRow(
+  asset: AssetLiveCoingeckoDb,
+  metadataCoingeckoId: string | null,
+): AssetCoingeckoMetricsRow | null {
+  if (!asset.coingecko_fetched_at) return null;
+  const cgId = asset.coingecko_coin_id?.trim() || metadataCoingeckoId?.trim() || "—";
+  return {
+    fetched_at: asset.coingecko_fetched_at,
+    coingecko_id: cgId,
+    price_usd: asset.coingecko_price_usd,
+    market_cap_usd: asset.coingecko_market_cap_usd,
+    fully_diluted_valuation_usd: asset.coingecko_fdv_usd,
+    total_volume_usd: asset.coingecko_total_volume_usd,
+    high_24h_usd: asset.coingecko_high_24h_usd,
+    low_24h_usd: asset.coingecko_low_24h_usd,
+    price_change_24h_usd: asset.coingecko_price_change_24h_usd,
+    price_change_24h_pct: asset.coingecko_price_change_24h_pct,
+    price_change_7d_pct: asset.coingecko_price_change_7d_pct,
+    market_cap_rank: asset.coingecko_market_cap_rank,
+    circulating_supply: asset.coingecko_circulating_supply,
+    total_supply: asset.coingecko_total_supply,
+    max_supply: asset.coingecko_max_supply,
+    ath_usd: asset.coingecko_ath_usd,
+    ath_change_pct: asset.coingecko_ath_change_pct,
+  };
+}
+
 function fmtUtcShort(iso: string): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "—";
@@ -113,8 +162,8 @@ export function AssetCoingeckoMetricsBlock({
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">CoinGecko (USD)</h2>
           <p className="mt-1 text-xs text-zinc-500">
-            Latest snapshot for <span className="font-mono text-zinc-700 dark:text-zinc-300">{assetCode}</span> — cap,
-            volume, supply, ATH, and % moves (same row the mediator can read).
+            Live fields on <span className="font-mono text-zinc-700 dark:text-zinc-300">{assetCode}</span> (updated each
+            CoinGecko sync): cap, volume, supply, ATH, and % moves.
           </p>
         </div>
         <Link
@@ -170,9 +219,10 @@ export function AssetCoingeckoMetricsNoSnapshot({
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">CoinGecko (USD)</h2>
           <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-            No <code className="rounded bg-zinc-200/80 px-1 dark:bg-zinc-800">asset_coingecko_metrics</code> row for{" "}
-            <span className="font-mono font-medium">{assetCode}</span> yet. After a successful sync you will see market
-            cap, 24h volume, supplies, and more below.
+            No live CoinGecko data on <span className="font-mono font-medium">{assetCode}</span> yet. Run{" "}
+            <strong>Asset fundamentals (USD)</strong> from Sync runs — then the same row in{" "}
+            <code className="rounded bg-zinc-200/80 px-1 dark:bg-zinc-800">assets</code> is filled (no duplicate history
+            rows).
           </p>
         </div>
         <Link
@@ -199,8 +249,8 @@ export function AssetCoingeckoMetricsNoSnapshot({
 export function AssetCoingeckoMetricsPlaceholder({ reason }: { reason: "non_crypto" | "no_data" }) {
   const copy =
     reason === "non_crypto"
-      ? "CoinGecko snapshots are only collected for crypto assets in the catalog."
-      : "No snapshot yet. Metrics sync on a schedule (worker GET with CRON_SECRET, or local dev with ENABLE_LOCAL_COINGECKO_METRICS_SYNC).";
+      ? "CoinGecko live fields are only collected for crypto assets in the catalog."
+      : "No live CoinGecko data yet. Use Sync runs (worker or local ENABLE_LOCAL_COINGECKO_METRICS_SYNC).";
 
   return (
     <section className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">

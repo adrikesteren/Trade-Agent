@@ -2,11 +2,13 @@ import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sy
 import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   BITVAVO_SYNC_JOB_MARKETS_EUR,
+  COINGECKO_SYNC_JOB_COIN_ID,
   COINGECKO_SYNC_JOB_METRICS,
   type BitvavoSyncJobStatus,
 } from "@/lib/markets/record-bitvavo-sync-status";
 import {
   getCandlesSyncIntervalMs,
+  getCoingeckoCoinIdSyncIntervalMs,
   getCoingeckoMetricsSyncIntervalMs,
   getMarketsSyncIntervalMs,
 } from "@/lib/markets/sync-schedule";
@@ -34,6 +36,7 @@ const SYNC_JOB_KEYS = [
   BITVAVO_SYNC_JOB_MARKETS_EUR,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   COINGECKO_SYNC_JOB_METRICS,
+  COINGECKO_SYNC_JOB_COIN_ID,
 ] as const;
 
 export default async function SyncRunsPage() {
@@ -55,10 +58,12 @@ export default async function SyncRunsPage() {
   const marketsLatest = latestByJob.get(BITVAVO_SYNC_JOB_MARKETS_EUR) ?? null;
   const candlesLatest = latestByJob.get(BITVAVO_SYNC_JOB_CANDLES_EUR) ?? null;
   const coingeckoLatest = latestByJob.get(COINGECKO_SYNC_JOB_METRICS) ?? null;
+  const coinIdLatest = latestByJob.get(COINGECKO_SYNC_JOB_COIN_ID) ?? null;
 
   const marketsCompletedAt = lastCompletedAtForJob(runsSafe, BITVAVO_SYNC_JOB_MARKETS_EUR);
   const candlesCompletedAt = lastCompletedAtForJob(runsSafe, BITVAVO_SYNC_JOB_CANDLES_EUR);
   const coingeckoCompletedAt = lastCompletedAtForJob(runsSafe, COINGECKO_SYNC_JOB_METRICS);
+  const coinIdCompletedAt = lastCompletedAtForJob(runsSafe, COINGECKO_SYNC_JOB_COIN_ID);
 
   const recentRuns = runsSafe.slice(0, 40);
 
@@ -92,6 +97,16 @@ export default async function SyncRunsPage() {
       lastSuccessAt: coingeckoCompletedAt,
       intervalMs: getCoingeckoMetricsSyncIntervalMs(),
       action: "coingecko",
+    },
+    {
+      jobKey: COINGECKO_SYNC_JOB_COIN_ID,
+      label: "CoinGecko coin id (catalog)",
+      provider: "CoinGecko",
+      status: (coinIdLatest?.status as BitvavoSyncJobStatus | null) ?? null,
+      lastStartedAt: coinIdLatest?.created_at ?? null,
+      lastSuccessAt: coinIdCompletedAt,
+      intervalMs: getCoingeckoCoinIdSyncIntervalMs(),
+      action: "coingecko-coin-id",
     },
   ];
 

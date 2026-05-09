@@ -23,6 +23,11 @@ export function getCoingeckoMetricsSyncIntervalMs(): number {
   return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_METRICS_SYNC_INTERVAL_MS, 300_000);
 }
 
+/** CoinGecko coin-id backfill worker (default 5m). */
+export function getCoingeckoCoinIdSyncIntervalMs(): number {
+  return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_COIN_ID_SYNC_INTERVAL_MS, 300_000);
+}
+
 /**
  * Next local wall-clock instant strictly after `afterMs` on a grid of `intervalMs` from local
  * midnight (e.g. every hour → …:00; every 5 minutes → …:00, …:05, …:10, …).

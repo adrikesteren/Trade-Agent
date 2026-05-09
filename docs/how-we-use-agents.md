@@ -44,7 +44,7 @@ Zo voorkom je dat een los agent direct geld riskeert en houd je één plek voor 
 - Bitvavo (eerst) via REST en/of websocket.
 - Detecteert **candle close** en triggert de pipeline (event: `CANDLE_CLOSED`).
 - Schrijft naar database (bijv. Supabase): OHLCV + `close_time`.
-- **CoinGecko** (ca. elke 5 minuten, worker + optioneel lokale dev-timer): fundamentals per catalogus-asset (`market_cap`, `total_volume`, FDV, 24h/7d %, rank, supplies, ATH, …) in `public.asset_coingecko_metrics` (append-only snapshots). `metadata.coingecko_id` op `assets` wordt waar nodig via search gevuld.
+- **CoinGecko** (ca. elke 5 minuten, worker + optioneel lokale dev-timer): live USD-velden per catalogus-asset op `public.assets` (`coingecko_market_cap_usd`, volume, FDV, 24h/7d %, rank, supplies, ATH, …; overschreven per sync). `metadata.coingecko_id` wordt waar nodig via `/search` gevuld.
 
 **Output:** feiten over de markt, geen trade-intent.
 
@@ -68,7 +68,7 @@ Zo voorkom je dat een los agent direct geld riskeert en houd je één plek voor 
 De mediator:
 
 - Leest signalen van toegestane agents voor het symbol/timeframe.
-- Kan **laatste fundamentals** meenemen (bv. uit `asset_coingecko_metrics` op tijd van besluit): market cap/volume/rank helpen context (“illiquid”, “macro cap”) zonder zelf een aparte “fundamentals-agent” te verplichten — policy bepaalt of en hoe dat meetelt.
+- Kan **live fundamentals** meenemen (kolommen op `assets`, gezet door CoinGecko-sync): market cap/volume/rank helpen context (“illiquid”, “macro cap”) zonder zelf een aparte “fundamentals-agent” te verplichten — policy bepaalt of en hoe dat meetelt.
 - Past **operationele modus** toe: `Paper` / `Micro` / `BigSpender`.
 - Past **risk rails** toe: daily loss, max posities, allowlist, kill switch, cooldown, enz.
 - Kijkt naar **bestaande positie** en **beleid** (zie expliciete signalen hieronder).
@@ -169,9 +169,9 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 
 ## `CANDLE_CLOSED` en live charts (concreet in deze repo)
 
-- **Betekenis:** het moment dat een **nieuwe gesloten OHLCV-rij** voor een markt in de catalogus staat — technisch een **`INSERT` of `UPDATE`** op `public.candles` (interval gelijk aan `CATALOG_STORAGE_TIMEFRAME` in [`apps/web/src/lib/markets/chart-types.ts`](../apps/web/src/lib/markets/chart-types.ts)).
+- **Betekenis:** het moment dat een **nieuwe gesloten OHLCV-rij** voor een markt in de catalogus staat — technisch een `**INSERT` of `UPDATE`** op `public.candles` (interval gelijk aan `CATALOG_STORAGE_TIMEFRAME` in `[apps/web/src/lib/markets/chart-types.ts](../apps/web/src/lib/markets/chart-types.ts)`).
 - **Geen aparte message-bus voor de dashboard-grafiek:** Realtime volgt de database. Migratie `20250512120000_enable_realtime_candles.sql` voegt `candles` toe aan de publicatie `supabase_realtime`. RLS blijft gelden (`candles_select_all` voor `authenticated`).
-- **Market detail:** [`MarketCandleChart`](../apps/web/src/components/market-candle-chart.tsx) opent een Supabase-kanaal met filter `market_id=eq.{uuid}` en vernieuwt na een korte debounce de data via `GET /api/markets/candles` (zodat aggregatie naar hogere timeframes op de server blijft).
+- **Market detail:** `[MarketCandleChart](../apps/web/src/components/market-candle-chart.tsx)` opent een Supabase-kanaal met filter `market_id=eq.{uuid}` en vernieuwt na een korte debounce de data via `GET /api/markets/candles` (zodat aggregatie naar hogere timeframes op de server blijft).
 - **Server-side signal pipeline:** kan later **extra** een QStash-job publiceren na een candle-write; dat is **niet** nodig voor de live chart.
 - **Asset detail (v1):** er is **geen** chart op de asset-pagina, alleen links naar markten. Als daar later een chart komt: overweeg meerdere Realtime-subscriptions (één per `markets.id` voor dit `asset_id`) of één kanaal zonder filter met client-side filter op die id-set.
 

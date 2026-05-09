@@ -7,5 +7,6 @@ export async function register() {
   await Promise.all([
     import("@/lib/markets/local-candle-sync-scheduler"),
     import("@/lib/markets/local-coingecko-metrics-scheduler"),
+    import("@/lib/markets/local-coingecko-coin-id-scheduler"),
   ]);
 }

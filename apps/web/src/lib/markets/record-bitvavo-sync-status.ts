@@ -2,8 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const BITVAVO_SYNC_JOB_MARKETS_EUR = "bitvavo_markets_eur";
 export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
-/** CoinGecko catalog metrics worker / manual sync — same `sync_runs` table as Bitvavo jobs. */
-export const COINGECKO_SYNC_JOB_METRICS = "coingecko_asset_metrics";
+/**
+ * CoinGecko USD fundamentals refresh (writes `public.assets` live columns).
+ * Value is `sync_runs.job_key` only — not a table name (legacy key was `coingecko_asset_metrics`).
+ */
+export const COINGECKO_SYNC_JOB_METRICS = "coingecko_assets_usd_live";
+/** Fills `assets.coingecko_coin_id` from `metadata.coingecko_id` or CoinGecko /search when empty (e.g. every 5 min). */
+export const COINGECKO_SYNC_JOB_COIN_ID = "coingecko_asset_coin_id";
 export type BitvavoSyncTriggerSource = "manual" | "automated";
 export type BitvavoSyncJobStatus = "running" | "completed" | "failed";
 

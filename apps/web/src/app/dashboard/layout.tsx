@@ -17,41 +17,6 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  let { data: connectors } = await supabase
-    .from("connectors")
-    .select("id, label, mode, exchange")
-    .eq("user_id", user.id);
-
-  if (!connectors?.length) {
-    const { data: created } = await supabase
-      .from("connectors")
-      .insert({
-        user_id: user.id,
-        label: "Primary",
-        exchange: "bitvavo",
-        mode: "paper",
-      })
-      .select("id, label, mode, exchange")
-      .single();
-    connectors = created ? [created] : [];
-  }
-
-  const primary = connectors[0];
-  if (primary) {
-    const { data: rs } = await supabase
-      .from("risk_state")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("connector_id", primary.id)
-      .maybeSingle();
-    if (!rs) {
-      await supabase.from("risk_state").insert({
-        user_id: user.id,
-        connector_id: primary.id,
-      });
-    }
-  }
-
   return (
     <div className="flex min-h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -94,7 +59,6 @@ export default async function DashboardLayout({
               Sync runs
             </Link>
           </nav>
-          <span className="hidden text-xs text-zinc-500 sm:inline">Paper · Bitvavo</span>
         </div>
         <SignOutButton />
       </header>

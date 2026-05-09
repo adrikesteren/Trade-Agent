@@ -1,0 +1,52 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  beginBitvavoSyncRun,
+  COINGECKO_SYNC_JOB_COIN_ID,
+  recordBitvavoSyncCompleted,
+  recordBitvavoSyncFailed,
+  type BitvavoSyncTriggerSource,
+} from "@/lib/markets/record-bitvavo-sync-status";
+import { syncCoingeckoCoinIds, type SyncCoingeckoCoinIdResult } from "@/lib/markets/sync-coingecko-coin-id";
+
+export async function runCoingeckoCoinIdSyncWithSyncRun(
+  admin: SupabaseClient,
+  source: BitvavoSyncTriggerSource,
+): Promise<SyncCoingeckoCoinIdResult & { syncRunId: string | null }> {
+  let runId: string | null = null;
+  try {
+    runId = await beginBitvavoSyncRun(admin, COINGECKO_SYNC_JOB_COIN_ID, source);
+  } catch {
+    /* non-fatal */
+  }
+
+  try {
+    const result = await syncCoingeckoCoinIds(admin);
+    if (runId) {
+      try {
+        await recordBitvavoSyncCompleted(admin, {
+          runId,
+          jobKey: COINGECKO_SYNC_JOB_COIN_ID,
+          source,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+    return { ...result, syncRunId: runId };
+  } catch (e) {
+    if (runId) {
+      try {
+        await recordBitvavoSyncFailed(admin, {
+          runId,
+          jobKey: COINGECKO_SYNC_JOB_COIN_ID,
+          source,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+    throw e;
+  }
+}

@@ -2,6 +2,8 @@ import {
   AssetCoingeckoMetricsBlock,
   AssetCoingeckoMetricsNoSnapshot,
   AssetCoingeckoMetricsPlaceholder,
+  buildAssetCoingeckoMetricsRow,
+  type AssetLiveCoingeckoDb,
 } from "@/components/asset-coingecko-metrics-block";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -9,8 +11,8 @@ import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ assetId: string }> };
 
-const CG_METRICS_SELECT =
-  "fetched_at, coingecko_id, price_usd, market_cap_usd, fully_diluted_valuation_usd, total_volume_usd, high_24h_usd, low_24h_usd, price_change_24h_usd, price_change_24h_pct, price_change_7d_pct, market_cap_rank, circulating_supply, total_supply, max_supply, ath_usd, ath_change_pct";
+const ASSET_CG_FIELDS =
+  "coingecko_fetched_at, coingecko_coin_id, coingecko_price_usd, coingecko_market_cap_usd, coingecko_fdv_usd, coingecko_total_volume_usd, coingecko_high_24h_usd, coingecko_low_24h_usd, coingecko_price_change_24h_usd, coingecko_price_change_24h_pct, coingecko_price_change_7d_pct, coingecko_market_cap_rank, coingecko_circulating_supply, coingecko_total_supply, coingecko_max_supply, coingecko_ath_usd, coingecko_ath_change_pct";
 
 export default async function AssetDetailPage({ params }: PageProps) {
   const { assetId } = await params;
@@ -18,7 +20,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
   const { data: asset, error } = await supabase
     .from("assets")
-    .select("id, code, kind, name, metadata, created_at")
+    .select(`id, code, kind, name, metadata, created_at, ${ASSET_CG_FIELDS}`)
     .eq("id", assetId)
     .maybeSingle();
 
@@ -42,21 +44,13 @@ export default async function AssetDetailPage({ params }: PageProps) {
     .limit(100);
 
   const isCrypto = asset.kind === "crypto";
-  const { data: cgRow } = isCrypto
-    ? await supabase
-        .from("asset_coingecko_metrics")
-        .select(CG_METRICS_SELECT)
-        .eq("asset_id", assetId)
-        .order("fetched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    : { data: null };
-
   const meta =
     asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
       ? (asset.metadata as Record<string, unknown>)
       : {};
   const coingeckoIdHint = typeof meta.coingecko_id === "string" ? meta.coingecko_id : null;
+
+  const cgRow = isCrypto ? buildAssetCoingeckoMetricsRow(asset as AssetLiveCoingeckoDb, coingeckoIdHint) : null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-1">

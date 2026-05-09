@@ -26,7 +26,8 @@ const MAX_COINGECKO_RESOLVE_CONTINUATION_DEPTH = 100;
 export type CoingeckoMetricsSyncResult = {
   assetsConsidered: number;
   resolvedThisRun: number;
-  snapshotsInserted: number;
+  /** Rows in `assets` patched with live CoinGecko /coins/markets fields this run. */
+  assetsUpdated: number;
   searchFailures: string[];
   stillMissingCoingeckoId: number;
   searchAttemptsThisRun: number;
@@ -87,7 +88,7 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
     const result: CoingeckoMetricsSyncResult = {
       assetsConsidered: p1.assetsConsidered,
       resolvedThisRun: p1.resolvedThisRun,
-      snapshotsInserted: p2.snapshotsInserted,
+      assetsUpdated: p2.assetsUpdated,
       searchFailures: p1.searchFailures,
       stillMissingCoingeckoId: stillMissing,
       searchAttemptsThisRun: p1.searchAttemptsThisRun,

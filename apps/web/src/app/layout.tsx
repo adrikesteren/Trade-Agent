@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "@/lib/markets/local-candle-sync-scheduler";
 import "@/lib/markets/local-coingecko-metrics-scheduler";
+import "@/lib/markets/local-coingecko-coin-id-scheduler";
 import "./globals.css";
 
 const geistSans = Geist({

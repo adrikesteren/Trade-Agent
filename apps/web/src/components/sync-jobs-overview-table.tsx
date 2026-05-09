@@ -59,7 +59,7 @@ export type SyncJobsOverviewRow = {
   lastStartedAt: string | null;
   lastSuccessAt: string | null;
   intervalMs: number;
-  action: null | "bitvavo-markets" | "coingecko";
+  action: null | "bitvavo-markets" | "coingecko" | "coingecko-coin-id";
 };
 
 function statusBadge(status: BitvavoSyncJobStatus | null) {
@@ -118,16 +118,22 @@ function SyncNowCell({
       const url =
         action === "bitvavo-markets"
           ? "/api/markets/bitvavo/sync?quote=EUR&source=manual"
-          : "/api/markets/coingecko/metrics-sync?source=manual";
+          : action === "coingecko"
+            ? "/api/markets/coingecko/metrics-sync?source=manual"
+            : "/api/markets/coingecko/coin-id-sync?source=manual";
       const res = await fetch(url, { method: "POST", credentials: "include" });
       const raw = await res.text();
       let body: {
         error?: string;
         hint?: string;
         upsertedListings?: number;
-        snapshotsInserted?: number;
+        assetsUpdated?: number;
         continuationQueued?: boolean;
         stillMissingCoingeckoId?: number;
+        copiedFromMetadata?: number;
+        filledViaSearch?: number;
+        searchAttempts?: number;
+        stillMissingCoinId?: number;
       } = {};
       if (raw) {
         try {
@@ -147,14 +153,17 @@ function SyncNowCell({
       setState("done");
       if (action === "bitvavo-markets") {
         setMsg(`${body.upsertedListings ?? 0} listings`);
+      } else if (action === "coingecko") {
+        const tail = body.continuationQueued
+          ? ` · catalog resolve continues (${body.stillMissingCoingeckoId ?? "?"} left)`
+          : (body.stillMissingCoingeckoId ?? 0) > 0
+            ? ` · ${body.stillMissingCoingeckoId} assets still without CoinGecko id (enable QStash + public URL to finish)`
+            : "";
+        setMsg(`${body.assetsUpdated ?? 0} assets updated (live CoinGecko)${tail}`);
       } else {
-        const tail =
-          action === "coingecko" && body.continuationQueued
-            ? ` · catalog resolve continues (${body.stillMissingCoingeckoId ?? "?"} left)`
-            : action === "coingecko" && (body.stillMissingCoingeckoId ?? 0) > 0
-              ? ` · ${body.stillMissingCoingeckoId} assets still without CoinGecko id (enable QStash + public URL to finish)`
-              : "";
-        setMsg(`${body.snapshotsInserted ?? 0} snapshots${tail}`);
+        setMsg(
+          `coin id: meta ${body.copiedFromMetadata ?? 0}, search ${body.filledViaSearch ?? 0} (${body.searchAttempts ?? 0} tries) · ${body.stillMissingCoinId ?? "?"} still empty`,
+        );
       }
       // Defer refresh so the success/error message stays visible (immediate refresh remounts this cell).
       refreshTimeoutRef.current = globalThis.setTimeout(() => {

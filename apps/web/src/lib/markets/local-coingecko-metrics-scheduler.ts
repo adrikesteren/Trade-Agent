@@ -42,7 +42,7 @@ function startLocalCoingeckoMetricsScheduler(): void {
       const ms = Date.now() - started;
       console.log(
         "[local coingecko metrics]",
-        `snapshots=${r.snapshotsInserted}`,
+        `assetsUpdated=${r.assetsUpdated}`,
         `resolved=${r.resolvedThisRun}`,
         `searches=${r.searchAttemptsThisRun}`,
         `missingCgId=${r.stillMissingCoingeckoId}`,

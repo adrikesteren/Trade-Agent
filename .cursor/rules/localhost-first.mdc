@@ -1,0 +1,21 @@
+---
+description: User develops and tests only on localhost; avoid Vercel-centric guidance unless they ask for deploy/hosting.
+alwaysApply: true
+---
+
+# Localhost-first workflow
+
+The maintainer builds, runs, and tests **only on localhost** (`next dev`, local Supabase, local `.env`). Treat that as the default context.
+
+## Do
+
+- Prefer instructions that work **on the same machine**: repo-root `.env`, `pnpm dev` / `turbo dev`, `ENABLE_LOCAL_CANDLE_AUTO_SYNC`, `Invoke-WebRequest` to `http://localhost:3000`, Supabase local/remote from env, etc.
+- When documenting syncs, workers, or cron-like behaviour, lead with **local automation** (instrumentation, manual button, OS scheduler hitting localhost) before any hosted option.
+
+## Do not (unless the user explicitly asks about deploy or names a host)
+
+- Do **not** bring up **Vercel**, **Vercel Cron**, or “deploy to Vercel” as the default or implied next step.
+- Do not add **vercel.json** crons or Vercel-only env copy (“set this in Vercel”) unless the user explicitly asks for Vercel.
+- Do not frame problems as “you need Vercel” when localhost-only fixes exist.
+
+If hosting or a specific cloud provider becomes relevant **because the user asked**, then discuss it normally.

@@ -37,26 +37,28 @@ function getCoingeckoId(meta: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-function marketRowToInsert(assetId: string, row: CoinGeckoMarketRow) {
+/** Patches catalog `assets` with live CoinGecko /coins/markets fields (one row per asset, overwritten each sync). */
+function marketRowToAssetPatch(row: CoinGeckoMarketRow) {
+  const now = new Date().toISOString();
   return {
-    asset_id: assetId,
-    coingecko_id: row.id,
-    price_usd: row.current_price,
-    market_cap_usd: row.market_cap,
-    fully_diluted_valuation_usd: row.fully_diluted_valuation,
-    total_volume_usd: row.total_volume,
-    high_24h_usd: row.high_24h,
-    low_24h_usd: row.low_24h,
-    price_change_24h_usd: row.price_change_24h,
-    price_change_24h_pct: row.price_change_percentage_24h,
-    price_change_7d_pct: row.price_change_percentage_7d_in_currency ?? null,
-    market_cap_rank: row.market_cap_rank,
-    circulating_supply: row.circulating_supply,
-    total_supply: row.total_supply,
-    max_supply: row.max_supply,
-    ath_usd: row.ath,
-    ath_change_pct: row.ath_change_percentage,
-    raw: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+    coingecko_fetched_at: now,
+    coingecko_coin_id: row.id,
+    coingecko_price_usd: row.current_price,
+    coingecko_market_cap_usd: row.market_cap,
+    coingecko_fdv_usd: row.fully_diluted_valuation,
+    coingecko_total_volume_usd: row.total_volume,
+    coingecko_high_24h_usd: row.high_24h,
+    coingecko_low_24h_usd: row.low_24h,
+    coingecko_price_change_24h_usd: row.price_change_24h,
+    coingecko_price_change_24h_pct: row.price_change_percentage_24h,
+    coingecko_price_change_7d_pct: row.price_change_percentage_7d_in_currency ?? null,
+    coingecko_market_cap_rank: row.market_cap_rank,
+    coingecko_circulating_supply: row.circulating_supply,
+    coingecko_total_supply: row.total_supply,
+    coingecko_max_supply: row.max_supply,
+    coingecko_ath_usd: row.ath,
+    coingecko_ath_change_pct: row.ath_change_percentage,
+    coingecko_raw: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
   };
 }
 
@@ -132,33 +134,31 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
 }
 
 /**
- * Phase 2 (callout: CoinGecko /coins/markets + DB): fetch markets for resolved ids and append metrics rows.
+ * Phase 2 (CoinGecko /coins/markets): fetch markets and PATCH catalog `assets` (live columns, no history table).
  */
 export async function syncCoingeckoAssetMetricsMarketsPhase(
   supabase: SupabaseClient,
   idByCoingecko: Map<string, string>,
-): Promise<{ snapshotsInserted: number }> {
+): Promise<{ assetsUpdated: number }> {
   const ids = [...idByCoingecko.keys()];
   if (!ids.length) {
-    return { snapshotsInserted: 0 };
+    return { assetsUpdated: 0 };
   }
 
   const markets = await coingeckoFetchMarketsByIds(ids);
-  const inserts = [];
+  let assetsUpdated = 0;
   for (const m of markets) {
     const assetId = idByCoingecko.get(m.id);
     if (!assetId) continue;
-    inserts.push(marketRowToInsert(assetId, m));
-  }
-
-  if (inserts.length) {
-    const { error: insErr } = await supabase.from("asset_coingecko_metrics").insert(inserts);
-    if (insErr) {
-      throw new Error(insErr.message);
+    const patch = marketRowToAssetPatch(m);
+    const { error: upErr } = await supabase.from("assets").update(patch).eq("id", assetId);
+    if (upErr) {
+      throw new Error(upErr.message);
     }
+    assetsUpdated += 1;
   }
 
-  return { snapshotsInserted: inserts.length };
+  return { assetsUpdated };
 }
 
 /**
@@ -167,7 +167,7 @@ export async function syncCoingeckoAssetMetricsMarketsPhase(
 export async function syncCoingeckoAssetMetrics(supabase: SupabaseClient): Promise<{
   assetsConsidered: number;
   resolvedThisRun: number;
-  snapshotsInserted: number;
+  assetsUpdated: number;
   searchFailures: string[];
   stillMissingCoingeckoId: number;
   searchAttemptsThisRun: number;
@@ -177,7 +177,7 @@ export async function syncCoingeckoAssetMetrics(supabase: SupabaseClient): Promi
   return {
     assetsConsidered: p1.assetsConsidered,
     resolvedThisRun: p1.resolvedThisRun,
-    snapshotsInserted: p2.snapshotsInserted,
+    assetsUpdated: p2.assetsUpdated,
     searchFailures: p1.searchFailures,
     stillMissingCoingeckoId: p1.stillMissingCoingeckoId,
     searchAttemptsThisRun: p1.searchAttemptsThisRun,
