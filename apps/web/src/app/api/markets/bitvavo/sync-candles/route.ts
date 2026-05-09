@@ -2,6 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { barsForRetention, CANDLE_RETENTION_HOURS } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import {
+  fetchCandleSyncWindowMeta,
+  prepareEurCandleSyncRunWindow,
+} from "@/lib/markets/candle-sync-window";
 import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 import {
   beginBitvavoSyncRun,
@@ -30,6 +34,9 @@ type Body = {
   syncMode?: CandleSyncMode;
   candleTimestampId?: string | null;
   targetCloseTimeIso?: string | null;
+  windowStartOpen?: string;
+  windowEndClose?: string;
+  windowBarCount?: number;
 };
 
 /**
@@ -67,6 +74,7 @@ export async function POST(request: Request) {
   const marketBatchSize = Math.min(Math.max(body.marketBatchSize ?? 25, 1), 80);
   const delayMsBetweenMarkets = Math.min(Math.max(body.delayMsBetweenMarkets ?? 120, 0), 2000);
   const isEurQuote = quote === null || String(quote).toUpperCase() === "EUR";
+  const isCatalogTf = timeframe === CATALOG_STORAGE_TIMEFRAME;
 
   const admin = createServiceRoleClient();
   let runId: string | null = body.syncRunId ?? null;
@@ -99,10 +107,87 @@ export async function POST(request: Request) {
   let syncMode: CandleSyncMode = "full";
   let candleTimestampId: string | null = null;
   let targetCloseTimeIso: string | null = null;
+  let windowStartOpen: string | undefined;
+  let windowEndClose: string | undefined;
+  let windowBarCount: number | undefined;
 
   if (body.syncMode === "full") {
     syncMode = "full";
-  } else if (isEurQuote && timeframe === CATALOG_STORAGE_TIMEFRAME && marketOffset === 0) {
+  } else if (isEurQuote && isCatalogTf && runId) {
+    if (marketOffset === 0) {
+      const prep = await prepareEurCandleSyncRunWindow(admin, {
+        runId,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        timeframe,
+      });
+      if (prep.kind === "empty") {
+        try {
+          await recordBitvavoSyncCompleted(admin, {
+            runId,
+            jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+            source,
+            metadata: { emptyWindow: true, candleRowsUpserted: 0 },
+          });
+        } catch {
+          /* non-fatal */
+        }
+        return NextResponse.json({
+          ok: true,
+          emptyWindow: true,
+          syncRunId: runId,
+          marketsProcessed: 0,
+          candleRowsUpserted: 0,
+          nextMarketOffset: null,
+          totalMarkets: 0,
+          timeframe,
+          barsPerMarket: 0,
+          retentionMaxBars: retentionCap,
+          syncMode: "window",
+        });
+      }
+      syncMode = "window";
+      windowStartOpen = prep.startOpenIso;
+      windowEndClose = prep.endCloseIso;
+      windowBarCount = prep.barCount;
+    } else {
+      const fromPayload =
+        body.syncMode === "window" &&
+        body.windowStartOpen &&
+        body.windowEndClose &&
+        body.windowBarCount &&
+        body.windowBarCount > 0
+          ? {
+              startOpenIso: body.windowStartOpen,
+              endCloseIso: body.windowEndClose,
+              barCount: body.windowBarCount,
+            }
+          : null;
+
+      const win = fromPayload ?? (await fetchCandleSyncWindowMeta(admin, runId, BITVAVO_SYNC_JOB_CANDLES_EUR));
+      if (win) {
+        syncMode = "window";
+        windowStartOpen = win.startOpenIso;
+        windowEndClose = win.endCloseIso;
+        windowBarCount = win.barCount;
+      } else if (
+        body.syncMode === "incremental" &&
+        body.candleTimestampId &&
+        body.targetCloseTimeIso
+      ) {
+        const { data: tsHit, error: tsErr } = await admin
+          .schema("catalog")
+          .from("candle_timestamps")
+          .select("id")
+          .eq("id", body.candleTimestampId)
+          .maybeSingle();
+        if (!tsErr && tsHit) {
+          syncMode = "incremental";
+          candleTimestampId = body.candleTimestampId;
+          targetCloseTimeIso = body.targetCloseTimeIso;
+        }
+      }
+    }
+  } else if (isEurQuote && isCatalogTf && marketOffset === 0) {
     const prep = await prepareEurCandleTimestampWindow(admin, timeframe);
     if (prep.mode === "blocked_future_close") {
       if (runId) {
@@ -153,6 +238,9 @@ export async function POST(request: Request) {
       syncMode,
       candleTimestampId,
       targetCloseTimeIso,
+      windowStartOpen,
+      windowEndClose,
+      windowBarCount,
     });
 
     const isFullSweepDone = result.nextMarketOffset == null;

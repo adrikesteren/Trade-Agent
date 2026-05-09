@@ -1,13 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { BitvavoAdapter } from "@repo/exchange";
+import { BitvavoAdapter, type Candle } from "@repo/exchange";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
 
-export type CandleSyncMode = "full" | "incremental";
+export type CandleSyncMode = "full" | "incremental" | "window";
 
 export type SyncCandlesChunkOptions = {
   /** Bitvavo interval, e.g. 1h, 5m */
   timeframe: string;
-  /** Bars per market (Bitvavo max 1440 per request). Ignored when incremental. */
+  /** Bars per market (Bitvavo max 1440 per request). Ignored when incremental or window. */
   barsPerMarket: number;
   /** Only markets with this quote, e.g. EUR. Null = all quotes. */
   quote: string | null;
@@ -23,6 +23,10 @@ export type SyncCandlesChunkOptions = {
   candleTimestampId?: string | null;
   /** When incremental: ISO close time of the target bar (Bitvavo `end` must align). */
   targetCloseTimeIso?: string | null;
+  /** When window: pre-created `candle_timestamps` cover [start, end] (open/close ISO). */
+  windowStartOpen?: string | null;
+  windowEndClose?: string | null;
+  windowBarCount?: number | null;
 };
 
 export type SyncCandlesChunkResult = {
@@ -39,6 +43,49 @@ export type SyncCandlesChunkResult = {
 
 function keyForTs(openIso: string, closeIso: string): string {
   return `${openIso}\0${closeIso}`;
+}
+
+const BITVAVO_MAX_LIMIT = 1440;
+
+/**
+ * Fetches up to `totalBars` candles ending at or before `windowEndCloseMs`, oldest-first.
+ * Splits into multiple Bitvavo calls when `totalBars` exceeds 1440.
+ */
+async function listCandlesForWindow(
+  adapter: BitvavoAdapter,
+  params: {
+    symbol: string;
+    timeframe: string;
+    windowEndCloseMs: number;
+    totalBars: number;
+  },
+): Promise<Candle[]> {
+  const { symbol, timeframe, windowEndCloseMs, totalBars } = params;
+  let endMs = windowEndCloseMs;
+  let remaining = Math.max(totalBars, 1);
+  const chunks: Candle[][] = [];
+
+  while (remaining > 0) {
+    const limit = Math.min(remaining, BITVAVO_MAX_LIMIT);
+    const batch = await adapter.listCandles({
+      symbol,
+      timeframe,
+      limit,
+      endTime: String(Math.trunc(endMs)),
+    });
+    if (!batch.length) break;
+    chunks.unshift(batch);
+    remaining -= batch.length;
+    const oldest = batch[0]!;
+    const oldestOpenMs = Date.parse(oldest.openTime);
+    if (!Number.isFinite(oldestOpenMs)) {
+      throw new Error(`${symbol}: invalid openTime from Bitvavo`);
+    }
+    endMs = oldestOpenMs - 1;
+    if (batch.length < limit) break;
+  }
+
+  return chunks.flat();
 }
 
 /**
@@ -80,9 +127,23 @@ export async function syncBitvavoCandlesChunk(
   const total = totalMarkets ?? 0;
 
   const maxBars = barsForRetention(opts.timeframe);
+  const windowMode =
+    opts.syncMode === "window" &&
+    Boolean(opts.windowStartOpen && opts.windowEndClose && opts.windowBarCount && opts.windowBarCount > 0);
+
   const incremental =
     opts.syncMode === "incremental" && Boolean(opts.candleTimestampId && opts.targetCloseTimeIso);
-  const effectiveBars = incremental ? 1 : Math.min(Math.max(opts.barsPerMarket, 1), maxBars);
+
+  let effectiveBars: number;
+  let totalWindowBars: number | undefined;
+  if (windowMode) {
+    totalWindowBars = Math.min(opts.windowBarCount!, maxBars);
+    effectiveBars = totalWindowBars;
+  } else if (incremental) {
+    effectiveBars = 1;
+  } else {
+    effectiveBars = Math.min(Math.max(opts.barsPerMarket, 1), maxBars);
+  }
 
   let listQuery = supabase
     .schema("catalog")
@@ -108,21 +169,56 @@ export async function syncBitvavoCandlesChunk(
   const adapter = new BitvavoAdapter();
   let candleRowsUpserted = 0;
 
-  const endMs = incremental ? Date.parse(String(opts.targetCloseTimeIso)) : NaN;
-  const endTimeParam =
-    incremental && Number.isFinite(endMs) ? String(Math.trunc(endMs)) : undefined;
+  let idByKey = new Map<string, string>();
+  if (windowMode) {
+    const startIso = String(opts.windowStartOpen);
+    const endIso = String(opts.windowEndClose);
+    const { data: tsRows, error: tsErr } = await supabase
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id, open_time, close_time")
+      .gte("open_time", startIso)
+      .lte("close_time", endIso);
+    if (tsErr) {
+      throw new Error(`candle_timestamps: ${tsErr.message}`);
+    }
+    for (const r of tsRows ?? []) {
+      idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id as string);
+    }
+  }
+
+  const endMsIncremental = incremental ? Date.parse(String(opts.targetCloseTimeIso)) : NaN;
+  const endTimeParamIncremental =
+    incremental && Number.isFinite(endMsIncremental) ? String(Math.trunc(endMsIncremental)) : undefined;
+
+  const windowEndCloseMs = windowMode ? Date.parse(String(opts.windowEndClose)) : NaN;
+  const windowStartOpenMs = windowMode ? Date.parse(String(opts.windowStartOpen)) : NaN;
 
   for (let i = 0; i < rows.length; i++) {
     const m = rows[i]!;
     const marketSymbol = String(m.market_symbol);
     const marketId = m.id as string;
 
-    const candles = await adapter.listCandles({
-      symbol: marketSymbol,
-      timeframe: opts.timeframe,
-      limit: effectiveBars,
-      ...(endTimeParam ? { endTime: endTimeParam } : {}),
-    });
+    let candles: Candle[];
+
+    if (windowMode) {
+      if (!Number.isFinite(windowEndCloseMs) || !Number.isFinite(windowStartOpenMs)) {
+        throw new Error(`${marketSymbol}: invalid window bounds`);
+      }
+      candles = await listCandlesForWindow(adapter, {
+        symbol: marketSymbol,
+        timeframe: opts.timeframe,
+        windowEndCloseMs,
+        totalBars: totalWindowBars!,
+      });
+    } else {
+      candles = await adapter.listCandles({
+        symbol: marketSymbol,
+        timeframe: opts.timeframe,
+        limit: effectiveBars,
+        ...(endTimeParamIncremental ? { endTime: endTimeParamIncremental } : {}),
+      });
+    }
 
     let rowsToWrite: {
       market_id: string;
@@ -135,7 +231,27 @@ export async function syncBitvavoCandlesChunk(
       candle_timestamp_id: string;
     }[];
 
-    if (incremental) {
+    if (windowMode) {
+      rowsToWrite = [];
+      for (const c of candles) {
+        const openMs = Date.parse(c.openTime);
+        const closeMs = Date.parse(c.closeTime);
+        if (!Number.isFinite(openMs) || !Number.isFinite(closeMs)) continue;
+        if (openMs < windowStartOpenMs - 1 || closeMs > windowEndCloseMs + 1) continue;
+        const id = idByKey.get(keyForTs(c.openTime, c.closeTime));
+        if (!id) continue;
+        rowsToWrite.push({
+          market_id: marketId,
+          timeframe: c.timeframe,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+          candle_timestamp_id: id,
+        });
+      }
+    } else if (incremental) {
       const tsId = opts.candleTimestampId as string;
       const wantCloseMs = Date.parse(String(opts.targetCloseTimeIso));
       const match = candles.filter((c) => {
@@ -162,7 +278,7 @@ export async function syncBitvavoCandlesChunk(
         }
       }
       const pairList = [...distinctPairs.values()];
-      let idByKey = new Map<string, string>();
+      idByKey = new Map<string, string>();
       if (pairList.length) {
         const { data: tsRows, error: tsErr } = await supabase
           .schema("catalog")
@@ -220,6 +336,8 @@ export async function syncBitvavoCandlesChunk(
 
   await deleteExpiredCandleTimestamps(supabase);
 
+  const resultMode: CandleSyncMode = windowMode ? "window" : incremental ? "incremental" : "full";
+
   return {
     marketsProcessed: processed,
     candleRowsUpserted,
@@ -228,6 +346,6 @@ export async function syncBitvavoCandlesChunk(
     timeframe: opts.timeframe,
     barsPerMarket: effectiveBars,
     retentionMaxBars: maxBars,
-    syncMode: incremental ? "incremental" : "full",
+    syncMode: resultMode,
   };
 }

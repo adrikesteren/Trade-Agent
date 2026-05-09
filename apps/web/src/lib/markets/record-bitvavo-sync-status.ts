@@ -95,9 +95,14 @@ async function resolveRunIdForUpdate(
   return resolveLatestRunningBitvavoRunId(admin, jobKey);
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code?: string }).code) : "";
+  return code === "23505";
+}
+
 /**
- * Starts a new sync run, or records a `skipped` row when `source` is `automated` and the same `job_key`
- * already has a `running` row (scheduler overlap).
+ * Starts a new sync run. Concurrent `running` rows for the same `job_key` are prevented by a partial unique
+ * index; on conflict, `automated` inserts a `skipped` audit row (manual callers get an error).
  */
 export async function beginBitvavoSyncRun(
   admin: SupabaseClient,
@@ -108,31 +113,6 @@ export async function beginBitvavoSyncRun(
   const now = new Date().toISOString();
   const initialMeta =
     options?.metadata && Object.keys(options.metadata).length > 0 ? options.metadata : undefined;
-
-  if (source === "automated") {
-    const existingRunningId = await resolveLatestRunningBitvavoRunId(admin, jobKey);
-    if (existingRunningId) {
-      const { data, error } = await admin
-        .schema(AUTOMATION_SCHEMA)
-        .from(TABLE)
-        .insert({
-          job_key: jobKey,
-          status: "skipped",
-          trigger_source: source,
-          reason: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
-          created_at: now,
-          ended_at: now,
-          updated_at: now,
-          ...(initialMeta ? { metadata: initialMeta } : {}),
-        })
-        .select("id")
-        .single();
-
-      if (error) throw new Error(`${TABLE}: ${error.message}`);
-      if (!data?.id) throw new Error(`${TABLE}: skipped insert returned no id`);
-      return { outcome: "skipped", runId: data.id as string };
-    }
-  }
 
   const { data, error } = await admin
     .schema(AUTOMATION_SCHEMA)
@@ -148,9 +128,43 @@ export async function beginBitvavoSyncRun(
     .select("id")
     .single();
 
-  if (error) throw new Error(`${TABLE}: ${error.message}`);
-  if (!data?.id) throw new Error(`${TABLE}: insert returned no id`);
-  return { outcome: "started", runId: data.id as string };
+  if (!error && data?.id) {
+    return { outcome: "started", runId: data.id as string };
+  }
+
+  if (isUniqueViolation(error)) {
+    const blockedByRunId = await resolveLatestRunningBitvavoRunId(admin, jobKey);
+    const skipMeta: Record<string, unknown> = {
+      ...(initialMeta ?? {}),
+      ...(blockedByRunId ? { blockedByRunId } : {}),
+    };
+
+    if (source === "automated") {
+      const { data: skipRow, error: skipErr } = await admin
+        .schema(AUTOMATION_SCHEMA)
+        .from(TABLE)
+        .insert({
+          job_key: jobKey,
+          status: "skipped",
+          trigger_source: source,
+          reason: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+          created_at: now,
+          ended_at: now,
+          updated_at: now,
+          ...(Object.keys(skipMeta).length > 0 ? { metadata: skipMeta } : {}),
+        })
+        .select("id")
+        .single();
+
+      if (skipErr) throw new Error(`${TABLE}: ${skipErr.message}`);
+      if (!skipRow?.id) throw new Error(`${TABLE}: skipped insert returned no id`);
+      return { outcome: "skipped", runId: skipRow.id as string };
+    }
+
+    throw new Error("Another sync is already running for this job.");
+  }
+
+  throw new Error(`${TABLE}: ${error?.message ?? "insert failed"}`);
 }
 
 /**

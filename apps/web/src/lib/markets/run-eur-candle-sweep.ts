@@ -2,6 +2,10 @@ import { Client } from "@upstash/qstash";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { barsForRetention } from "@/lib/markets/candle-retention";
+import {
+  fetchCandleSyncWindowMeta,
+  prepareEurCandleSyncRunWindow,
+} from "@/lib/markets/candle-sync-window";
 import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 import {
   beginBitvavoSyncRun,
@@ -16,6 +20,7 @@ import {
 import {
   syncBitvavoCandlesChunk,
   type CandleSyncMode,
+  type SyncCandlesChunkOptions,
 } from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
@@ -30,10 +35,13 @@ export type EurCandleSweepBody = {
   triggerSource?: BitvavoSyncTriggerSource;
   /** Same logical run across QStash chunks (from first `beginBitvavoSyncRun`). */
   syncRunId?: string | null;
-  /** Carried across QStash continuations together with `candleTimestampId` / `targetCloseTimeIso`. */
+  /** Carried across QStash continuations together with window or incremental fields. */
   syncMode?: CandleSyncMode;
   candleTimestampId?: string | null;
   targetCloseTimeIso?: string | null;
+  windowStartOpen?: string;
+  windowEndClose?: string;
+  windowBarCount?: number;
 };
 
 export type EurCandleSweepResult = {
@@ -47,13 +55,28 @@ export type EurCandleSweepResult = {
   /** Populated for EUR sweeps when a run row exists for this execution. */
   syncRunId: string | null;
   warning?: string;
+  emptyWindow?: boolean;
 };
 
-type ChunkTiming = {
-  syncMode: CandleSyncMode;
-  candleTimestampId: string | null;
-  targetCloseTimeIso: string | null;
-};
+type ChunkTiming =
+  | {
+      syncMode: "full";
+      candleTimestampId: null;
+      targetCloseTimeIso: null;
+    }
+  | {
+      syncMode: "incremental";
+      candleTimestampId: string;
+      targetCloseTimeIso: string;
+    }
+  | {
+      syncMode: "window";
+      candleTimestampId: null;
+      targetCloseTimeIso: null;
+      windowStartOpen: string;
+      windowEndClose: string;
+      windowBarCount: number;
+    };
 
 function maxChunksPerRun(): number {
   const n = Number(process.env.BITVAVO_CANDLES_SYNC_MAX_CHUNKS_PER_RUN ?? 8);
@@ -100,13 +123,63 @@ async function resolveChunkTiming(
     return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
   }
 
-  // Fresh EUR sweep at offset 0: DB state wins (empty `candle_timestamps` => full). Do not trust a stale
-  // `body.syncMode === "incremental"` from an old QStash payload before this runs.
+  const isCatalogTf = args.timeframe === CATALOG_STORAGE_TIMEFRAME;
+
+  // Legacy QStash continuations: single-bar incremental payload wins over run metadata.
   if (
-    args.isEurQuote &&
-    args.timeframe === CATALOG_STORAGE_TIMEFRAME &&
-    args.marketOffset === 0
+    body.syncMode === "incremental" &&
+    body.candleTimestampId &&
+    body.targetCloseTimeIso
   ) {
+    const { data: tsHit, error: tsErr } = await admin
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id")
+      .eq("id", body.candleTimestampId)
+      .maybeSingle();
+    if (!tsErr && tsHit) {
+      return {
+        syncMode: "incremental",
+        candleTimestampId: body.candleTimestampId,
+        targetCloseTimeIso: body.targetCloseTimeIso,
+      };
+    }
+  }
+
+  if (
+    body.syncMode === "window" &&
+    body.windowStartOpen &&
+    body.windowEndClose &&
+    body.windowBarCount &&
+    body.windowBarCount > 0
+  ) {
+    return {
+      syncMode: "window",
+      candleTimestampId: null,
+      targetCloseTimeIso: null,
+      windowStartOpen: body.windowStartOpen,
+      windowEndClose: body.windowEndClose,
+      windowBarCount: body.windowBarCount,
+    };
+  }
+
+  if (args.isEurQuote && isCatalogTf && args.syncRunId) {
+    const win = await fetchCandleSyncWindowMeta(admin, args.syncRunId, BITVAVO_SYNC_JOB_CANDLES_EUR);
+    if (win) {
+      return {
+        syncMode: "window",
+        candleTimestampId: null,
+        targetCloseTimeIso: null,
+        windowStartOpen: win.startOpenIso,
+        windowEndClose: win.endCloseIso,
+        windowBarCount: win.barCount,
+      };
+    }
+  }
+
+  // Fresh EUR sweep at offset 0 (non-window catalog path): DB state wins. Do not trust a stale
+  // `body.syncMode === "incremental"` from an old QStash payload before this runs.
+  if (args.isEurQuote && isCatalogTf && args.marketOffset === 0) {
     const prep = await prepareEurCandleTimestampWindow(admin, args.timeframe);
     if (prep.mode === "blocked_future_close") {
       if (args.syncRunId) {
@@ -133,28 +206,47 @@ async function resolveChunkTiming(
     return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
   }
 
-  // Chunk continuations (or non-prep paths): incremental only if the timestamp row still exists.
-  if (
-    body.syncMode === "incremental" &&
-    body.candleTimestampId &&
-    body.targetCloseTimeIso
-  ) {
-    const { data: tsHit, error: tsErr } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id")
-      .eq("id", body.candleTimestampId)
-      .maybeSingle();
-    if (!tsErr && tsHit) {
-      return {
-        syncMode: "incremental",
-        candleTimestampId: body.candleTimestampId,
-        targetCloseTimeIso: body.targetCloseTimeIso,
-      };
-    }
-  }
-
   return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
+}
+
+function chunkOptsFromTiming(
+  chunkTiming: ChunkTiming,
+  base: Pick<
+    SyncCandlesChunkOptions,
+    "timeframe" | "barsPerMarket" | "quote" | "marketBatchSize" | "delayMsBetweenMarkets"
+  >,
+): Omit<SyncCandlesChunkOptions, "marketOffset"> {
+  if (chunkTiming.syncMode === "window") {
+    return {
+      ...base,
+      syncMode: "window" as const,
+      candleTimestampId: null,
+      targetCloseTimeIso: null,
+      windowStartOpen: chunkTiming.windowStartOpen,
+      windowEndClose: chunkTiming.windowEndClose,
+      windowBarCount: chunkTiming.windowBarCount,
+    };
+  }
+  if (chunkTiming.syncMode === "incremental") {
+    return {
+      ...base,
+      syncMode: "incremental" as const,
+      candleTimestampId: chunkTiming.candleTimestampId,
+      targetCloseTimeIso: chunkTiming.targetCloseTimeIso,
+      windowStartOpen: undefined,
+      windowEndClose: undefined,
+      windowBarCount: undefined,
+    };
+  }
+  return {
+    ...base,
+    syncMode: "full" as const,
+    candleTimestampId: null,
+    targetCloseTimeIso: null,
+    windowStartOpen: undefined,
+    windowEndClose: undefined,
+    windowBarCount: undefined,
+  };
 }
 
 /**
@@ -202,6 +294,64 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     }
   }
 
+  if (
+    isEurQuote &&
+    timeframe === CATALOG_STORAGE_TIMEFRAME &&
+    marketOffset === 0 &&
+    syncRunId &&
+    body.syncMode !== "full"
+  ) {
+    try {
+      const prep = await prepareEurCandleSyncRunWindow(admin, {
+        runId: syncRunId,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        timeframe,
+      });
+      if (prep.kind === "empty") {
+        try {
+          await recordBitvavoSyncCompleted(admin, {
+            runId: syncRunId,
+            jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+            source: triggerSource,
+            metadata: {
+              emptyWindow: true,
+              candleRowsUpserted: 0,
+              chunksProcessed: 0,
+              incomplete: false,
+            },
+          });
+        } catch {
+          /* non-fatal */
+        }
+        return {
+          ok: true,
+          incomplete: false,
+          chunksProcessed: 0,
+          candleRowsUpserted: 0,
+          marketsProcessed: 0,
+          totalMarkets: 0,
+          nextMarketOffset: null,
+          syncRunId,
+          emptyWindow: true,
+        };
+      }
+    } catch (e) {
+      if (syncRunId) {
+        try {
+          await recordBitvavoSyncFailed(admin, {
+            runId: syncRunId,
+            jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+            source: triggerSource,
+            reason: e instanceof Error ? e.message : "prepare candle window failed",
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
+      throw e;
+    }
+  }
+
   const chunkTiming = await resolveChunkTiming(admin, body, {
     isEurQuote,
     timeframe,
@@ -217,16 +367,13 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   let lastTotalMarkets = 0;
   let lastResult: Awaited<ReturnType<typeof syncBitvavoCandlesChunk>> | null = null;
 
-  const chunkOptsBase = {
+  const chunkOptsBase = chunkOptsFromTiming(chunkTiming, {
     timeframe,
     barsPerMarket,
     quote,
     marketBatchSize,
     delayMsBetweenMarkets,
-    syncMode: chunkTiming.syncMode,
-    candleTimestampId: chunkTiming.candleTimestampId,
-    targetCloseTimeIso: chunkTiming.targetCloseTimeIso,
-  };
+  });
 
   for (; chunksProcessed < maxChunks; chunksProcessed++) {
     lastResult = await syncBitvavoCandlesChunk(admin, {
@@ -324,8 +471,19 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       triggerSource,
       syncRunId: syncRunId ?? undefined,
       syncMode: chunkTiming.syncMode,
-      candleTimestampId: chunkTiming.candleTimestampId ?? undefined,
-      targetCloseTimeIso: chunkTiming.targetCloseTimeIso ?? undefined,
+      ...(chunkTiming.syncMode === "incremental"
+        ? {
+            candleTimestampId: chunkTiming.candleTimestampId,
+            targetCloseTimeIso: chunkTiming.targetCloseTimeIso,
+          }
+        : {}),
+      ...(chunkTiming.syncMode === "window"
+        ? {
+            windowStartOpen: chunkTiming.windowStartOpen,
+            windowEndClose: chunkTiming.windowEndClose,
+            windowBarCount: chunkTiming.windowBarCount,
+          }
+        : {}),
     };
     await client.publishJSON({
       url: `${base}/api/workers/bitvavo-candles-sync`,
