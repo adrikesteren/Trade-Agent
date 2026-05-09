@@ -40,6 +40,13 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
           runId,
           jobKey: COINGECKO_SYNC_JOB_COIN_ID,
           source,
+          metadata: {
+            copiedFromMetadata: result.copiedFromMetadata,
+            filledViaSearch: result.filledViaSearch,
+            searchAttempts: result.searchAttempts,
+            stillMissingCoinId: result.stillMissingCoinId,
+            failureCount: result.failures.length,
+          },
         });
       } catch {
         /* non-fatal */

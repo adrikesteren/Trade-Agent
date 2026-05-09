@@ -20,6 +20,8 @@ export type SyncRunRow = {
   created_at: string | null;
   ended_at: string | null;
   reason: string | null;
+  /** `automation.sync_runs.metadata` (jsonb); job-specific shape. */
+  metadata: Record<string, unknown> | null;
 };
 
 const MAX_RUNS = 200;
@@ -47,6 +49,11 @@ function sortByCreatedDesc(a: SyncRunRow, b: SyncRunRow): number {
   return tb.localeCompare(ta);
 }
 
+function metadataFromUnknown(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return null;
+}
+
 function rowFromPayload(rec: Record<string, unknown>): SyncRunRow | null {
   const id = rec.id;
   const job_key = rec.job_key;
@@ -66,6 +73,7 @@ function rowFromPayload(rec: Record<string, unknown>): SyncRunRow | null {
         : typeof rec.failed_reason === "string"
           ? rec.failed_reason
           : null,
+    metadata: metadataFromUnknown(rec.metadata),
   };
 }
 
@@ -89,6 +97,24 @@ function formatElapsedMs(ms: number): string {
   if (min < 60) return `${min}m ${sec % 60}s`;
   const h = Math.floor(min / 60);
   return `${h}h ${min % 60}m`;
+}
+
+function metadataIsEmpty(m: Record<string, unknown> | null): boolean {
+  return m == null || Object.keys(m).length === 0;
+}
+
+function MetadataCell({ metadata }: { metadata: Record<string, unknown> | null }) {
+  if (metadataIsEmpty(metadata)) {
+    return <span className="text-zinc-400">—</span>;
+  }
+  const compact = JSON.stringify(metadata);
+  const title = JSON.stringify(metadata, null, 2);
+  const shown = compact.length > 100 ? `${compact.slice(0, 97)}…` : compact;
+  return (
+    <span className="font-mono text-[10px] text-zinc-600 dark:text-zinc-400" title={title}>
+      {shown}
+    </span>
+  );
 }
 
 function ElapsedCell({ r, nowMs, ready }: { r: SyncRunRow; nowMs: number; ready: boolean }) {
@@ -199,6 +225,7 @@ export function SyncRunsLiveClient({
                 <th className="py-2 pr-2">Job</th>
                 <th className="py-2 pr-2">Status</th>
                 <th className="py-2 pr-2">Reason</th>
+                <th className="py-2 pr-2">Metadata</th>
                 <th className="py-2 pr-2">Trigger</th>
                 <th className="py-2 pr-2">Started</th>
                 <th className="py-2 pr-2">Ended</th>
@@ -213,6 +240,9 @@ export function SyncRunsLiveClient({
                     <td className="max-w-[200px] truncate py-1.5 pr-2 text-zinc-600 dark:text-zinc-400" title={r.reason ?? ""}>
                       {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
                     </td>
+                  <td className="max-w-[min(320px,40vw)] truncate py-1.5 pr-2 align-top">
+                    <MetadataCell metadata={r.metadata} />
+                  </td>
                   <td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</td>
                   <td className="py-1.5 pr-2 font-mono text-zinc-600 dark:text-zinc-400">
                     {r.created_at
@@ -231,7 +261,7 @@ export function SyncRunsLiveClient({
               ))}
               {!recentRuns.length ? (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-zinc-500">
+                  <td colSpan={8} className="py-6 text-center text-zinc-500">
                     No runs yet. Use <strong>Sync now</strong> in the table above, or wait for QStash workers.
                   </td>
                 </tr>

@@ -71,7 +71,7 @@ export default async function SyncRunsPage() {
   const { data: runRows, error: runsError } = await supabase
     .schema("automation")
     .from("sync_runs")
-    .select("id, job_key, status, trigger_source, created_at, ended_at, reason")
+    .select("id, job_key, status, trigger_source, created_at, ended_at, reason, metadata")
     .in("job_key", [...SYNC_JOB_KEYS])
     .order("created_at", { ascending: false })
     .limit(200);

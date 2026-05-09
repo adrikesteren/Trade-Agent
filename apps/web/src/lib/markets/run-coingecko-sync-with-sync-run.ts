@@ -99,6 +99,14 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
           runId,
           jobKey: COINGECKO_SYNC_JOB_METRICS,
           source,
+          metadata: {
+            assetsConsidered: result.assetsConsidered,
+            resolvedThisRun: result.resolvedThisRun,
+            assetsUpdated: result.assetsUpdated,
+            stillMissingCoingeckoId: result.stillMissingCoingeckoId,
+            searchAttemptsThisRun: result.searchAttemptsThisRun,
+            searchFailureCount: result.searchFailures.length,
+          },
         });
       } catch {
         /* non-fatal */

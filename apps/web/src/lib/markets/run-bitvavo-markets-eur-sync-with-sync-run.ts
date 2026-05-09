@@ -65,6 +65,11 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
           runId,
           jobKey: BITVAVO_SYNC_JOB_MARKETS_EUR,
           source,
+          metadata: {
+            upsertedListings: stats.upsertedListings,
+            upsertedAssets: stats.upsertedAssets,
+            ...(quoteFilter != null ? { quoteFilter } : {}),
+          },
         });
       } catch {
         /* non-fatal */

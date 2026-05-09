@@ -6,6 +6,7 @@ import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candl
 import {
   beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
+  patchSyncRunMetadata,
   recordBitvavoSyncCompleted,
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
@@ -275,6 +276,36 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
         runId: syncRunId,
         jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
         source: triggerSource,
+        metadata: {
+          chunksProcessed,
+          candleRowsUpserted,
+          marketsProcessed,
+          totalMarkets: lastTotalMarkets,
+          timeframe,
+          barsPerMarket,
+          incomplete: false,
+        },
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  if (incomplete && isEurQuote && syncRunId && canQueueFollowUp) {
+    try {
+      await patchSyncRunMetadata(admin, {
+        runId: syncRunId,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        patch: {
+          chunksProcessed,
+          candleRowsUpserted,
+          marketsProcessed,
+          totalMarkets: lastTotalMarkets,
+          nextMarketOffset: lastResult?.nextMarketOffset ?? marketOffset,
+          incomplete: true,
+          timeframe,
+          barsPerMarket,
+        },
       });
     } catch {
       /* non-fatal */

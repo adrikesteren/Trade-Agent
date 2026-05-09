@@ -2,7 +2,7 @@
 
 ## `sync_runs`
 
-Append-only **sync run** rows per `job_key` (e.g. Bitvavo markets EUR, candles EUR). **Read** for `authenticated`; **insert/update** via service role from API routes / workers (`record-bitvavo-sync-status`, candle sweep).
+Append-only **sync run** rows per `job_key` (e.g. Bitvavo markets EUR, candles EUR). **Read** for `authenticated`; **insert/update** via service role from API routes / workers (`record-bitvavo-sync-status`, candle sweep). **`metadata`** (`jsonb`, default `{}`) holds optional per-job fields (counts, progress); workers merge patches on complete or via `patchSyncRunMetadata` while a run is still `running`.
 
 **Realtime:** `automation.sync_runs` is included in `supabase_realtime` (migration `20260519120000_enable_realtime_sync_runs.sql`) so the dashboard Sync runs page can subscribe to INSERT/UPDATE without refresh.
 
