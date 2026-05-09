@@ -9,6 +9,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   const supabase = await createClient();
 
   const { data: ex, error } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id, code, name, metadata, created_at")
     .eq("id", exchangeId)
@@ -19,6 +20,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   }
 
   const { data: markets, count } = await supabase
+    .schema("catalog")
     .from("markets")
     .select("id, market_symbol, quote_code, status", { count: "exact" })
     .eq("exchange_id", exchangeId)

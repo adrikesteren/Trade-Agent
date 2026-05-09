@@ -22,6 +22,7 @@ export async function backfillMissingBitvavoCandles(
   const barsPerMarket = barsForRetention(timeframe);
 
   const { data: ex, error: exErr } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id")
     .eq("code", "bitvavo")
@@ -76,7 +77,7 @@ export async function backfillMissingBitvavoCandles(
       const chunkSize = 500;
       for (let j = 0; j < ecRows.length; j += chunkSize) {
         const part = ecRows.slice(j, j + chunkSize);
-        const { error: upErr } = await supabase.from("candles").upsert(part, {
+        const { error: upErr } = await supabase.schema("catalog").from("candles").upsert(part, {
           onConflict: "market_id,timeframe,close_time",
         });
         if (upErr) {

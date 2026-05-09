@@ -36,6 +36,7 @@ export async function GET(request: Request) {
   const requested = timeframe as ChartTimeframe;
 
   const { data: rows, error } = await supabase
+    .schema("catalog")
     .from("candles")
     .select("open_time, close_time, open, high, low, close, volume")
     .eq("market_id", marketId)

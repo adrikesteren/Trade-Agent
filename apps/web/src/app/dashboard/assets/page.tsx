@@ -12,7 +12,11 @@ type AssetRow = {
 export default async function AssetsIndexPage() {
   const supabase = await createClient();
 
-  const { data: rows, error } = await supabase.from("assets").select("id, code, kind, name, created_at").limit(2000);
+  const { data: rows, error } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("id, code, kind, name, created_at")
+    .limit(2000);
 
   const assets = (rows ?? []) as AssetRow[];
   const assetIds = assets.map((a) => a.id);

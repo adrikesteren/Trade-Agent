@@ -79,6 +79,7 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
   let searchAttemptsThisRun = 0;
 
   const { data: assets, error: selErr } = await supabase
+    .schema("catalog")
     .from("assets")
     .select("id, code, metadata")
     .eq("kind", "crypto")
@@ -101,7 +102,11 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
         await sleep(SEARCH_DELAY_MS);
         if (found) {
           const meta = { ...asRecord(a.metadata), coingecko_id: found };
-          const { error: upErr } = await supabase.from("assets").update({ metadata: meta }).eq("id", a.id);
+          const { error: upErr } = await supabase
+            .schema("catalog")
+            .from("assets")
+            .update({ metadata: meta })
+            .eq("id", a.id);
           if (upErr) {
             searchFailures.push(`${a.code}: ${upErr.message}`);
           } else {
@@ -151,7 +156,7 @@ export async function syncCoingeckoAssetMetricsMarketsPhase(
     const assetId = idByCoingecko.get(m.id);
     if (!assetId) continue;
     const patch = marketRowToAssetPatch(m);
-    const { error: upErr } = await supabase.from("assets").update(patch).eq("id", assetId);
+    const { error: upErr } = await supabase.schema("catalog").from("assets").update(patch).eq("id", assetId);
     if (upErr) {
       throw new Error(upErr.message);
     }

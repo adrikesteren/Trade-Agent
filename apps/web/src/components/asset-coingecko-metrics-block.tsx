@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-/** Columns on `public.assets` filled by CoinGecko sync (subset used by UI). */
+/** Columns on `catalog.assets` filled by CoinGecko sync (subset used by UI). */
 export type AssetLiveCoingeckoDb = {
   coingecko_fetched_at: string | null;
   coingecko_coin_id: string | null;
@@ -21,7 +21,7 @@ export type AssetLiveCoingeckoDb = {
   coingecko_ath_change_pct: number | string | null;
 };
 
-/** Live CoinGecko fields stored on `public.assets` (updated each sync). */
+/** Live CoinGecko fields stored on `catalog.assets` (updated each sync). */
 export type AssetCoingeckoMetricsRow = {
   fetched_at: string;
   coingecko_id: string;

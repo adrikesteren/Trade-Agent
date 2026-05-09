@@ -5,6 +5,7 @@ export default async function ExchangesIndexPage() {
   const supabase = await createClient();
 
   const { data: rows, error } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id, code, name, created_at")
     .order("code", { ascending: true })

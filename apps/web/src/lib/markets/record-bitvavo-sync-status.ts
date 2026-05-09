@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const BITVAVO_SYNC_JOB_MARKETS_EUR = "bitvavo_markets_eur";
 export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
 /**
- * CoinGecko USD fundamentals refresh (writes `public.assets` live columns).
+ * CoinGecko USD fundamentals refresh (writes `catalog.assets` live columns).
  * Value is `sync_runs.job_key` only — not a table name (legacy key was `coingecko_asset_metrics`).
  */
 export const COINGECKO_SYNC_JOB_METRICS = "coingecko_assets_usd_live";
@@ -13,6 +13,7 @@ export type BitvavoSyncTriggerSource = "manual" | "automated";
 export type BitvavoSyncJobStatus = "running" | "completed" | "failed";
 
 const TABLE = "sync_runs" as const;
+const AUTOMATION_SCHEMA = "automation" as const;
 
 /** Latest still-running row for a job (e.g. QStash continuation missing syncRunId). */
 export async function resolveLatestRunningBitvavoRunId(
@@ -20,6 +21,7 @@ export async function resolveLatestRunningBitvavoRunId(
   jobKey: string,
 ): Promise<string | null> {
   const { data, error } = await admin
+    .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .select("id")
     .eq("job_key", jobKey)
@@ -49,6 +51,7 @@ export async function beginBitvavoSyncRun(
   const now = new Date().toISOString();
 
   const { data, error } = await admin
+    .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .insert({
       job_key: jobKey,
@@ -77,6 +80,7 @@ export async function recordBitvavoSyncCompleted(
   if (!runId) return;
 
   const { error } = await admin
+    .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
       status: "completed",
@@ -104,6 +108,7 @@ export async function recordBitvavoSyncFailed(
   if (!runId) return;
 
   const { error } = await admin
+    .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
       status: "failed",

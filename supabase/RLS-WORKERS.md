@@ -8,7 +8,7 @@ Append-only **sync run** rows per `job_key` (e.g. Bitvavo markets EUR, candles E
 
 These tables hold **shared** reference data (not per-user). **RLS** allows any `authenticated` user to **read** them; **writes** are intended to go through the **service role** (Bitvavo catalog sync routes, candle workers, CoinGecko metrics worker) so the app can bulk-upsert without per-row `user_id`.
 
-**Realtime:** `public.candles` is included in the `supabase_realtime` publication (see migration `20250512120000_enable_realtime_candles.sql`). Subscribers only receive changes for rows they are allowed to `SELECT` under RLS.
+**Realtime:** `catalog.candles` is included in the `supabase_realtime` publication (see migration `20250512120000_enable_realtime_candles.sql`). Subscribers only receive changes for rows they are allowed to `SELECT` under RLS.
 
 ## Authenticated users (Next.js dashboard)
 

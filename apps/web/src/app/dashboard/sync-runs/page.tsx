@@ -43,6 +43,7 @@ export default async function SyncRunsPage() {
   const supabase = await createClient();
 
   const { data: runRows, error: runsError } = await supabase
+    .schema("automation")
     .from("sync_runs")
     .select("id, job_key, status, trigger_source, created_at, completed_at, ended_at")
     .in("job_key", [...SYNC_JOB_KEYS])

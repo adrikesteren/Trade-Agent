@@ -17,6 +17,7 @@ export default async function MarketsIndexPage() {
   const supabase = await createClient();
 
   const { data: exchange } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id, code, name")
     .eq("code", "bitvavo")
@@ -24,6 +25,7 @@ export default async function MarketsIndexPage() {
 
   const { data: listings, error } = exchange
     ? await supabase
+        .schema("catalog")
         .from("markets")
         .select(
           `

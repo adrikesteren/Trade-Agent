@@ -24,6 +24,7 @@ export async function ensureMarket(
   const { base, quote } = parseMarketSymbol(market);
 
   const { data: ex, error: exErr } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id")
     .eq("code", params.exchangeCode)
@@ -36,6 +37,7 @@ export async function ensureMarket(
   const exchangeId = ex.id as string;
 
   const { data: existing } = await supabase
+    .schema("catalog")
     .from("markets")
     .select("id, asset_id")
     .eq("exchange_id", exchangeId)
@@ -51,6 +53,7 @@ export async function ensureMarket(
   }
 
   const { data: assetRow, error: assetErr } = await supabase
+    .schema("catalog")
     .from("assets")
     .upsert(
       {
@@ -71,6 +74,7 @@ export async function ensureMarket(
   const assetId = assetRow.id as string;
 
   const { data: row, error: mErr } = await supabase
+    .schema("catalog")
     .from("markets")
     .upsert(
       {

@@ -19,6 +19,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
   const supabase = await createClient();
 
   const { data: asset, error } = await supabase
+    .schema("catalog")
     .from("assets")
     .select(`id, code, kind, name, metadata, created_at, ${ASSET_CG_FIELDS}`)
     .eq("id", assetId)
@@ -29,6 +30,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
   }
 
   const { data: markets } = await supabase
+    .schema("catalog")
     .from("markets")
     .select(
       `

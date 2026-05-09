@@ -37,7 +37,7 @@ export async function deleteExpiredMarketCandles(
 ): Promise<void> {
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
 
-  const { error } = await supabase.from("candles").delete().lt("close_time", cutoff);
+  const { error } = await supabase.schema("catalog").from("candles").delete().lt("close_time", cutoff);
 
   if (error) {
     throw new Error(error.message);

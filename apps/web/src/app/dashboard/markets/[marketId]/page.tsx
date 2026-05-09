@@ -36,6 +36,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const supabase = await createClient();
 
   const { data: market, error } = await supabase
+    .schema("catalog")
     .from("markets")
     .select(
       `
@@ -73,6 +74,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
   } | null;
 
   const { data: candleRows } = await supabase
+    .schema("catalog")
     .from("candles")
     .select("open_time, close_time, open, high, low, close, volume")
     .eq("market_id", marketId)

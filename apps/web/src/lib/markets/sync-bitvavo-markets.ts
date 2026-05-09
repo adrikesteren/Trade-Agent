@@ -25,6 +25,7 @@ export async function syncBitvavoMarkets(
   const markets = (await res.json()) as BitvavoMarketRow[];
 
   const { data: ex, error: exErr } = await supabase
+    .schema("catalog")
     .from("exchanges")
     .select("id")
     .eq("code", "bitvavo")
@@ -51,7 +52,7 @@ export async function syncBitvavoMarkets(
     metadata: {},
   }));
 
-  const { error: assetsErr } = await supabase.from("assets").upsert(assetRows, {
+  const { error: assetsErr } = await supabase.schema("catalog").from("assets").upsert(assetRows, {
     onConflict: "kind,code",
   });
   if (assetsErr) {
@@ -59,6 +60,7 @@ export async function syncBitvavoMarkets(
   }
 
   const { data: assetRowsDb, error: selErr } = await supabase
+    .schema("catalog")
     .from("assets")
     .select("id, code")
     .eq("kind", "crypto")
@@ -96,7 +98,7 @@ export async function syncBitvavoMarkets(
   const chunkSize = 200;
   for (let i = 0; i < listingRows.length; i += chunkSize) {
     const chunk = listingRows.slice(i, i + chunkSize);
-    const { error: eaErr } = await supabase.from("markets").upsert(chunk, {
+    const { error: eaErr } = await supabase.schema("catalog").from("markets").upsert(chunk, {
       onConflict: "exchange_id,market_symbol",
     });
     if (eaErr) {

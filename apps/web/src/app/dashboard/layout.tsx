@@ -1,3 +1,4 @@
+import { DashboardSchemaNav } from "@/components/dashboard-schema-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -27,38 +28,7 @@ export default async function DashboardLayout({
           >
             Trade Agent
           </Link>
-          <nav className="flex items-center gap-3 text-xs">
-            <Link
-              href="/dashboard"
-              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Overview
-            </Link>
-            <Link
-              href="/dashboard/markets"
-              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Markets
-            </Link>
-            <Link
-              href="/dashboard/assets"
-              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Assets
-            </Link>
-            <Link
-              href="/dashboard/exchanges"
-              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Exchanges
-            </Link>
-            <Link
-              href="/dashboard/sync-runs"
-              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Sync runs
-            </Link>
-          </nav>
+          <DashboardSchemaNav />
         </div>
         <SignOutButton />
       </header>

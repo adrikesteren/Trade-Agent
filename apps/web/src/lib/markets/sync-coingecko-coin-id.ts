@@ -42,6 +42,7 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
   const failures: string[] = [];
 
   const { data: rows, error: selErr } = await admin
+    .schema("catalog")
     .from("assets")
     .select("id, code, metadata, coingecko_coin_id")
     .eq("kind", "crypto");
@@ -57,7 +58,7 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
     if (!isCoinIdEmpty(r.coingecko_coin_id as string | null)) continue;
     const mid = coingeckoIdFromMetadata(r.metadata);
     if (!mid) continue;
-    const { error: upErr } = await admin.from("assets").update({ coingecko_coin_id: mid }).eq("id", r.id);
+    const { error: upErr } = await admin.schema("catalog").from("assets").update({ coingecko_coin_id: mid }).eq("id", r.id);
     if (upErr) {
       failures.push(`${r.code}: ${upErr.message}`);
     } else {
@@ -66,6 +67,7 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
   }
 
   const { data: rows2, error: sel2Err } = await admin
+    .schema("catalog")
     .from("assets")
     .select("id, code, metadata, coingecko_coin_id")
     .eq("kind", "crypto");
@@ -87,6 +89,7 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
       if (found) {
         const meta = { ...asRecord(r.metadata), coingecko_id: found };
         const { error: upErr } = await admin
+          .schema("catalog")
           .from("assets")
           .update({ coingecko_coin_id: found, metadata: meta })
           .eq("id", r.id);
@@ -101,7 +104,7 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
     }
   }
 
-  const { data: finalRows } = await admin.from("assets").select("coingecko_coin_id").eq("kind", "crypto");
+  const { data: finalRows } = await admin.schema("catalog").from("assets").select("coingecko_coin_id").eq("kind", "crypto");
   const stillMissingCoinId = (finalRows ?? []).filter((a) =>
     isCoinIdEmpty(a.coingecko_coin_id as string | null),
   ).length;

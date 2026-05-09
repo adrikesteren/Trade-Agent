@@ -389,7 +389,7 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
         "postgres_changes",
         {
           event: "*",
-          schema: "public",
+          schema: "catalog",
           table: "candles",
           filter: `market_id=eq.${marketId}`,
         },
