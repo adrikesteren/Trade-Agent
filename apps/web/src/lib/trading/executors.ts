@@ -13,11 +13,19 @@ export type ExecutorRow = {
   name: string;
   enabled: boolean;
   execution_mode: ExecutionMode;
-  budget_eur: string | number | null;
   asset_filter_mode: ExecutorAssetFilterMode;
   filter_asset_ids: string[] | null;
   created_at?: string;
   updated_at?: string;
+  default_notional_eur: string | number;
+  max_risk_per_trade: string | number;
+  max_open_positions: string | number;
+  max_exposure_per_symbol_eur: string | number;
+  daily_loss_limit_eur: string | number;
+  max_drawdown_eur: string | number;
+  cooldown_after_losses: string | number;
+  allow_add: boolean;
+  mediator_rails_extra: Record<string, unknown> | null;
 };
 
 /** Prefer "Default" by name, then oldest created. */
@@ -38,10 +46,41 @@ export async function fetchExecutorsForUsers(
   const { data, error } = await admin
     .schema("trading")
     .from("executors")
-    .select("id, user_id, name, enabled, execution_mode, budget_eur, asset_filter_mode, filter_asset_ids, created_at, updated_at")
+    .select(
+      "id, user_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra",
+    )
     .in("user_id", userIds);
   if (error) throw new Error(error.message);
   return (data ?? []) as ExecutorRow[];
+}
+
+/** Idempotent: one `risk_state` row per executor (paper defaults). */
+export async function ensureRiskStateForExecutor(
+  admin: SupabaseClient,
+  args: { userId: string; executorId: string },
+): Promise<void> {
+  const { data: existing, error: selErr } = await admin
+    .schema("trading")
+    .from("risk_state")
+    .select("id")
+    .eq("executor_id", args.executorId)
+    .maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  if (existing) return;
+
+  const { error } = await admin.schema("trading").from("risk_state").insert({
+    user_id: args.userId,
+    executor_id: args.executorId,
+    equity_eur: 0,
+    open_position_count: 0,
+    exposure_by_market: {},
+    daily_pnl_eur: 0,
+    max_drawdown_eur: 0,
+    kill_switch: false,
+    consecutive_losses: 0,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(`ensureRiskStateForExecutor: ${error.message}`);
 }
 
 export async function ensureDefaultExecutorsForUsers(
@@ -59,37 +98,16 @@ export async function ensureDefaultExecutorsForUsers(
     name: "Default",
     enabled: true,
     execution_mode: "paper" as const,
-    budget_eur: null as number | null,
     asset_filter_mode: "all" as const,
     filter_asset_ids: [] as string[],
     updated_at: new Date().toISOString(),
   }));
 
-  const { error } = await admin.schema("trading").from("executors").insert(rows);
+  const { data: inserted, error } = await admin.schema("trading").from("executors").insert(rows).select("id, user_id");
   if (error) throw new Error(`ensureDefaultExecutorsForUsers: ${error.message}`);
-}
-
-/** Sum `notional_eur` for filled orders per executor (spot v1 budget cap). */
-export async function fetchFilledNotionalSumByExecutorIds(
-  admin: SupabaseClient,
-  executorIds: string[],
-): Promise<Map<string, number>> {
-  const sums = new Map<string, number>();
-  if (!executorIds.length) return sums;
-  const { data, error } = await admin
-    .schema("trading")
-    .from("orders")
-    .select("executor_id, notional_eur")
-    .eq("status", "filled")
-    .in("executor_id", executorIds);
-  if (error) throw new Error(error.message);
-  for (const row of data ?? []) {
-    const id = row.executor_id as string;
-    const n = Number(row.notional_eur ?? 0);
-    if (!Number.isFinite(n)) continue;
-    sums.set(id, (sums.get(id) ?? 0) + n);
+  for (const row of inserted ?? []) {
+    await ensureRiskStateForExecutor(admin, { userId: row.user_id as string, executorId: row.id as string });
   }
-  return sums;
 }
 
 export async function fetchMarketAssetIds(
@@ -120,15 +138,20 @@ export async function ensureUserExecutorExists(supabase: SupabaseClient, userId:
   if (error) throw new Error(error.message);
   if ((count ?? 0) > 0) return;
 
-  const { error: insErr } = await supabase.schema("trading").from("executors").insert({
-    user_id: userId,
-    name: "Default",
-    enabled: true,
-    execution_mode: "paper",
-    budget_eur: null,
-    asset_filter_mode: "all",
-    filter_asset_ids: [],
-    updated_at: new Date().toISOString(),
-  });
+  const { data: created, error: insErr } = await supabase
+    .schema("trading")
+    .from("executors")
+    .insert({
+      user_id: userId,
+      name: "Default",
+      enabled: true,
+      execution_mode: "paper",
+      asset_filter_mode: "all",
+      filter_asset_ids: [],
+      updated_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
   if (insErr) throw new Error(insErr.message);
+  await ensureRiskStateForExecutor(supabase, { userId, executorId: created?.id as string });
 }

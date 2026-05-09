@@ -61,15 +61,15 @@ curl -sS -X POST "http://localhost:3000/api/workers/signals-catalog-close" ^
 
 ## Trade mediator (env)
 
-After the **last** batch of `signals-catalog-close` for a closed catalog bar (when at least one signal row was upserted), the app enqueues `POST /api/workers/mediator-catalog-close`, which reads `trading.signals`, `trading.executors` (enabled rows per user), `trading.positions` per executor, and `trading.risk_state` per configured user and **upserts** `trading.trade_decisions` (unique per `user_id`, `executor_id`, `market_id`, `timeframe`, `close_time`). See [docs/how-we-use-agents.md](../../docs/how-we-use-agents.md).
+After the **last** batch of `signals-catalog-close` for a closed catalog bar (when at least one signal row was upserted), the app enqueues `POST /api/workers/mediator-catalog-close`, which reads `trading.signals`, `trading.executors` (enabled rows per user; **rails + default notional live on each executor row**), `trading.positions` and **`trading.risk_state` per executor**, then **upserts** `trading.trade_decisions` (unique per `user_id`, `executor_id`, `market_id`, `timeframe`, `close_time`). See [docs/mediator-developer.md](../../docs/mediator-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users for whom decisions are written (trusted env only). |
 | `MEDIATOR_AFTER_SIGNALS_DISABLE` | Optional | Set to `1` to skip enqueueing the mediator after the signal pass. |
-| `MEDIATOR_RISK_RAILS_JSON` | Optional | JSON object merged over defaults (`maxRiskPerTrade`, `maxOpenPositions`, …, optional `allowAdd`). |
-| `MEDIATOR_DEFAULT_NOTIONAL_EUR` | Optional | Suggested EUR size before risk clamp (default `100`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as the signal worker (`MARKET_BATCH_SIZE`, `MAX_TOTAL_MARKETS`, `INLINE_MAX_ITERS`). |
+
+Mediator risk rails and default EUR notional are edited per executor in the dashboard (**Trading → Executors**), not via env.
 
 Manual worker call (dev):
 
@@ -82,7 +82,7 @@ curl -sS -X POST "http://localhost:3000/api/workers/mediator-catalog-close" ^
 
 ## Trade executor (env)
 
-After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsUpserted > 0`), the app enqueues `POST /api/workers/executor-catalog-close`, which turns **approved** `trading.trade_decisions` into `trading.orders` (+ `fills` / `positions`) with **`executor_id`**. Paper vs live follows **`trading.executors.execution_mode`** at execution time (decisions are mode-agnostic). Optional per-executor **budget** and **asset whitelist/blacklist** are enforced in mediator (filter) and executor (budget). See [docs/executor-developer.md](../../docs/executor-developer.md).
+After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsUpserted > 0`), the app enqueues `POST /api/workers/executor-catalog-close`, which turns **approved** `trading.trade_decisions` into `trading.orders` (+ `fills` / `positions`) with **`executor_id`**. Paper vs live follows **`trading.executors.execution_mode`** at execution time (decisions are mode-agnostic). Buys require sufficient **assigned EUR balance** (`risk_state.equity_eur`); **asset whitelist/blacklist** is enforced in the mediator (filter). See [docs/executor-developer.md](../../docs/executor-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 | `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
 
-**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, optional EUR budget, enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings/execution` redirects to Executors.
+**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, **Add/remove balance** (assigned EUR), enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings/execution` redirects to Executors.
 
 Manual worker call (dev):
 

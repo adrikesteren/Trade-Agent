@@ -14,6 +14,10 @@ These tables hold **shared** reference data (not per-user). **RLS** allows any `
 
 **Realtime:** `catalog.candles` is included in the `supabase_realtime` publication (initial migration targeted `public.candles`; after the catalog schema split, migration `20260518100000_candle_timestamps_failed_reason_realtime.sql` adds `catalog.candles` when missing). Subscribers only receive changes for rows they are allowed to `SELECT` under RLS.
 
+## `trading.risk_state` (per executor)
+
+After migration `20260601100000_executor_rails_and_risk_per_executor.sql`, each row is scoped by **`executor_id`** (FK to `trading.executors`) as well as `user_id`. **RLS** for `authenticated` requires `auth.uid() = user_id` **and** that the `executor_id` belongs to an executor owned by that user (`exists` subquery on `trading.executors`). Workers using the **service role** bypass RLS.
+
 ## Authenticated users (Next.js dashboard)
 
 The web app uses the **anon key** with the user session. **Row Level Security (RLS)** on most `public.*` trading tables restricts reads and writes to rows where `user_id = auth.uid()`.

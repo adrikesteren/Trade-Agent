@@ -14,11 +14,17 @@ import {
   ensureDefaultExecutorsForUsers,
   executorAllowsMarketAsset,
   fetchExecutorsForUsers,
-  fetchFilledNotionalSumByExecutorIds,
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/trading/executors";
-import { wouldExceedExecutorBudget } from "@/lib/trading/executor-rules";
+import {
+  applyExecutorTradeBuyDebit,
+  executorPaperFeeEur,
+  fetchExecutorEquityEur,
+  fetchExecutorPositionSnapshot,
+  restoreExecutorPositionSnapshot,
+  tradeBuyDebitEur,
+} from "@/lib/trading/executor-wallet";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
@@ -265,16 +271,6 @@ export async function runExecutorCatalogClose(
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
 
-  const spentByUserExecutor = new Map<string, Map<string, number>>();
-  for (const userId of userIds) {
-    const exs = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
-    const sums = await fetchFilledNotionalSumByExecutorIds(
-      admin,
-      exs.map((e) => e.id),
-    );
-    spentByUserExecutor.set(userId, sums);
-  }
-
   let ordersInserted = 0;
 
   for (const m of rows) {
@@ -284,7 +280,6 @@ export async function runExecutorCatalogClose(
 
     for (const userId of userIds) {
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
-      const spentMap = spentByUserExecutor.get(userId) ?? new Map<string, number>();
 
       for (const ex of executors) {
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
@@ -322,14 +317,6 @@ export async function runExecutorCatalogClose(
         const paperExecution = ex.execution_mode !== "live";
         const notionalEur = proposed.notionalEur;
 
-        const budgetRaw = ex.budget_eur;
-        const budgetCap =
-          budgetRaw !== null && budgetRaw !== undefined && String(budgetRaw).trim() !== ""
-            ? Number(budgetRaw)
-            : null;
-        const spent = spentMap.get(ex.id) ?? 0;
-        if (wouldExceedExecutorBudget(spent, notionalEur, budgetCap)) continue;
-
         if (paperExecution) {
           const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
           if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
@@ -337,7 +324,16 @@ export async function runExecutorCatalogClose(
           const qty = baseQuantityFromNotionalEur(notionalEur, px.price);
           if (!Number.isFinite(qty) || qty <= 0) continue;
 
-          const feeEur = Math.round(notionalEur * 0.0025 * 1e8) / 1e8;
+          const feeEur = executorPaperFeeEur(notionalEur);
+          const debitEur = tradeBuyDebitEur(notionalEur, feeEur);
+          const equityPre = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
+          if (equityPre < debitEur) continue;
+
+          const posSnapshot = await fetchExecutorPositionSnapshot(admin, {
+            userId,
+            executorId: ex.id,
+            marketId,
+          });
 
           const { data: inserted, error: insOrdErr } = await admin
             .schema("trading")
@@ -368,21 +364,59 @@ export async function runExecutorCatalogClose(
           });
           if (fillErr) throw new Error(`${marketSymbol}: fill insert: ${fillErr.message}`);
 
-          await upsertPositionAfterBuy(admin, {
-            userId,
-            executorId: ex.id,
-            marketId,
-            paper: paperExecution,
-            addQty: qty,
-            price: px.price,
-          });
-          spentMap.set(ex.id, (spentMap.get(ex.id) ?? 0) + notionalEur);
+          try {
+            await upsertPositionAfterBuy(admin, {
+              userId,
+              executorId: ex.id,
+              marketId,
+              paper: paperExecution,
+              addQty: qty,
+              price: px.price,
+            });
+            await applyExecutorTradeBuyDebit(admin, {
+              userId,
+              executorId: ex.id,
+              orderId,
+              debitEur,
+            });
+          } catch (e) {
+            await admin.schema("trading").from("orders").delete().eq("id", orderId);
+            await restoreExecutorPositionSnapshot(admin, {
+              userId,
+              executorId: ex.id,
+              marketId,
+              snapshot: posSnapshot,
+            });
+            throw e;
+          }
           ordersInserted += 1;
           continue;
         }
 
         /* Live */
         try {
+          const estFee = executorPaperFeeEur(notionalEur);
+          const estDebit = tradeBuyDebitEur(notionalEur, estFee);
+          const liveEquity = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
+          if (liveEquity < estDebit) {
+            const { error: skipInsErr } = await admin.schema("trading").from("orders").insert({
+              user_id: userId,
+              executor_id: ex.id,
+              decision_id: dec.id,
+              market_id: marketId,
+              side: "buy",
+              quantity: 0,
+              notional_eur: notionalEur,
+              status: "rejected",
+              paper: false,
+              external_id: null,
+            });
+            if (skipInsErr && !/duplicate|unique/i.test(skipInsErr.message)) {
+              throw new Error(`${marketSymbol}: insufficient balance reject insert: ${skipInsErr.message}`);
+            }
+            continue;
+          }
+
           const live = await placeBitvavoMarketBuyQuote({
             market: marketSymbol,
             amountQuoteEur: notionalEur,
@@ -447,7 +481,17 @@ export async function runExecutorCatalogClose(
                 .from("orders")
                 .update({ quantity: fillQty, updated_at: new Date().toISOString() })
                 .eq("id", localOrderId);
-              spentMap.set(ex.id, (spentMap.get(ex.id) ?? 0) + notionalEur);
+              const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
+              try {
+                await applyExecutorTradeBuyDebit(admin, {
+                  userId,
+                  executorId: ex.id,
+                  orderId: localOrderId,
+                  debitEur: debitLive,
+                });
+              } catch (ledgerErr) {
+                console.error(`${marketSymbol}: live fill debit failed`, ledgerErr);
+              }
             }
           }
           ordersInserted += 1;

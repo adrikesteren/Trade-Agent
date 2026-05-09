@@ -13,9 +13,17 @@ export type ExecutorFormInitial = {
   name: string;
   enabled: boolean;
   execution_mode: ExecutionModeValue;
-  budget_eur: string | null;
   asset_filter_mode: ExecutorAssetFilterMode;
   filter_asset_ids: string[];
+  default_notional_eur?: string;
+  max_risk_per_trade?: string;
+  max_open_positions?: string;
+  max_exposure_per_symbol_eur?: string;
+  daily_loss_limit_eur?: string;
+  max_drawdown_eur?: string;
+  cooldown_after_losses?: string;
+  allow_add?: boolean;
+  mediator_rails_extra_json?: string;
 };
 
 export function ExecutorForm({
@@ -63,7 +71,7 @@ export function ExecutorForm({
           </div>
 
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="enabled" defaultChecked={initial?.enabled !== false} />
+            <input type="checkbox" name="enabled" defaultChecked={Boolean(initial?.enabled)} />
             Enabled
           </label>
 
@@ -99,21 +107,143 @@ export function ExecutorForm({
             <Alert tone="warning">This executor is in live mode. Switch to paper first if you need to acknowledge again.</Alert>
           ) : null}
 
+          <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
+            Mediator / risk rails
+          </div>
+
           <div>
-            <label htmlFor="ex-budget" className="bk-form-label">
-              Budget (EUR)
+            <label htmlFor="ex-default-notional" className="bk-form-label">
+              Default order size (EUR)
             </label>
             <input
-              id="ex-budget"
-              name="budget_eur"
+              id="ex-default-notional"
+              name="default_notional_eur"
               type="number"
-              min={0}
+              min={0.01}
               step="0.01"
               className="bk-input mt-1 w-full max-w-md font-mono text-sm"
-              placeholder="Unlimited if empty"
-              defaultValue={initial?.budget_eur ?? ""}
+              defaultValue={initial?.default_notional_eur ?? "100"}
+              required
             />
-            <p className="bk-text-muted mt-1 text-xs">Caps cumulative filled buy notional for this executor.</p>
+            <p className="bk-text-muted mt-1 text-xs">Suggested EUR per trade before equity cap (mediator).</p>
+          </div>
+
+          <div>
+            <label htmlFor="ex-max-risk" className="bk-form-label">
+              Max risk per trade (0–1)
+            </label>
+            <input
+              id="ex-max-risk"
+              name="max_risk_per_trade"
+              type="number"
+              min={0.0001}
+              max={1}
+              step="0.001"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.max_risk_per_trade ?? "0.05"}
+              required
+            />
+            <p className="bk-text-muted mt-1 text-xs">Fraction of equity per trade cap, e.g. 0.05 = 5%.</p>
+          </div>
+
+          <div>
+            <label htmlFor="ex-max-open" className="bk-form-label">
+              Max open positions
+            </label>
+            <input
+              id="ex-max-open"
+              name="max_open_positions"
+              type="number"
+              min={0}
+              step="1"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.max_open_positions ?? "5"}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="ex-max-exp" className="bk-form-label">
+              Max exposure per symbol (EUR)
+            </label>
+            <input
+              id="ex-max-exp"
+              name="max_exposure_per_symbol_eur"
+              type="number"
+              min={0}
+              step="1"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.max_exposure_per_symbol_eur ?? "500"}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="ex-daily-loss" className="bk-form-label">
+              Daily loss limit (EUR)
+            </label>
+            <input
+              id="ex-daily-loss"
+              name="daily_loss_limit_eur"
+              type="number"
+              min={0}
+              step="1"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.daily_loss_limit_eur ?? "100"}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="ex-max-dd" className="bk-form-label">
+              Max drawdown (EUR)
+            </label>
+            <input
+              id="ex-max-dd"
+              name="max_drawdown_eur"
+              type="number"
+              min={0}
+              step="1"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.max_drawdown_eur ?? "500"}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="ex-cooldown" className="bk-form-label">
+              Cooldown after losses (count)
+            </label>
+            <input
+              id="ex-cooldown"
+              name="cooldown_after_losses"
+              type="number"
+              min={0}
+              step="1"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              defaultValue={initial?.cooldown_after_losses ?? "3"}
+              required
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="allow_add" defaultChecked={initial?.allow_add === true} />
+            Allow ADD intent (extra buys when already in position)
+          </label>
+
+          <div>
+            <label htmlFor="ex-rails-extra" className="bk-form-label">
+              Advanced rails (JSON object, optional)
+            </label>
+            <textarea
+              id="ex-rails-extra"
+              name="mediator_rails_extra"
+              rows={5}
+              className="bk-input mt-1 w-full max-w-2xl font-mono text-xs"
+              defaultValue={initial?.mediator_rails_extra_json ?? "{}"}
+              spellCheck={false}
+            />
+            <p className="bk-text-muted mt-1 text-xs">Overrides typed fields when keys match (camelCase).</p>
           </div>
 
           <div>

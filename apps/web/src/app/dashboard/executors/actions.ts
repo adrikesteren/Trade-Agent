@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { ensureRiskStateForExecutor } from "@/lib/trading/executors";
 
 export type ExecutorAssetFilterMode = "all" | "whitelist" | "blacklist";
 export type ExecutionModeValue = "paper" | "live";
@@ -30,6 +31,66 @@ function parseAssetIds(formData: FormData): string[] {
   return [...new Set(out)];
 }
 
+function parsePositiveFinite(name: string, raw: FormDataEntryValue | null): number {
+  const n = Number(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} must be a positive number.`);
+  return n;
+}
+
+function parseNonNegInt(name: string, raw: FormDataEntryValue | null): number {
+  const n = Math.floor(Number(String(raw ?? "").trim()));
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be a non-negative integer.`);
+  return n;
+}
+
+function parseNonNegNumber(name: string, raw: FormDataEntryValue | null): number {
+  const n = Number(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be a non-negative number.`);
+  return n;
+}
+
+function parseMaxRiskPerTrade(raw: FormDataEntryValue | null): number {
+  const n = Number(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0 || n > 1) {
+    throw new Error("Max risk per trade must be a fraction between 0 and 1 (e.g. 0.05 for 5%).");
+  }
+  return n;
+}
+
+function parseMediatorRailsExtra(formData: FormData): Record<string, unknown> {
+  const raw = String(formData.get("mediator_rails_extra") ?? "").trim();
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("Advanced rails JSON is not valid JSON.");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Advanced rails JSON must be a JSON object.");
+  }
+  const s = JSON.stringify(parsed);
+  if (s.length > 16_000) throw new Error("Advanced rails JSON is too large.");
+  return parsed as Record<string, unknown>;
+}
+
+function mediatorFieldsFromForm(formData: FormData) {
+  return {
+    default_notional_eur: parsePositiveFinite("Default notional (EUR)", formData.get("default_notional_eur")),
+    max_risk_per_trade: parseMaxRiskPerTrade(formData.get("max_risk_per_trade")),
+    max_open_positions: parseNonNegInt("Max open positions", formData.get("max_open_positions")),
+    max_exposure_per_symbol_eur: parseNonNegNumber(
+      "Max exposure per symbol (EUR)",
+      formData.get("max_exposure_per_symbol_eur"),
+    ),
+    daily_loss_limit_eur: parseNonNegNumber("Daily loss limit (EUR)", formData.get("daily_loss_limit_eur")),
+    max_drawdown_eur: parseNonNegNumber("Max drawdown (EUR)", formData.get("max_drawdown_eur")),
+    cooldown_after_losses: parseNonNegInt("Cooldown after losses", formData.get("cooldown_after_losses")),
+    allow_add: formData.has("allow_add"),
+    mediator_rails_extra: parseMediatorRailsExtra(formData),
+  };
+}
+
 export async function createExecutor(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const {
@@ -47,19 +108,13 @@ export async function createExecutor(formData: FormData): Promise<void> {
     throw new Error("Confirm live trading before enabling live mode.");
   }
 
-  const budgetRaw = String(formData.get("budget_eur") ?? "").trim();
-  const budget_eur =
-    budgetRaw === "" ? null : Number(budgetRaw);
-  if (budget_eur != null && (!Number.isFinite(budget_eur) || budget_eur < 0)) {
-    throw new Error("Budget must be a non-negative number or empty for unlimited.");
-  }
-
   const asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
   const filter_asset_ids = parseAssetIds(formData);
   if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
     throw new Error("Pick at least one asset for whitelist or blacklist mode.");
   }
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
+  const rails = mediatorFieldsFromForm(formData);
 
   const { data: inserted, error } = await supabase
     .schema("trading")
@@ -69,17 +124,70 @@ export async function createExecutor(formData: FormData): Promise<void> {
       name,
       enabled,
       execution_mode,
-      budget_eur,
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
       updated_at: new Date().toISOString(),
+      ...rails,
     })
     .select("id")
     .single();
 
   if (error) throw new Error(error.message);
+  const newId = inserted?.id as string;
+  await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId: newId });
   revalidatePath("/dashboard/executors");
-  redirect(`/dashboard/executors/${inserted?.id as string}`);
+  redirect(`/dashboard/executors/${newId}`);
+}
+
+function parseBalanceAmount(formData: FormData, field: string): number {
+  const raw = String(formData.get(field) ?? "").trim();
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) throw new Error("Amount must be a positive number.");
+  return n;
+}
+
+export async function addExecutorBalance(executorId: string, formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const amount = parseBalanceAmount(formData, "amount_eur");
+  const note = String(formData.get("note") ?? "").trim() || null;
+
+  const { error } = await supabase.schema("trading").rpc("apply_executor_balance_change", {
+    p_executor_id: executorId,
+    p_kind: "deposit",
+    p_amount_eur: amount,
+    p_note: note,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/dashboard/executors");
+  revalidatePath(`/dashboard/executors/${executorId}`);
+}
+
+export async function removeExecutorBalance(executorId: string, formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const amount = parseBalanceAmount(formData, "amount_eur");
+  const note = String(formData.get("note") ?? "").trim() || null;
+
+  const { error } = await supabase.schema("trading").rpc("apply_executor_balance_change", {
+    p_executor_id: executorId,
+    p_kind: "withdrawal",
+    p_amount_eur: amount,
+    p_note: note,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/dashboard/executors");
+  revalidatePath(`/dashboard/executors/${executorId}`);
 }
 
 export async function updateExecutor(executorId: string, formData: FormData): Promise<void> {
@@ -99,18 +207,13 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
     throw new Error("Confirm live trading before enabling live mode.");
   }
 
-  const budgetRaw = String(formData.get("budget_eur") ?? "").trim();
-  const budget_eur = budgetRaw === "" ? null : Number(budgetRaw);
-  if (budget_eur != null && (!Number.isFinite(budget_eur) || budget_eur < 0)) {
-    throw new Error("Budget must be a non-negative number or empty for unlimited.");
-  }
-
   const asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
   const filter_asset_ids = parseAssetIds(formData);
   if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
     throw new Error("Pick at least one asset for whitelist or blacklist mode.");
   }
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
+  const rails = mediatorFieldsFromForm(formData);
 
   const { error } = await supabase
     .schema("trading")
@@ -119,10 +222,10 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       name,
       enabled,
       execution_mode,
-      budget_eur,
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
       updated_at: new Date().toISOString(),
+      ...rails,
     })
     .eq("id", executorId)
     .eq("user_id", user.id);

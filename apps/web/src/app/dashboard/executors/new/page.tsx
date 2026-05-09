@@ -33,7 +33,7 @@ export default async function NewExecutorPage() {
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <PageHeader
         title="New executor"
-        subtitle="Create a portfolio with its own paper/live mode, optional EUR budget, and optional asset whitelist or blacklist."
+        subtitle="Create a portfolio with its own paper/live mode, optional asset whitelist or blacklist, then add EUR balance on the executor detail page."
       />
       <Stack gap="md">
         <p className="bk-text-muted text-sm">

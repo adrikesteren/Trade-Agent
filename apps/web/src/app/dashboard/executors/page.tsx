@@ -19,7 +19,6 @@ type ExecutorListRow = {
   name: string;
   enabled: boolean;
   execution_mode: string;
-  budget_eur: string | number | null;
   asset_filter_mode: string;
 };
 
@@ -35,7 +34,7 @@ export default async function ExecutorsListPage() {
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("executors")
-    .select("id, name, enabled, execution_mode, budget_eur, asset_filter_mode, updated_at")
+    .select("id, name, enabled, execution_mode, asset_filter_mode, updated_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
@@ -48,7 +47,7 @@ export default async function ExecutorsListPage() {
         title="Executors"
         iconLetter="E"
         rowCount={list.length}
-        sortLine="Portfolios: paper/live, budget, and asset filters"
+        sortLine="Portfolios: paper/live and asset filters"
         actions={
           <Link href="/dashboard/executors/new" className={listViewOutlineActionClass}>
             New executor
@@ -64,7 +63,6 @@ export default async function ExecutorsListPage() {
                 <tr>
                   <Th>Name</Th>
                   <Th>Mode</Th>
-                  <Th>Budget (EUR)</Th>
                   <Th>Filter</Th>
                   <Th>Enabled</Th>
                   <Th />
@@ -75,11 +73,6 @@ export default async function ExecutorsListPage() {
                   <tr key={row.id}>
                     <Td className="font-medium">{row.name}</Td>
                     <Td className="font-mono">{row.execution_mode}</Td>
-                    <Td className="font-mono">
-                      {row.budget_eur === null || row.budget_eur === undefined || String(row.budget_eur).trim() === ""
-                        ? "—"
-                        : String(row.budget_eur)}
-                    </Td>
                     <Td className="font-mono">{row.asset_filter_mode}</Td>
                     <Td>{row.enabled ? "yes" : "no"}</Td>
                     <Td>
@@ -91,7 +84,7 @@ export default async function ExecutorsListPage() {
                 ))}
                 {!list.length ? (
                   <tr>
-                    <Td colSpan={6} muted className="py-8 text-center">
+                    <Td colSpan={5} muted className="py-8 text-center">
                       No executors yet.
                     </Td>
                   </tr>

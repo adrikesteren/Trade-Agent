@@ -19,11 +19,3 @@ export function executorAllowsMarketAsset(
   if (mode === "blacklist") return !ids.includes(marketAssetId);
   return false;
 }
-
-/** Returns true when a new buy would exceed a non-null finite budget cap (spot v1). */
-export function wouldExceedExecutorBudget(spentFilledEur: number, proposedNotionalEur: number, budgetEur: number | null): boolean {
-  if (budgetEur == null || !Number.isFinite(budgetEur) || budgetEur < 0) return false;
-  const spent = Number.isFinite(spentFilledEur) ? spentFilledEur : 0;
-  const prop = Number.isFinite(proposedNotionalEur) ? proposedNotionalEur : 0;
-  return spent + prop > budgetEur + 1e-9;
-}

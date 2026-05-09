@@ -12,7 +12,7 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 
 1. **Ingest** schrijft gesloten OHLCV naar `catalog.candles` (opslag-timeframe `5m` — zie `CATALOG_STORAGE_TIMEFRAME` in de webapp).
 2. **Signal agents** schrijven advies naar `trading.signals` (`intent`, `confidence`, `reasons`, …). Zij plaatsen **geen** orders.
-3. **Trade Mediator** (dit document) leest signalen + positie per **executor** (`trading.positions` op `(user_id, executor_id, market_id)`) + `trading.risk_state` (nog **user-globaal** in v1) en **upsert** één rij in `trading.trade_decisions` per `(user_id, executor_id, market_id, timeframe, close_time)`. Beslissingen zijn **zonder** `paper`-kolom; paper vs live volgt alleen uit `trading.executors.execution_mode` bij de executor.
+3. **Trade Mediator** (dit document) leest signalen + positie per **executor** (`trading.positions` op `(user_id, executor_id, market_id)`) + **`trading.risk_state` per executor** (`user_id`, `executor_id`) + **risk rails en default-notional op `trading.executors`**, en **upsert** één rij in `trading.trade_decisions` per `(user_id, executor_id, market_id, timeframe, close_time)`. Beslissingen zijn **zonder** `paper`-kolom; paper vs live volgt alleen uit `trading.executors.execution_mode` bij de executor.
 4. **Executor** leest goedgekeurde beslissingen en schrijft `orders` / `fills` ([executor-developer.md](./executor-developer.md)).
 
 ---
@@ -22,9 +22,10 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 - **Signalen lezen** voor de doel-bar: alle rijen in `trading.signals` voor dezelfde `market_id`, `timeframe` en `close_time` (tolerantie ±2s ten opzichte van `closeTimeIso` uit de worker), met join naar `trading.signal_agents` voor het `agent_id`-slug in logs/payload.
 - **Executors & filters:** alleen **enabled** rijen in `trading.executors` per gebruiker; sla markten over die niet voldoen aan whitelist/blacklist (`catalog.markets.asset_id` vs `executors.filter_asset_ids`).  
 - **Positie meenemen:** `trading.positions` voor `(user_id, executor_id, market_id)` — `quantity > 0` betekent “in positie” voor die executor.
-- **Risk state meenemen:** `trading.risk_state` voor `user_id`; `exposure_by_market` wordt voor de risk-check op **symbool** gemapt (o.a. huidige `market_id` → `market_symbol` voor `ProposedOrder.symbol` in `@repo/risk`).
+- **Risk state meenemen:** `trading.risk_state` voor **`(user_id, executor_id)`**; `exposure_by_market` wordt voor de risk-check op **symbool** gemapt (o.a. huidige `market_id` → `market_symbol` voor `ProposedOrder.symbol` in `@repo/risk`).
+- **Risk rails & notional:** typed kolommen op `trading.executors` (o.a. `max_risk_per_trade`, `daily_loss_limit_eur`, `default_notional_eur`, `allow_add`) plus optioneel **`mediator_rails_extra`** (jsonb, merge met dezelfde camelCase-keys als `@repo/risk` / `MediatorRailsConfig`). Zie [`executor-mediator-rails.ts`](../apps/web/src/lib/trading/executor-mediator-rails.ts); beheer in het dashboard onder **Executors**.
 - **Eén geaggregeerde intent** per bar volgens prioriteit (sterkste wint): **EXIT** > **REDUCE** > **ADD** > **ENTER** > **HOLD** — zie ook [asset-selection-workflow.md](./asset-selection-workflow.md) (Mediator-beslisvolgorde).
-- **Risk rails toepassen** voor nieuwe **koop**-exposure (`ENTER`, en `ADD` alleen als `allowAdd` aan staat): via `evaluateNewEntry` in `[packages/risk](../packages/risk/src/evaluate.ts)`.
+- **Risk rails toepassen** voor nieuwe **koop**-exposure (`ENTER`, en `ADD` alleen als `allow_add` op die executor aan staat): via `evaluateNewEntry` in `[packages/risk](../packages/risk/src/evaluate.ts)`.
 - **Beslissing vastleggen:** `approved`, `reason_codes`, `risk_snapshot`, `decision_payload` (o.a. `resolvedIntent`, `signalIds`, `signalsIn`, `proposedOrder` bij approve), optioneel `signal_id` naar de eerste bron-signal.
 - **Idempotentie:** upsert op unieke sleutel `(user_id, executor_id, market_id, timeframe, close_time)` (migratie `20260530120000_trading_executors.sql`; vervangt de eerdere sleutel zonder `executor_id`).
 
@@ -77,7 +78,7 @@ Zelfde **batch + QStash self-chain** als signalen: `[apps/web/src/lib/mediator/r
 
 - **Auth:** QStash-handtekening **of** `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`), zie andere workers.
 - **Body (JSON):** `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`
-- **Gedrag:** voor elke markt in de batch, elke geconfigureerde `user_id`, en elke **enabled executor** van die gebruiker (asset-filter toegepast): signalen ophalen → positie op dat executor-boek → risk → `evaluateTradeDecision` → upsert `trading.trade_decisions`.
+- **Gedrag:** voor elke markt in de batch, elke geconfigureerde `user_id`, en elke **enabled executor** van die gebruiker (asset-filter toegepast): signalen ophalen → `risk_state` voor die executor → positie op dat executor-boek → rails/notional van die executor-rij → `evaluateTradeDecision` → upsert `trading.trade_decisions`.
 
 Implementatie-entrypoints:
 
@@ -96,8 +97,7 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`                                                                                   | Voor welke gebruikers beslissingen worden weggeschreven (zelfde als signal agents).                                                 |
 | `MEDIATOR_AFTER_SIGNALS_DISABLE`                                                                                               | Zet op `1` om de mediator **niet** te starten na de signal-pass.                                                                    |
-| `MEDIATOR_RISK_RAILS_JSON`                                                                                                     | Optioneel JSON-object dat de default risk rails overschrijft (o.a. `maxRiskPerTrade`, `maxOpenPositions`, …, optioneel `allowAdd`). |
-| `MEDIATOR_DEFAULT_NOTIONAL_EUR`                                                                                                | Voorgestelde ordergrootte (EUR) vóór risk-clamp (default `100`).                                                                    |
+| ~~`MEDIATOR_RISK_RAILS_JSON`~~ / ~~`MEDIATOR_DEFAULT_NOTIONAL_EUR`~~                                                           | **Verouderd** — rails en default-notional staan op **`trading.executors`** (dashboard **Executors**).                               |
 | `SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE`, `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` | Zelfde batch-limieten als de signal-worker.                                                                                         |
 
 
@@ -113,7 +113,7 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 ## Troubleshooting
 
 - **Geen rijen in `trading.trade_decisions`:** controleer `SIGNAL_`* env, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, of er minstens één **enabled** `trading.executors`-rij is voor die gebruiker, en of migraties t/m `20260530120000_trading_executors.sql` zijn toegepast (unique met `executor_id`).
-- **Alleen denied beslissingen met `non_positive_equity`:** vaak ontbreekt een rij in `trading.risk_state` voor die gebruiker — vul realistische `equity_eur` e.d. of seed defaults.
+- **Alleen denied beslissingen met `non_positive_equity` / `invalid_notional`:** controleer `trading.risk_state` voor **die executor** (`equity_eur` > 0) en `default_notional_eur` / `max_risk_per_trade` op `trading.executors`.
 - **Upsert-fouten op unique:** `onConflict` moet overeenkomen met `(user_id, executor_id, market_id, timeframe, close_time)`.
 
 ---
@@ -126,4 +126,4 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 
 ---
 
-*Laatste update: Trade Mediator stap 3 — worker + `@repo/trading`.*
+*Laatste update: Mediator rails + `risk_state` per executor; env `MEDIATOR_RISK_RAILS_JSON` / `MEDIATOR_DEFAULT_NOTIONAL_EUR` vervallen.*

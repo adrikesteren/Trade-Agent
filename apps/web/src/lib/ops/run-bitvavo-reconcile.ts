@@ -8,6 +8,7 @@ import { fetchBitvavoOrder } from "@/lib/bitvavo/fetch-bitvavo-order";
 import { bitvavoPrivateEnv } from "@/lib/bitvavo/signed-request";
 import { mergeBuyPositionAvg } from "@/lib/executor/paper-fill";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/trading/executor-wallet";
 
 function batchSize(): number {
   const n = Number(process.env.BITVAVO_RECONCILE_BATCH ?? 40);
@@ -37,6 +38,7 @@ type OrderRow = {
   market_id: string;
   external_id: string;
   status: string;
+  side: string;
   notional_eur: string | number | null;
   quantity: string | number | null;
 };
@@ -114,7 +116,7 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     const { data: ordRows, error: ordErr } = await admin
       .schema("trading")
       .from("orders")
-      .select("id, user_id, executor_id, market_id, external_id, status, notional_eur, quantity")
+      .select("id, user_id, executor_id, market_id, external_id, status, notional_eur, quantity, side")
       .eq("paper", false)
       .in("status", ["pending", "open"])
       .not("external_id", "is", null)
@@ -226,6 +228,22 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
               addQty: fillQty,
               price: fillPrice,
             });
+            if (String(o.side) === "buy") {
+              const notional = Number(o.notional_eur ?? 0);
+              const actualFee = Number.isFinite(fillFee) ? fillFee : 0;
+              try {
+                await applyExecutorTradeBuyDebit(admin, {
+                  userId: o.user_id,
+                  executorId: o.executor_id,
+                  orderId: o.id,
+                  debitEur: tradeBuyDebitEur(notional, actualFee),
+                });
+              } catch (ledgerErr) {
+                errors.push(
+                  `order ${o.id}: ledger debit: ${ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr)}`,
+                );
+              }
+            }
           }
         }
 

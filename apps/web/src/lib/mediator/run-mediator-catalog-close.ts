@@ -2,7 +2,7 @@ import "server-only";
 
 import { Client } from "@upstash/qstash";
 
-import { evaluateTradeDecision, type MediatorRailsConfig, type SignalIntent } from "@repo/trading";
+import { evaluateTradeDecision, type SignalIntent } from "@repo/trading";
 import type { RiskStateSnapshot } from "@repo/risk";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
@@ -10,8 +10,10 @@ import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { enqueueExecutorCatalogCloseAfterMediator } from "@/lib/executor/enqueue-executor-catalog-close";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
+import { defaultNotionalFromExecutor, executorToMediatorRails } from "@/lib/trading/executor-mediator-rails";
 import {
   ensureDefaultExecutorsForUsers,
+  ensureRiskStateForExecutor,
   executorAllowsMarketAsset,
   fetchExecutorsForUsers,
   fetchMarketAssetIds,
@@ -49,35 +51,6 @@ function maxTotalMarkets(): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.floor(n);
-}
-
-function defaultRails(): MediatorRailsConfig {
-  return {
-    maxRiskPerTrade: 0.05,
-    maxOpenPositions: 5,
-    maxExposurePerSymbolEur: 500,
-    dailyLossLimitEur: 100,
-    maxDrawdownEur: 500,
-    cooldownAfterLosses: 3,
-    allowAdd: false,
-  };
-}
-
-function mediatorRailsFromEnv(): MediatorRailsConfig {
-  const raw = process.env.MEDIATOR_RISK_RAILS_JSON?.trim();
-  if (!raw) return defaultRails();
-  try {
-    const o = JSON.parse(raw) as Partial<MediatorRailsConfig>;
-    return { ...defaultRails(), ...o };
-  } catch {
-    return defaultRails();
-  }
-}
-
-function defaultNotionalEur(): number {
-  const n = Number(process.env.MEDIATOR_DEFAULT_NOTIONAL_EUR ?? 100);
-  if (!Number.isFinite(n) || n <= 0) return 100;
-  return n;
 }
 
 function buildRiskSnapshot(
@@ -202,8 +175,6 @@ export async function runMediatorCatalogClose(
     };
   }
 
-  const rails = mediatorRailsFromEnv();
-  const notionalSuggested = defaultNotionalEur();
   const t = Date.parse(closeTimeIso);
   const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
   const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
@@ -218,6 +189,10 @@ export async function runMediatorCatalogClose(
     executorsByUser.set(ex.user_id, cur);
   }
 
+  for (const ex of executorRows) {
+    await ensureRiskStateForExecutor(admin, { userId: ex.user_id, executorId: ex.id });
+  }
+
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
 
@@ -229,16 +204,6 @@ export async function runMediatorCatalogClose(
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
     for (const userId of userIds) {
-      const { data: riskUser, error: riskUserErr } = await admin
-        .schema("trading")
-        .from("risk_state")
-        .select("equity_eur, open_position_count, exposure_by_market, daily_pnl_eur, max_drawdown_eur, consecutive_losses, kill_switch")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (riskUserErr) throw new Error(riskUserErr.message);
-      const riskSnap = buildRiskSnapshot(riskUser ?? {}, marketId, marketSymbol);
-
       const { data: sigData, error: sigErr } = await admin
         .schema("trading")
         .from("signals")
@@ -257,6 +222,19 @@ export async function runMediatorCatalogClose(
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
       for (const ex of executors) {
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
+
+        const { data: riskEx, error: riskExErr } = await admin
+          .schema("trading")
+          .from("risk_state")
+          .select("equity_eur, open_position_count, exposure_by_market, daily_pnl_eur, max_drawdown_eur, consecutive_losses, kill_switch")
+          .eq("user_id", userId)
+          .eq("executor_id", ex.id)
+          .maybeSingle();
+
+        if (riskExErr) throw new Error(riskExErr.message);
+        const riskSnap = buildRiskSnapshot(riskEx ?? {}, marketId, marketSymbol);
+        const rails = executorToMediatorRails(ex);
+        const notionalSuggested = defaultNotionalFromExecutor(ex);
 
         const { data: posRow, error: posErr } = await admin
           .schema("trading")

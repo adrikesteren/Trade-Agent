@@ -18,12 +18,20 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 ---
 
-## Executors (portfolios, Paper / Live, budget, asset filter)
+## Executors (portfolios, Paper / Live, asset filter)
 
-- **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live`), optional **`budget_eur`** (cap on cumulative **filled buy** `orders.notional_eur` for that executor), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array.  
+- **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live`), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array. **Mediator policy** on the same row: `default_notional_eur`, risk rail columns (`max_risk_per_trade`, `max_open_positions`, …, `allow_add`), and optional **`mediator_rails_extra`** jsonb — see [mediator-developer.md](./mediator-developer.md). (Legacy column **`budget_eur`** may still exist in the database but is no longer used by the app; spending is limited by **assigned balance** in `risk_state.equity_eur`.)  
 - Dashboard: **Trading → Executors** → [`/dashboard/executors`](../apps/web/src/app/dashboard/executors/page.tsx) (detail + PnL snapshot per executor). Legacy **`/dashboard/settings/execution`** redirects here.  
 - The **mediator** loads **enabled** executors per `SIGNAL_*` user, skips markets outside the executor’s asset filter (via `catalog.markets.asset_id`), reads **`positions`** for `(user_id, executor_id, market_id)`, and writes **mode-agnostic** decisions (`trade_decisions` has no `paper` column).  
 - **Live Bitvavo keys** are **not** in the database: use server env `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` (and optional `BITVAVO_OPERATOR_ID`, default `1`). See [apps/web/README.md](../apps/web/README.md).
+
+---
+
+## Executor balance (EUR) — assigned capital
+
+- **`trading.risk_state.equity_eur`** (per `executor_id`) is the **only in-app spendable balance** for that executor: it starts at **0** when `risk_state` is created; users add or remove EUR on the executor detail page (**Add balance** / **Remove balance**), which calls `trading.apply_executor_balance_change` and appends rows to **`trading.executor_balance_ledger`**.
+- **Buys** debit **`notional_eur + fill fee`** from `equity_eur` and append a **`trade_buy`** ledger row (idempotent per `orders.id` via `trading.apply_executor_trade_buy_debit`, **service_role** only). The executor worker **skips** a paper buy (or inserts a **rejected** live stub without calling Bitvavo) when `equity_eur` is below that debit. This balance is **not** your Bitvavo account total — it is only what you assign inside Trade Agent.
+- **New executors** created from the dashboard default to **`enabled = false`** until the user turns them on (DB default on `executors.enabled` is also `false` after the balance migration).
 
 ---
 
@@ -36,9 +44,9 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 **Behaviour (v1):**
 
 - For each configured `user_id`, each **enabled** executor, and each market in the batch: skip if the market’s base **`asset_id`** is excluded by the executor’s whitelist/blacklist; load the `trade_decision` for `(user_id, executor_id, market_id, timeframe, close_time)`.  
-- If `approved`, payload has a **buy** `proposedOrder`, optional **budget** still allows the trade (`filled` notional sum + proposed ≤ `budget_eur` when set), and there is **no** `orders` row for that `decision_id` yet (partial unique index on `decision_id`):  
-  - **Paper executor (`executors.execution_mode = paper`):** use catalog candle **close** at that bar as fill price; insert `orders` (`status=filled`, `executor_id`), one `fills` row, upsert `positions` for `(user_id, executor_id, market_id)` with `orders.paper` / `positions.paper` true.  
-  - **Live executor:** `POST /v2/order` (market buy with `amountQuote` = EUR notional). On success insert `orders` with `executor_id` and `external_id`; if Bitvavo returns `filled` and fill data, insert `fills` and update `positions` with `paper=false`. On failure insert `orders` with `status=rejected` (best-effort; duplicate errors ignored).
+- If `approved`, payload has a **buy** `proposedOrder`, **`risk_state.equity_eur`** is at least **notional + estimated paper fee** (0.25% of notional for the pre-check on live), and there is **no** `orders` row for that `decision_id` yet (partial unique index on `decision_id`):  
+  - **Paper executor (`executors.execution_mode = paper`):** use catalog candle **close** at that bar as fill price; insert `orders` (`status=filled`, `executor_id`), one `fills` row, upsert `positions` for `(user_id, executor_id, market_id)` with `orders.paper` / `positions.paper` true; then debit balance + ledger via `apply_executor_trade_buy_debit` (rollback order/fill/position if that debit fails).  
+  - **Live executor:** if balance pre-check fails, insert `orders` with `status=rejected` and skip Bitvavo. Otherwise `POST /v2/order` (market buy with `amountQuote` = EUR notional). On success insert `orders` with `executor_id` and `external_id`; if Bitvavo returns `filled` and fill data, insert `fills` and update `positions` with `paper=false`, then debit `notional + actual fee`. On failure insert `orders` with `status=rejected` (best-effort; duplicate errors ignored).
 
 Entry points:
 
@@ -59,8 +67,8 @@ Entry points:
 
 - **No** new trading decisions from the executor.  
 - **No** unsigned `user_id` — workers use env-configured users only.  
-- **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled + Redis lock) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). Edge cases (partial fills, drift) may still need policy hardening.
+- **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled + Redis lock) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). When a **filled** buy gets its first `fills` row here, the same **`apply_executor_trade_buy_debit`** runs so balance stays in sync for late-filled live orders.
 
 ---
 
-*Last updated: Executor step 4 + multi-executor portfolios (`trading.executors`).*
+*Last updated: Executor balance + ledger (`executor_balance_ledger`, `risk_state.equity_eur`, RPCs).*

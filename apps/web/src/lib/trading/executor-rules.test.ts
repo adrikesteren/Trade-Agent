@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { executorAllowsMarketAsset, wouldExceedExecutorBudget } from "./executor-rules";
+import { executorAllowsMarketAsset } from "./executor-rules";
 
 describe("executorAllowsMarketAsset", () => {
   const btc = "00000000-0000-0000-0000-000000000001";
@@ -32,17 +32,5 @@ describe("executorAllowsMarketAsset", () => {
     expect(executorAllowsMarketAsset({ asset_filter_mode: "whitelist", filter_asset_ids: [btc] }, null)).toBe(
       false,
     );
-  });
-});
-
-describe("wouldExceedExecutorBudget", () => {
-  it("never blocks when cap is null", () => {
-    expect(wouldExceedExecutorBudget(1e9, 1e9, null)).toBe(false);
-  });
-
-  it("blocks when sum exceeds cap", () => {
-    expect(wouldExceedExecutorBudget(60, 50, 100)).toBe(true);
-    expect(wouldExceedExecutorBudget(60, 40, 100)).toBe(false);
-    expect(wouldExceedExecutorBudget(100, 0, 100)).toBe(false);
   });
 });
