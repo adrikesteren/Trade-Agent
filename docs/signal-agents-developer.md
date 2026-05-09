@@ -1,0 +1,122 @@
+# Signal agents — developer & AI agent guide
+
+This document describes **what a Signal Agent is in this repo**, what it **must** and **must not** do, how it is **triggered**, and how to **add** or **debug** one. It complements the product-level role split in [how-we-use-agents.md](./how-we-use-agents.md).
+
+Audience: human developers and **Cursor / automation agents** editing this codebase.
+
+---
+
+## Role in the pipeline
+
+1. **Ingest** writes closed OHLCV to `catalog.candles` (catalog storage timeframe: `5m` — see `CATALOG_STORAGE_TIMEFRAME` in the web app).
+2. **Signal agents** (this document) read that data and append **advice** to `trading.signals` (`intent`, `confidence`, `reasons`, …). They **never** place orders.
+3. **Trade Mediator** (future step) reads signals + portfolio/risk and writes `trade_decisions`.
+4. **Executor** executes approved decisions.
+
+Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer** identified by `agent_id`.
+
+---
+
+## Tasks a Signal Agent **must** perform
+
+- **Read market history** for a `(market_id, timeframe)` from `catalog.candles`, joined to `catalog.candle_timestamps` for `close_time`, with enough bars for the rule (e.g. slow MA length).
+- **Evaluate** the rule set for the **target closed bar** (`close_time` / `closeTimeIso` passed by the worker).
+- **Write** at most one row per `(user_id, agent_id, market_id, timeframe, close_time)` into `trading.signals`, using **upsert** so reruns are idempotent.
+- **Populate**:
+  - `intent`: `trading.signal_intent` enum (`ENTER`, `ADD`, `REDUCE`, `EXIT`, `HOLD`).
+  - `reasons`: JSON **array of short strings** (audit / debugging).
+  - `metadata`: JSON object (rule version, indicator snapshots, optional `candleSyncRunId` from the candle sweep).
+  - `candle_id`: strongly recommended — FK to the `catalog.candles` row for the evaluated bar.
+- **Register** the agent in `trading.signal_agents` (migration seed or ops insert) before writing signals — `agent_id` is an FK from `trading.signals`.
+
+---
+
+## Boundaries (must **not** do)
+
+- **No orders** — no Bitvavo order placement, no `trading.orders` / `trading.fills` writes from signal code.
+- **No mediator** — do not write `trade_decisions` from a signal agent.
+- **No untrusted `user_id`** — workers use the Supabase **service role** and must take `user_id` only from **server-trusted configuration** (`SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`). Never copy `user_id` from unsigned client JSON. See [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
+- **`ADD` / `REDUCE` / `EXIT` without position context** — v1 rule agents should stick to **`ENTER` vs `HOLD`** until positions and mediator policy exist; emitting exit-style intents without position awareness creates noisy or misleading advice.
+
+---
+
+## Data contract (`trading.signals`)
+
+| Column | Required | Notes |
+| --- | --- | --- |
+| `user_id` | yes | Trusted env UUID(s); RLS for `authenticated` users still applies to dashboard reads. |
+| `agent_id` | yes | Must exist in `trading.signal_agents`. |
+| `market_id` | yes | `catalog.markets.id`. |
+| `timeframe` | yes | Must match the evaluated series (catalog `5m` in v1). |
+| `close_time` | yes | Bar close instant; keep consistent with `candle_timestamps.close_time`. |
+| `intent` | yes | Enum literal as string in JS. |
+| `confidence` | optional | Numeric or `null`. |
+| `reasons` | yes | JSON array (may be `[]`). |
+| `metadata` | yes | JSON object (may be `{}`). |
+| `candle_id` | recommended | `catalog.candles.id` for the evaluated bar. |
+
+Unique constraint (multi-tenant): `(user_id, agent_id, market_id, timeframe, close_time)` — see migration `20260526120000_signals_unique_user_seed_agent.sql`.
+
+---
+
+## When signal runs are triggered
+
+- **Primary path**: after a **successful** Bitvavo **EUR** candle sweep completes in **incremental** mode for the **catalog storage timeframe** (`5m`), `runEurCandleSweep` calls `enqueueSignalsCatalogCloseAfterIncremental` with the incremental bar’s `closeTimeIso`.
+- **Not by default** on huge **full / window** candle backfills — avoids inserting signals for every historical bar. A dedicated “backfill signals” job could be added later with an explicit limit.
+- **Opt-out**: set `SIGNALS_AFTER_CANDLE_DISABLE=1`.
+- **No-op** if neither `SIGNAL_DEFAULT_USER_ID` nor `SIGNAL_USER_IDS` is set — the worker returns `skippedReason: no_signal_user_ids`.
+
+---
+
+## Worker: `POST /api/workers/signals-catalog-close`
+
+- **Auth**: same as other workers — QStash signature **or** `Authorization: Bearer ${CRON_SECRET}` (see `verifyScheduledWorker`).
+- **Body** (JSON): `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`.
+- **Behaviour**: loads enabled rows from `trading.signal_agents`, processes a **batch** of Bitvavo EUR markets (RPC `bitvavo_markets_for_candle_sync_slice`), upserts signals. When `QSTASH_TOKEN` + public base URL exist, **self-chains** to the next `marketOffset` (same pattern as `bitvavo-candles-sync`).
+- **Localhost without QStash**: `enqueueSignalsCatalogCloseAfterIncremental` runs `runSignalsCatalogCloseDrain`, which loops batches **in-process** with `allowQStashSelfQueue: false` to avoid double-queueing.
+
+Implementation entry points:
+
+- [`apps/web/src/lib/signals/run-signals-catalog-close.ts`](../apps/web/src/lib/signals/run-signals-catalog-close.ts)
+- [`apps/web/src/lib/signals/enqueue-signals-catalog-close.ts`](../apps/web/src/lib/signals/enqueue-signals-catalog-close.ts)
+- [`apps/web/src/app/api/workers/signals-catalog-close/route.ts`](../apps/web/src/app/api/workers/signals-catalog-close/route.ts)
+
+---
+
+## Built-in agent: `ma-cross-5m-v1`
+
+- **Type**: rule-based — simple moving averages on **closes**; **ENTER** on bullish crossover at the target bar, else **HOLD**.
+- **Config** (`trading.signal_agents.config` JSON): `fastPeriod` (default `9`), `slowPeriod` (default `21`).
+- **Code**: [`apps/web/src/lib/signals/ma-cross-eval.ts`](../apps/web/src/lib/signals/ma-cross-eval.ts) (pure functions + unit tests).
+
+To add another `agent_id`, implement an evaluator, register the row in `signal_agents`, and extend the worker’s agent dispatch loop (today only `ma-cross-5m-v1` is wired).
+
+---
+
+## Environment variables (summary)
+
+See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table. Minimum to get rows after incremental candle sync:
+
+1. `SIGNAL_DEFAULT_USER_ID=<your auth.users uuid>`
+2. `CRON_SECRET` / QStash keys as for other workers if you invoke manually or via QStash.
+
+---
+
+## Troubleshooting
+
+- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm candle sweep was **incremental** EUR `5m` and completed (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-5m-v1`.
+- **Upsert errors on unique**: ensure migration `20260526120000_signals_unique_user_seed_agent.sql` applied; `onConflict` must match `(user_id, agent_id, market_id, timeframe, close_time)`.
+- **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or rely on QStash self-chaining with a public `APP_BASE_URL`.
+
+---
+
+## Instructions for AI coding agents (Cursor)
+
+- Respect **RLS worker rules**: service role writes are allowed, but **scope `user_id` from env only**.
+- Do **not** place orders or write `trade_decisions` in signal-agent tasks (step 2 scope).
+- When changing indicator logic, **update or add unit tests** under `apps/web/src/lib/signals/*.test.ts` and run `pnpm --filter web test` from the repo root.
+- Prefer **deterministic** rule code for v1; avoid hidden randomness.
+
+---
+
+*Last updated: Signal Agent step 2 implementation.*

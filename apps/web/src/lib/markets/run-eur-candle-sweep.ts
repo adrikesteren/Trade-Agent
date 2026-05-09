@@ -22,6 +22,7 @@ import {
   type CandleSyncMode,
   type SyncCandlesChunkOptions,
 } from "@/lib/markets/sync-bitvavo-candles-chunk";
+import { enqueueSignalsCatalogCloseAfterIncremental } from "@/lib/signals/enqueue-signals-catalog-close";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type EurCandleSweepBody = {
@@ -435,6 +436,22 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       });
     } catch {
       /* non-fatal */
+    }
+
+    if (
+      timeframe === CATALOG_STORAGE_TIMEFRAME &&
+      chunkTiming.syncMode === "incremental" &&
+      chunkTiming.targetCloseTimeIso
+    ) {
+      try {
+        await enqueueSignalsCatalogCloseAfterIncremental({
+          closeTimeIso: chunkTiming.targetCloseTimeIso,
+          timeframe,
+          candleSyncRunId: syncRunId,
+        });
+      } catch (e) {
+        console.error("enqueueSignalsCatalogCloseAfterIncremental failed:", e);
+      }
     }
   }
 

@@ -20,17 +20,19 @@ export default async function DashboardLayout({
   }
 
   return (
-    <AppShell>
-      <AppHeader
-        brand={
-          <Link href="/dashboard" className="bk-app-header_brand">
-            Trade Agent
-          </Link>
-        }
-        nav={<DashboardSchemaNav />}
-        actions={<SignOutButton />}
-      />
-      <AppMain>{children}</AppMain>
-    </AppShell>
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
+      <AppShell className="min-h-0 flex-1 overflow-hidden">
+        <AppHeader
+          brand={
+            <Link href="/dashboard" className="bk-app-header_brand">
+              Trade Agent
+            </Link>
+          }
+          nav={<DashboardSchemaNav />}
+          actions={<SignOutButton />}
+        />
+        <AppMain>{children}</AppMain>
+      </AppShell>
+    </div>
   );
 }

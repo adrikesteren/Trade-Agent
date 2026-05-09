@@ -233,6 +233,7 @@ Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder mod
 ## Gerelateerde documenten
 
 - `trading-platform-project-brief.md` — totale projectcontext en stack (Next.js, Expo, Supabase, Upstash).
+- [`signal-agents-developer.md`](./signal-agents-developer.md) — taken, grenzen, triggers en DB-contract voor **Signal agents** (implementatie + AI-agent-instructies).
 
 ---
 
