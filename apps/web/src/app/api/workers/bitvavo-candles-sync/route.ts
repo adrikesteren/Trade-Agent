@@ -4,6 +4,7 @@ import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   recordBitvavoSyncFailed,
 } from "@/lib/markets/record-bitvavo-sync-status";
+import { sendOpsAlert } from "@/lib/ops/send-ops-alert";
 import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/markets/run-eur-candle-sweep";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
@@ -84,6 +85,13 @@ export async function POST(request: Request) {
       /* non-fatal */
     }
     const message = e instanceof Error ? e.message : "sync failed";
+    await sendOpsAlert({
+      source: "bitvavo-candles-sync",
+      level: "error",
+      title: "Bitvavo EUR candle sweep failed",
+      detail: message,
+      at: new Date().toISOString(),
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

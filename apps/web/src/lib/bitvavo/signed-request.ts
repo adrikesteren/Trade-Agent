@@ -38,3 +38,23 @@ export async function bitvavoPrivatePost(requestPath: string, bodyObj: Record<st
     body,
   });
 }
+
+/**
+ * GET with signed path. `requestPath` must be the path **including** query string as used in the URL
+ * (e.g. `/v2/order?market=BTC-EUR&orderId=...`), matching Bitvavo signing rules.
+ */
+export async function bitvavoPrivateGet(requestPath: string): Promise<Response> {
+  const { key, secret } = bitvavoPrivateEnv();
+  const body = "";
+  const timestamp = Date.now();
+  const sig = bitvavoSign(secret, timestamp, "GET", requestPath, body);
+
+  return fetch(`${BASE}${requestPath}`, {
+    method: "GET",
+    headers: {
+      "Bitvavo-Access-Key": key,
+      "Bitvavo-Access-Signature": sig,
+      "Bitvavo-Access-Timestamp": String(timestamp),
+    },
+  });
+}

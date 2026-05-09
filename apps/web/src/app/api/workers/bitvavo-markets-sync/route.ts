@@ -1,7 +1,8 @@
 import { Client } from "@upstash/qstash";
 import { NextResponse } from "next/server";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/markets/run-bitvavo-markets-eur-sync-with-sync-run";
+import { sendOpsAlert } from "@/lib/ops/send-ops-alert";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
@@ -56,6 +57,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const message = e instanceof Error ? e.message : "sync failed";
+    await sendOpsAlert({
+      source: "bitvavo-markets-sync",
+      level: "error",
+      title: "Bitvavo markets EUR sync failed",
+      detail: message,
+      at: new Date().toISOString(),
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

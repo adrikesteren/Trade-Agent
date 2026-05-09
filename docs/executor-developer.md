@@ -12,7 +12,7 @@ Audience: human developers and automation agents editing this repo.
 2. Signal agents → `trading.signals`  
 3. Trade Mediator → `trading.trade_decisions` (one row per **enabled executor** per market/bar; mode-agnostic — paper vs live is only `trading.executors.execution_mode` at order time)  
 4. **Executor** (this document) → `trading.orders` (+ `fills`, `positions`) keyed by `executor_id`  
-5. Ops / reconciliation (future hardening)
+5. **Ops / scheduler** — QStash schedules, optional Redis, live **reconcile** vs Bitvavo, daily risk reset, optional alerts. See [ops-developer.md](./ops-developer.md). (In [how-we-use-agents.md](./how-we-use-agents.md) FAQ table, “stap 5” means executor; the **Rollen** list uses step 5 for Ops — both docs now cross-link.)
 
 The executor **does not** re-run risk logic; it only executes what the mediator already approved (`approved = true` and a `proposedOrder` in `decision_payload`).
 
@@ -59,7 +59,7 @@ Entry points:
 
 - **No** new trading decisions from the executor.  
 - **No** unsigned `user_id` — workers use env-configured users only.  
-- **Reconciliation** of open live orders is not fully implemented; expect a follow-up job for drift and partial fills.
+- **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled + Redis lock) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). Edge cases (partial fills, drift) may still need policy hardening.
 
 ---
 

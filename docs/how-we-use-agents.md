@@ -97,6 +97,8 @@ Geen strategie, geen risk-beslissing — alleen **betrouwbare uitvoering**.
 - **Redis:** locks, idempotency (“deze candle al verwerkt”), rate limits.
 - Alerts bij fouten of kill switch.
 
+**Implementatie in deze repo:** zie [ops-developer.md](./ops-developer.md) (managed QStash-schedules, `risk-daily-reset`, `bitvavo-reconcile`, Redis-lock op reconcile, optionele `OPS_ALERT_WEBHOOK_URL`).
+
 ---
 
 ## Expliciete signalen (aanbevolen)
@@ -216,6 +218,7 @@ De **mediator** hoeft niet te weten welk model je gebruikte; die ziet alleen het
 
 Als je de pipeline nummeren zoals in dit document (**ingest → signal agents → mediator → executor → ops**), kun je **per stap** bepalen hoe zwaar de logica is:
 
+**Let op:** deze tabel gebruikt **vijf stappen zonder aparte “Ops”-rij** — “stap 5” hieronder is de **executor (orders)**. De **hoofdlijst “Rollen in het systeem”** hierboven heeft **stap 5 = Ops / scheduler**; dat is bewust een andere nummering. Zie [ops-developer.md](./ops-developer.md) voor Ops.
 
 | Stap              | Rol                                                                  | Suggestie “eenvoudig vs advanced”                                                                                                    |
 | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -224,7 +227,6 @@ Als je de pipeline nummeren zoals in dit document (**ingest → signal agents �
 | 3 Mediator        | Beslissen                                                            | **Meestal rules** (zoals in de tabel “Waar AI past”).                                                                                |
 | 4 (jouw “stap 4”) | Bijv. één **research / context**-agent vóór of naast andere signalen | Hier zou je **één** zwaarder LLM-agent kunnen zetten — strikt **JSON output + guardrails**, en de mediator blijft de echte go/no-go. |
 | 5 Executor        | Orders                                                               | **Geen AI**.                                                                                                                         |
-
 
 Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder model toe in config; de andere `agent_id`s blijven rules of goedkope modellen. De mediator-policy bepaalt of dat zware signaal überhaupt meetelt (gewicht, veto, consensus).
 
@@ -236,6 +238,7 @@ Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder mod
 - `[signal-agents-developer.md](./signal-agents-developer.md)` — taken, grenzen, triggers en DB-contract voor **Signal agents** (implementatie + AI-agent-instructies).
 - `[mediator-developer.md](./mediator-developer.md)` — taken, grenzen, triggers en gebruik van de **Trade Mediator** (beslissingen in `trade_decisions`).
 - `[executor-developer.md](./executor-developer.md)` — **Trade Executor**: orders/fills, paper/live, Bitvavo private API.
+- `[ops-developer.md](./ops-developer.md)` — **Ops / scheduler (stap 5 in de rollenlijst)**: QStash-jobs, Redis, reconcile, risk-daily-reset, alerts.
 
 ---
 

@@ -102,3 +102,28 @@ curl -sS -X POST "http://localhost:3000/api/workers/executor-catalog-close" ^
   -H "Content-Type: application/json" ^
   -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
 ```
+
+## Ops / scheduler (QStash, Redis, alerts)
+
+Background jobs for **daily risk reset** and **live order reconciliation**, plus optional **Upstash Redis** and a **failure webhook**. See [docs/ops-developer.md](../../docs/ops-developer.md).
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional | Distributed lock for `bitvavo-reconcile` (`@repo/redis`). If unset, reconcile still runs without a lock. |
+| `OPS_ALERT_WEBHOOK_URL` | Optional | `POST` JSON on hard failures (e.g. candle/markets sync throws, risk reset throws, reconcile throws). |
+| `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
+| `BITVAVO_RECONCILE_LOCK_TTL_MS` | Optional | Redis lock TTL for reconcile (default 9 minutes). |
+| `QSTASH_CRON_RISK_DAILY_RESET` | Optional | UTC cron for `risk-daily-reset` (script default `0 0 * * *`). |
+| `QSTASH_CRON_BITVAVO_RECONCILE` | Optional | UTC cron for reconcile (defaults to `QSTASH_DEFAULT_CRON` / five-minute cron). |
+
+Managed schedules (including the two above): from `apps/web` run `pnpm qstash:schedules` (requires `QSTASH_TOKEN` and public **https** `APP_BASE_URL` / `NEXT_PUBLIC_APP_URL`).
+
+Manual worker calls (dev):
+
+```bash
+curl -sS -X POST "http://localhost:3000/api/workers/risk-daily-reset" ^
+  -H "Authorization: Bearer %CRON_SECRET%"
+
+curl -sS -X POST "http://localhost:3000/api/workers/bitvavo-reconcile" ^
+  -H "Authorization: Bearer %CRON_SECRET%"
+```

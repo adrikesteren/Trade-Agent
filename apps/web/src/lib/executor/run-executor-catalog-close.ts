@@ -3,6 +3,7 @@ import "server-only";
 import { Client } from "@upstash/qstash";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
 import { placeBitvavoMarketBuyQuote } from "@/lib/bitvavo/place-market-order";
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
@@ -98,15 +99,6 @@ function parseProposedBuy(payload: Record<string, unknown> | null): { symbol: st
   const n = Number(o.notionalEur);
   if (!sym || !Number.isFinite(n) || n <= 0) return null;
   return { symbol: sym, notionalEur: n };
-}
-
-function bitvavoStatusToDbOrderStatus(
-  s: string,
-): "pending" | "open" | "filled" | "cancelled" | "rejected" {
-  if (s === "filled") return "filled";
-  if (s === "new" || s === "partiallyFilled") return "open";
-  if (s === "canceled" || s === "cancelled" || s === "expired") return "cancelled";
-  return "open";
 }
 
 type DecisionRow = {
@@ -396,7 +388,7 @@ export async function runExecutorCatalogClose(
             amountQuoteEur: notionalEur,
             clientOrderId: dec.id,
           });
-          const dbStatus = bitvavoStatusToDbOrderStatus(live.status);
+          const dbStatus = mapBitvavoOrderStatusToDb(live.status);
           const { data: insLive, error: insLiveErr } = await admin
             .schema("trading")
             .from("orders")

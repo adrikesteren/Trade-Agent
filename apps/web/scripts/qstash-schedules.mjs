@@ -17,6 +17,7 @@
  * Override per job or globally:
  *   QSTASH_DEFAULT_CRON — if unset, the script uses a five-minute UTC cron (see `defaultCron()`).
  *   QSTASH_CRON_BITVAVO_CANDLES, QSTASH_CRON_BITVAVO_MARKETS, QSTASH_CRON_COINGECKO_METRICS, QSTASH_CRON_COINGECKO_COIN_ID
+ *   QSTASH_CRON_RISK_DAILY_RESET (default `0 0 * * *` UTC), QSTASH_CRON_BITVAVO_RECONCILE (defaults to QSTASH_DEFAULT_CRON)
  *   Jobs without QSTASH_DEFAULT_CRON use their own fallback (e.g. markets & coingecko-coin-id = hourly UTC).
  *
  * Each schedule uses a stable `scheduleId` so re-running **upsert** updates the same schedule.
@@ -85,6 +86,19 @@ const MANAGED = [
     label: "trade-agent.coingecko-coin-id",
     cronEnv: "QSTASH_CRON_COINGECKO_COIN_ID",
     fallbackCron: "0 * * * *",
+  },
+  {
+    scheduleId: "trade-agent-risk-daily-reset",
+    path: "/api/workers/risk-daily-reset",
+    label: "trade-agent.risk-daily-reset",
+    cronEnv: "QSTASH_CRON_RISK_DAILY_RESET",
+    fallbackCron: "0 0 * * *",
+  },
+  {
+    scheduleId: "trade-agent-bitvavo-reconcile",
+    path: "/api/workers/bitvavo-reconcile",
+    label: "trade-agent.bitvavo-reconcile",
+    cronEnv: "QSTASH_CRON_BITVAVO_RECONCILE",
   },
 ];
 
