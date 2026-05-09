@@ -23,6 +23,7 @@ import {
   type SyncCandlesChunkOptions,
 } from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { enqueueSignalsCatalogCloseAfterIncremental } from "@/lib/signals/enqueue-signals-catalog-close";
+import { resolveLatestCatalogCandleCloseIso } from "@/lib/signals/resolve-latest-catalog-close-for-signals";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type EurCandleSweepBody = {
@@ -438,14 +439,23 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       /* non-fatal */
     }
 
-    if (
+    /** Signal run: incremental uses the bar being synced; full/window uses latest global catalog close (same 5m grid). */
+    const signalCloseIso =
+      chunkTiming.syncMode === "incremental" && chunkTiming.targetCloseTimeIso
+        ? chunkTiming.targetCloseTimeIso
+        : timeframe === CATALOG_STORAGE_TIMEFRAME
+          ? await resolveLatestCatalogCandleCloseIso(admin)
+          : null;
+
+    const shouldEnqueueSignals =
       timeframe === CATALOG_STORAGE_TIMEFRAME &&
-      chunkTiming.syncMode === "incremental" &&
-      chunkTiming.targetCloseTimeIso
-    ) {
+      Boolean(signalCloseIso) &&
+      (candleRowsUpserted > 0 || chunkTiming.syncMode === "incremental");
+
+    if (shouldEnqueueSignals && signalCloseIso) {
       try {
         await enqueueSignalsCatalogCloseAfterIncremental({
-          closeTimeIso: chunkTiming.targetCloseTimeIso,
+          closeTimeIso: signalCloseIso,
           timeframe,
           candleSyncRunId: syncRunId,
         });

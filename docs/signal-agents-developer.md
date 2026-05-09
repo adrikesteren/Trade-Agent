@@ -61,8 +61,10 @@ Unique constraint (multi-tenant): `(user_id, agent_id, market_id, timeframe, clo
 
 ## When signal runs are triggered
 
-- **Primary path**: after a **successful** Bitvavo **EUR** candle sweep completes in **incremental** mode for the **catalog storage timeframe** (`5m`), `runEurCandleSweep` calls `enqueueSignalsCatalogCloseAfterIncremental` with the incremental bar’s `closeTimeIso`.
-- **Not by default** on huge **full / window** candle backfills — avoids inserting signals for every historical bar. A dedicated “backfill signals” job could be added later with an explicit limit.
+- After a **successful** Bitvavo **EUR** candle sweep **finishes** (`incomplete: false`) for the **catalog storage timeframe** (`5m`), `runEurCandleSweep` calls `enqueueSignalsCatalogCloseAfterIncremental`:
+  - **Incremental** mode: uses the sweep’s `targetCloseTimeIso` (the single new closed bar).
+  - **Full / window** mode: uses the **latest** `catalog.candle_timestamps.close_time` so one signal pass runs for the newest bar (not a per-bar storm across history).
+- **Skipped** when `candleRowsUpserted === 0` and the sweep was **not** incremental (nothing new to react to).
 - **Opt-out**: set `SIGNALS_AFTER_CANDLE_DISABLE=1`.
 - **No-op** if neither `SIGNAL_DEFAULT_USER_ID` nor `SIGNAL_USER_IDS` is set — the worker returns `skippedReason: no_signal_user_ids`.
 
