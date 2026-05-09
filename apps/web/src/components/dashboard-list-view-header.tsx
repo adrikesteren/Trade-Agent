@@ -13,6 +13,8 @@ export type DashboardListViewHeaderProps = {
   title: string;
   rowCount: number;
   sortLine: string;
+  /** When true, summary omits the “Max N rows” segment (unbounded list). */
+  uncapped?: boolean;
   maxRows?: number;
   /** Overrides default tile (first letter of `title`). */
   icon?: ReactNode;
@@ -26,13 +28,16 @@ export function DashboardListViewHeader({
   title,
   rowCount,
   sortLine,
+  uncapped = false,
   maxRows = 200,
   icon,
   iconLetter,
   actions,
 }: DashboardListViewHeaderProps) {
   const n = rowCount;
-  const summary = [`${n} row${n === 1 ? "" : "s"}`, sortLine, `Max ${maxRows} rows`].join(" · ");
+  const summaryParts = [`${n} row${n === 1 ? "" : "s"}`, sortLine];
+  if (!uncapped) summaryParts.push(`Max ${maxRows} rows`);
+  const summary = summaryParts.join(" · ");
   const resolvedIcon =
     icon ??
     (iconLetter ? (
