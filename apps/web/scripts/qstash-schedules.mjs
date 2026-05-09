@@ -15,7 +15,7 @@
  *
  * Cron expressions are interpreted by QStash (UTC). Defaults align with dashboard defaults (5m where applicable).
  * Override per job or globally:
- *   QSTASH_DEFAULT_CRON — if unset, the script uses `*/5 * * * *` (see `defaultCron()`).
+ *   QSTASH_DEFAULT_CRON — if unset, the script uses a five-minute UTC cron (see `defaultCron()`).
  *   QSTASH_CRON_BITVAVO_CANDLES, QSTASH_CRON_BITVAVO_MARKETS, QSTASH_CRON_COINGECKO_METRICS, QSTASH_CRON_COINGECKO_COIN_ID
  *   Jobs without QSTASH_DEFAULT_CRON use their own fallback (e.g. markets & coingecko-coin-id = hourly UTC).
  *
