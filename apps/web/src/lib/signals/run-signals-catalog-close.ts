@@ -173,11 +173,12 @@ export async function runSignalsCatalogClose(
   const { data: agentRows, error: agentErr } = await admin
     .schema("trading")
     .from("signal_agents")
-    .select("agent_id, enabled, config, allowed_timeframes")
+    .select("id, agent_id, enabled, config, allowed_timeframes")
     .eq("enabled", true);
   if (agentErr) throw new Error(agentErr.message);
 
   const agents = (agentRows ?? []) as {
+    id: string;
     agent_id: string;
     enabled: boolean;
     config: unknown;
@@ -219,7 +220,7 @@ export async function runSignalsCatalogClose(
       for (const userId of userIds) {
         const row = {
           user_id: userId,
-          agent_id: agent.agent_id,
+          signal_agent_id: agent.id,
           market_id: marketId,
           candle_id: candleId,
           timeframe,
@@ -230,12 +231,13 @@ export async function runSignalsCatalogClose(
           metadata: {
             ...ev.metadata,
             market_symbol: m.market_symbol,
+            agent_id: agent.agent_id,
             ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
           },
         };
 
         const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-          onConflict: "user_id,agent_id,market_id,timeframe,close_time",
+          onConflict: "user_id,signal_agent_id,market_id,timeframe,close_time",
         });
         if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
         signalsUpserted += 1;

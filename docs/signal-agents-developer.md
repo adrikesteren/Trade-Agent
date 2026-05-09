@@ -13,7 +13,7 @@ Audience: human developers and **Cursor / automation agents** editing this codeb
 3. **Trade Mediator** (future step) reads signals + portfolio/risk and writes `trade_decisions`.
 4. **Executor** executes approved decisions.
 
-Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer** identified by `agent_id`.
+Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer**: stable slug `trading.signal_agents.agent_id` (e.g. `ma-cross-5m-v1`) plus row PK `trading.signal_agents.id` used as **`trading.signals.signal_agent_id`** (FK for UI and integrity).
 
 ---
 
@@ -21,13 +21,13 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 
 - **Read market history** for a `(market_id, timeframe)` from `catalog.candles`, joined to `catalog.candle_timestamps` for `close_time`, with enough bars for the rule (e.g. slow MA length).
 - **Evaluate** the rule set for the **target closed bar** (`close_time` / `closeTimeIso` passed by the worker).
-- **Write** at most one row per `(user_id, agent_id, market_id, timeframe, close_time)` into `trading.signals`, using **upsert** so reruns are idempotent.
+- **Write** at most one row per `(user_id, signal_agent_id, market_id, timeframe, close_time)` into `trading.signals`, using **upsert** so reruns are idempotent (`signal_agent_id` → `trading.signal_agents.id`).
 - **Populate**:
   - `intent`: `trading.signal_intent` enum (`ENTER`, `ADD`, `REDUCE`, `EXIT`, `HOLD`).
   - `reasons`: JSON **array of short strings** (audit / debugging).
   - `metadata`: JSON object (rule version, indicator snapshots, optional `candleSyncRunId` from the candle sweep).
   - `candle_id`: strongly recommended — FK to the `catalog.candles` row for the evaluated bar.
-- **Register** the agent in `trading.signal_agents` (migration seed or ops insert) before writing signals — `agent_id` is an FK from `trading.signals`.
+- **Register** the agent in `trading.signal_agents` (migration seed or ops insert) before writing signals — `trading.signals.signal_agent_id` references `trading.signal_agents(id)` (`on delete restrict`). The worker may still copy the slug into `metadata.agent_id` for logs.
 
 ---
 
@@ -45,7 +45,7 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 | Column | Required | Notes |
 | --- | --- | --- |
 | `user_id` | yes | Trusted env UUID(s); RLS for `authenticated` users still applies to dashboard reads. |
-| `agent_id` | yes | Must exist in `trading.signal_agents`. |
+| `signal_agent_id` | yes | UUID FK to `trading.signal_agents.id`. |
 | `market_id` | yes | `catalog.markets.id`. |
 | `timeframe` | yes | Must match the evaluated series (catalog `5m` in v1). |
 | `close_time` | yes | Bar close instant; keep consistent with `candle_timestamps.close_time`. |
@@ -55,7 +55,7 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 | `metadata` | yes | JSON object (may be `{}`). |
 | `candle_id` | recommended | `catalog.candles.id` for the evaluated bar. |
 
-Unique constraint (multi-tenant): `(user_id, agent_id, market_id, timeframe, close_time)` — see migration `20260526120000_signals_unique_user_seed_agent.sql`.
+Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timeframe, close_time)` — see `20260527100000_signals_signal_agent_uuid_fk.sql` (replaces the earlier `(user_id, agent_id, …)` unique from `20260526120000_signals_unique_user_seed_agent.sql`).
 
 ---
 
@@ -104,8 +104,8 @@ See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table.
 
 ## Troubleshooting
 
-- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm candle sweep was **incremental** EUR `5m` and completed (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-5m-v1`.
-- **Upsert errors on unique**: ensure migration `20260526120000_signals_unique_user_seed_agent.sql` applied; `onConflict` must match `(user_id, agent_id, market_id, timeframe, close_time)`.
+- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm EUR `5m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-5m-v1`.
+- **Upsert errors on unique**: ensure migrations through `20260527100000_signals_signal_agent_uuid_fk.sql` are applied; `onConflict` must match `(user_id, signal_agent_id, market_id, timeframe, close_time)`.
 - **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or rely on QStash self-chaining with a public `APP_BASE_URL`.
 
 ---

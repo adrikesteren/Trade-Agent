@@ -37,7 +37,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Signal agents (env)
 
-After an **incremental** Bitvavo EUR catalog candle sweep (`5m`), the app can enqueue `POST /api/workers/signals-catalog-close` so rule-based agents write rows to `trading.signals`. See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
+After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows, the app can enqueue `POST /api/workers/signals-catalog-close` so rule-based agents write rows to `trading.signals` (FK `signal_agent_id` → `trading.signal_agents`). See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |

@@ -14,14 +14,22 @@ import Link from "next/link";
 
 type SignalRow = {
   id: string;
-  agent_id: string;
+  signal_agent_id: string;
   market_id: string;
   timeframe: string;
   close_time: string;
   intent: string;
   confidence: number | string | null;
   created_at: string;
+  signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
+
+function agentSlugFromSignalRow(row: SignalRow): string | null {
+  const rel = row.signal_agents;
+  if (!rel) return null;
+  const first = Array.isArray(rel) ? rel[0] : rel;
+  return first?.agent_id ?? null;
+}
 
 function fmtUtc(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -42,7 +50,9 @@ export default async function SignalsPage() {
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("signals")
-    .select("id, agent_id, market_id, timeframe, close_time, intent, confidence, created_at")
+    .select(
+      "id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, created_at, signal_agents ( agent_id )",
+    )
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -99,6 +109,7 @@ export default async function SignalsPage() {
               <tbody>
                 {list.map((row) => {
                   const sym = symbolById.get(row.market_id);
+                  const agentSlug = agentSlugFromSignalRow(row);
                   return (
                     <tr key={row.id}>
                       <Td>
@@ -106,8 +117,10 @@ export default async function SignalsPage() {
                           {sym ?? row.market_id.slice(0, 8) + "…"}
                         </Link>
                       </Td>
-                      <Td className="max-w-[10rem] truncate" title={row.agent_id}>
-                        {row.agent_id}
+                      <Td className="max-w-[10rem] truncate" title={agentSlug ?? row.signal_agent_id}>
+                        <Link href={`/dashboard/signal-agents/${row.signal_agent_id}`} className="bk-link font-mono">
+                          {agentSlug ?? row.signal_agent_id.slice(0, 8) + "…"}
+                        </Link>
                       </Td>
                       <Td>{row.timeframe}</Td>
                       <Td className="whitespace-nowrap font-mono">{fmtUtc(row.close_time)}</Td>
