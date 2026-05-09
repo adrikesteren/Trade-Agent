@@ -1,13 +1,8 @@
 "use client";
 
 import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sync-jobs-overview-table";
-import {
-  BITVAVO_SYNC_JOB_CANDLES_EUR,
-  BITVAVO_SYNC_JOB_MARKETS_EUR,
-  COINGECKO_SYNC_JOB_COIN_ID,
-  COINGECKO_SYNC_JOB_METRICS,
-  type BitvavoSyncJobStatus,
-} from "@/lib/markets/record-bitvavo-sync-status";
+import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
+import { type BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,12 +22,7 @@ export type SyncRunRow = {
 const MAX_RUNS = 200;
 const RECENT_LIMIT = 40;
 
-const TRACKED_JOB_KEYS = new Set<string>([
-  BITVAVO_SYNC_JOB_MARKETS_EUR,
-  BITVAVO_SYNC_JOB_CANDLES_EUR,
-  COINGECKO_SYNC_JOB_METRICS,
-  COINGECKO_SYNC_JOB_COIN_ID,
-]);
+const TRACKED_JOB_KEYS = new Set<string>(SYNC_RUN_DASHBOARD_JOB_KEYS);
 
 export type SyncRunsOverviewTemplate = Omit<SyncJobsOverviewRow, "status" | "lastStartedAt" | "lastSuccessAt">;
 
@@ -212,8 +202,8 @@ export function SyncRunsLiveClient({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Recent sync runs</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via
-          Realtime.
+          Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via Realtime.
+          Click a row to open the detail page.
         </p>
         {fetchError ? (
           <p className="mt-2 text-xs text-red-600 dark:text-red-400">{fetchError}</p>
@@ -234,12 +224,25 @@ export function SyncRunsLiveClient({
             </thead>
             <tbody>
               {recentRuns.map((r) => (
-                <tr key={r.id} className="border-b border-zinc-100 dark:border-zinc-800">
+                <tr
+                  key={r.id}
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Open sync run ${r.job_key} ${r.id}`}
+                  className="cursor-pointer border-b border-zinc-100 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60"
+                  onClick={() => router.push(`/dashboard/sync-runs/${r.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/dashboard/sync-runs/${r.id}`);
+                    }
+                  }}
+                >
                   <td className="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{r.job_key}</td>
                   <td className="py-1.5 pr-2">{r.status}</td>
-                    <td className="max-w-[200px] truncate py-1.5 pr-2 text-zinc-600 dark:text-zinc-400" title={r.reason ?? ""}>
-                      {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
-                    </td>
+                  <td className="max-w-[200px] truncate py-1.5 pr-2 text-zinc-600 dark:text-zinc-400" title={r.reason ?? ""}>
+                    {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
+                  </td>
                   <td className="max-w-[min(320px,40vw)] truncate py-1.5 pr-2 align-top">
                     <MetadataCell metadata={r.metadata} />
                   </td>

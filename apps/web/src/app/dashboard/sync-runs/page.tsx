@@ -3,6 +3,7 @@ import {
   type SyncRunRow,
   type SyncRunsOverviewTemplate,
 } from "@/components/sync-runs-live-client";
+import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   BITVAVO_SYNC_JOB_MARKETS_EUR,
@@ -18,13 +19,6 @@ import {
 import { MANAGED_QSTASH_SCHEDULES } from "@/lib/workers/qstash-managed-schedules";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-
-const SYNC_JOB_KEYS = [
-  BITVAVO_SYNC_JOB_MARKETS_EUR,
-  BITVAVO_SYNC_JOB_CANDLES_EUR,
-  COINGECKO_SYNC_JOB_METRICS,
-  COINGECKO_SYNC_JOB_COIN_ID,
-] as const;
 
 function qstashScheduleIdForJob(jobKey: string): string | null {
   return MANAGED_QSTASH_SCHEDULES.find((s) => s.jobKey === jobKey)?.scheduleId ?? null;
@@ -72,7 +66,7 @@ export default async function SyncRunsPage() {
     .schema("automation")
     .from("sync_runs")
     .select("id, job_key, status, trigger_source, created_at, ended_at, reason, metadata")
-    .in("job_key", [...SYNC_JOB_KEYS])
+    .in("job_key", [...SYNC_RUN_DASHBOARD_JOB_KEYS])
     .order("created_at", { ascending: false })
     .limit(200);
 
