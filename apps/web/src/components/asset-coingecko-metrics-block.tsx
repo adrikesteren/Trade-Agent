@@ -1,3 +1,4 @@
+import { Card, CardBody } from "@repo/blocks";
 import Link from "next/link";
 
 /** Columns on `catalog.assets` filled by CoinGecko sync (subset used by UI). */
@@ -123,9 +124,9 @@ function fmtUtcShort(iso: string): string {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-zinc-100 bg-zinc-50/80 px-2.5 py-2 dark:border-zinc-800 dark:bg-zinc-900/50">
-      <dt className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="mt-0.5 font-mono text-sm text-zinc-900 dark:text-zinc-100">{value}</dd>
+    <div className="bk-stat-cell">
+      <dt className="bk-stat-label">{label}</dt>
+      <dd className="bk-stat-value">{value}</dd>
     </div>
   );
 }
@@ -157,31 +158,30 @@ export function AssetCoingeckoMetricsBlock({
   const cgUrl = `https://www.coingecko.com/en/coins/${encodeURIComponent(row.coingecko_id)}`;
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">CoinGecko (USD)</h2>
-          <p className="mt-1 text-xs text-zinc-500">
-            Live fields on <span className="font-mono text-zinc-700 dark:text-zinc-300">{assetCode}</span> (updated each
-            CoinGecko sync): cap, volume, supply, ATH, and % moves.
-          </p>
+    <Card>
+      <CardBody>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
+              CoinGecko (USD)
+            </h2>
+            <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+              Live fields on <span className="font-mono">{assetCode}</span> (updated each CoinGecko sync): cap, volume,
+              supply, ATH, and % moves.
+            </p>
+          </div>
+          <Link href={cgUrl} target="_blank" rel="noreferrer" className="bk-link shrink-0" style={{ fontSize: "0.75rem" }}>
+            Open on CoinGecko ↗
+          </Link>
         </div>
-        <Link
-          href={cgUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
-        >
-          Open on CoinGecko ↗
-        </Link>
-      </div>
-      <p className="mt-2 text-[11px] text-zinc-500">
-        Fetched <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtUtcShort(row.fetched_at)}</span>
-        <span className="mx-1.5">·</span>
-        <span className="font-mono">id: {row.coingecko_id}</span>
-      </p>
-      {metricsStatGrid(row)}
-    </section>
+        <p className="bk-text-muted mt-2" style={{ fontSize: "0.6875rem" }}>
+          Fetched <span className="font-mono">{fmtUtcShort(row.fetched_at)}</span>
+          <span className="mx-1.5">·</span>
+          <span className="font-mono">id: {row.coingecko_id}</span>
+        </p>
+        {metricsStatGrid(row)}
+      </CardBody>
+    </Card>
   );
 }
 
@@ -214,35 +214,34 @@ export function AssetCoingeckoMetricsNoSnapshot({
   };
 
   return (
-    <section className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">CoinGecko (USD)</h2>
-          <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-            No live CoinGecko data on <span className="font-mono font-medium">{assetCode}</span> yet. Run{" "}
-            <strong>Asset fundamentals (USD)</strong> from Sync runs — then the same row in{" "}
-            <code className="rounded bg-zinc-200/80 px-1 dark:bg-zinc-800">assets</code> is filled (no duplicate history
-            rows).
-          </p>
+    <Card className="bk-card_dashed">
+      <CardBody>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
+              CoinGecko (USD)
+            </h2>
+            <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+              No live CoinGecko data on <span className="font-mono font-medium">{assetCode}</span> yet. Run{" "}
+              <strong>Asset fundamentals (USD)</strong> from Sync runs — then the same row in{" "}
+              <code className="bk-code">assets</code> is filled (no duplicate history rows).
+            </p>
+          </div>
+          <Link href="/dashboard/sync-runs" className="bk-link shrink-0" style={{ fontSize: "0.75rem" }}>
+            Sync runs →
+          </Link>
         </div>
-        <Link
-          href="/dashboard/sync-runs"
-          className="shrink-0 text-xs font-medium text-emerald-800 underline-offset-2 hover:underline dark:text-emerald-400"
-        >
-          Sync runs →
-        </Link>
-      </div>
-      <p className="mt-2 text-[11px] text-zinc-500">
-        Catalog id:{" "}
-        <span className="font-mono text-zinc-700 dark:text-zinc-300">{resolvedCoingeckoId ?? "not resolved"}</span>
-        {!resolvedCoingeckoId ? (
-          <span className="ml-1 text-zinc-400">
-            — the worker resolves ids via search (max per run). Run sync again if you just added the asset.
-          </span>
-        ) : null}
-      </p>
-      <div className="text-zinc-500/90">{metricsStatGrid(dashRow)}</div>
-    </section>
+        <p className="bk-text-muted mt-2" style={{ fontSize: "0.6875rem" }}>
+          Catalog id: <span className="font-mono">{resolvedCoingeckoId ?? "not resolved"}</span>
+          {!resolvedCoingeckoId ? (
+            <span className="ml-1 opacity-80">
+              — the worker resolves ids via search (max per run). Run sync again if you just added the asset.
+            </span>
+          ) : null}
+        </p>
+        <div className="opacity-90">{metricsStatGrid(dashRow)}</div>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -253,9 +252,15 @@ export function AssetCoingeckoMetricsPlaceholder({ reason }: { reason: "non_cryp
       : "No live CoinGecko data yet. Use Sync runs (worker or local ENABLE_LOCAL_COINGECKO_METRICS_SYNC).";
 
   return (
-    <section className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">CoinGecko (USD)</h2>
-      <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">{copy}</p>
-    </section>
+    <Card className="bk-card_dashed">
+      <CardBody>
+        <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
+          CoinGecko (USD)
+        </h2>
+        <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+          {copy}
+        </p>
+      </CardBody>
+    </Card>
   );
 }

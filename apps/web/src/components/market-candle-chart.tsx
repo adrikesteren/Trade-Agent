@@ -19,6 +19,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { Button, Card, CardBody } from "@repo/blocks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function formatChartCrosshairTime(t: Time, timeZone: string): string {
@@ -213,10 +214,15 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
   const [hoverOhlcv, setHoverOhlcv] = useState<HoverOhlcv | null>(null);
 
   const timeframeRef = useRef(timeframe);
-  timeframeRef.current = timeframe;
-
   const candlesRef = useRef(candles);
-  candlesRef.current = candles;
+
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+  }, [timeframe]);
+
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
 
   const pushSeriesData = useCallback((rows: CandleRowJson[]) => {
     const cs = candleSeriesRef.current;
@@ -457,87 +463,111 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
   }, [candles]);
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Price chart</h2>
-          <p className="text-xs text-zinc-500">
-            Candlesticks + volume · OHLCV + bar close time in tooltip · auto fit
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {CHART_TIMEFRAMES.map((tf) => (
-            <button
-              key={tf}
-              type="button"
-              disabled={loading}
-              onClick={() => void loadTf(tf)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                timeframe === tf
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-baseline gap-4 border-b border-zinc-100 pb-3 dark:border-zinc-800">
-        {lastPrice != null ? (
-          <span className="text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
-            {lastPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}
-          </span>
-        ) : (
-          <span className="text-sm text-zinc-500">No OHLCV yet</span>
-        )}
-        {changePct != null && Number.isFinite(changePct) ? (
-          <span
-            className={`text-sm font-medium tabular-nums ${changePct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-          >
-            {changePct >= 0 ? "+" : ""}
-            {changePct.toFixed(2)}% <span className="font-normal text-zinc-500">(in view)</span>
-          </span>
-        ) : null}
-        {loading ? <span className="text-xs text-zinc-500">Loading…</span> : null}
-        {error ? <span className="text-xs text-red-600">{error}</span> : null}
-      </div>
-
-      <div className="relative mt-2 min-h-[420px] w-full min-w-0">
-        <div ref={containerRef} className="h-[420px] w-full min-w-0" />
-        {hoverOhlcv ? (
-          <div
-            className="pointer-events-none absolute z-10 w-[272px] rounded-md border border-zinc-200 bg-white/95 px-3 py-2.5 text-[12px] leading-snug shadow-md backdrop-blur-sm dark:border-zinc-600 dark:bg-zinc-900/95"
-            style={{
-              left: hoverOhlcv.left,
-              top: hoverOhlcv.top,
-              transform: hoverOhlcv.transform,
-            }}
-            aria-live="polite"
-          >
-            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{hoverOhlcv.timeLabel}</p>
-            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 tabular-nums text-zinc-600 dark:text-zinc-400">
-              <dt className="text-zinc-400 dark:text-zinc-500" title="catalog.candle_timestamps.close_time">
-                Bar closes
-              </dt>
-              <dd className="text-right font-mono text-zinc-800 dark:text-zinc-100">
-                {hoverOhlcv.closeTimeLabel ?? "—"}
-              </dd>
-              <dt className="text-zinc-400 dark:text-zinc-500">O</dt>
-              <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtPrice(hoverOhlcv.open)}</dd>
-              <dt className="text-zinc-400 dark:text-zinc-500">H</dt>
-              <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtPrice(hoverOhlcv.high)}</dd>
-              <dt className="text-zinc-400 dark:text-zinc-500">L</dt>
-              <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtPrice(hoverOhlcv.low)}</dd>
-              <dt className="text-zinc-400 dark:text-zinc-500">C</dt>
-              <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtPrice(hoverOhlcv.close)}</dd>
-              <dt className="text-zinc-400 dark:text-zinc-500">V</dt>
-              <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtVol(hoverOhlcv.volume)}</dd>
-            </dl>
+    <Card>
+      <CardBody>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
+              Price chart
+            </h2>
+            <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+              Candlesticks + volume · OHLCV + bar close time in tooltip · auto fit
+            </p>
           </div>
-        ) : null}
-      </div>
-    </section>
+          <div className="flex flex-wrap items-center gap-2">
+            {CHART_TIMEFRAMES.map((tf) => (
+              <Button
+                key={tf}
+                type="button"
+                variant={timeframe === tf ? "brand" : "neutral"}
+                size="sm"
+                disabled={loading}
+                onClick={() => void loadTf(tf)}
+              >
+                {tf}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="mt-3 flex flex-wrap items-baseline gap-4 border-b pb-3"
+          style={{ borderColor: "var(--bk-color-border)" }}
+        >
+          {lastPrice != null ? (
+            <span className="text-2xl font-semibold tabular-nums" style={{ color: "var(--bk-color-text)" }}>
+              {lastPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+            </span>
+          ) : (
+            <span className="bk-text-muted text-sm">No OHLCV yet</span>
+          )}
+          {changePct != null && Number.isFinite(changePct) ? (
+            <span
+              className="text-sm font-medium tabular-nums"
+              style={{ color: changePct >= 0 ? "var(--bk-color-success)" : "var(--bk-color-error)" }}
+            >
+              {changePct >= 0 ? "+" : ""}
+              {changePct.toFixed(2)}% <span className="font-normal bk-text-muted">(in view)</span>
+            </span>
+          ) : null}
+          {loading ? <span className="bk-text-muted text-xs">Loading…</span> : null}
+          {error ? (
+            <span className="text-xs" style={{ color: "var(--bk-color-error)" }}>
+              {error}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="relative mt-2 min-h-[420px] w-full min-w-0">
+          <div ref={containerRef} className="h-[420px] w-full min-w-0" />
+          {hoverOhlcv ? (
+            <div
+              className="bk-chart-tooltip"
+              style={{
+                left: hoverOhlcv.left,
+                top: hoverOhlcv.top,
+                transform: hoverOhlcv.transform,
+              }}
+              aria-live="polite"
+            >
+              <p className="text-sm font-medium" style={{ color: "var(--bk-color-text)" }}>
+                {hoverOhlcv.timeLabel}
+              </p>
+              <dl
+                className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 tabular-nums bk-text-muted"
+                style={{ fontSize: "0.75rem" }}
+              >
+                <dt className="opacity-80" title="catalog.candle_timestamps.close_time">
+                  Bar closes
+                </dt>
+                <dd className="text-right font-mono" style={{ color: "var(--bk-color-text)" }}>
+                  {hoverOhlcv.closeTimeLabel ?? "—"}
+                </dd>
+                <dt className="opacity-80">O</dt>
+                <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
+                  {fmtPrice(hoverOhlcv.open)}
+                </dd>
+                <dt className="opacity-80">H</dt>
+                <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
+                  {fmtPrice(hoverOhlcv.high)}
+                </dd>
+                <dt className="opacity-80">L</dt>
+                <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
+                  {fmtPrice(hoverOhlcv.low)}
+                </dd>
+                <dt className="opacity-80">C</dt>
+                <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
+                  {fmtPrice(hoverOhlcv.close)}
+                </dd>
+                <dt className="opacity-80">V</dt>
+                <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
+                  {fmtVol(hoverOhlcv.volume)}
+                </dd>
+              </dl>
+            </div>
+          ) : null}
+        </div>
+      </CardBody>
+    </Card>
   );
 }

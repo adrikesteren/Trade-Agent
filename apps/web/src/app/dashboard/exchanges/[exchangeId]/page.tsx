@@ -1,4 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
+import {
+  Breadcrumbs,
+  ListViewObjectIcon,
+  Output,
+  PageHeader,
+  RecordDetailCard,
+  RecordDetailGrid,
+  RecordDetailLayout,
+  RecordDetailSection,
+} from "@repo/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -11,7 +21,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   const { data: ex, error } = await supabase
     .schema("catalog")
     .from("exchanges")
-    .select("id, code, name, metadata, created_at")
+    .select("id, code, name, created_at")
     .eq("id", exchangeId)
     .maybeSingle();
 
@@ -27,45 +37,62 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
     .order("market_symbol", { ascending: true })
     .limit(150);
 
+  const list = markets ?? [];
+  const countLabel = typeof count === "number" ? `${list.length} of ${count}` : String(list.length);
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-1">
-      <nav className="text-xs text-zinc-500">
-        <Link href="/dashboard/exchanges" className="underline-offset-2 hover:underline">
-          Exchanges
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-zinc-700 dark:text-zinc-300">Detail</span>
-      </nav>
+    <RecordDetailLayout className="bk-container bk-stack bk-stack_gap-md px-1" style={{ maxWidth: "48rem" }}>
+      <PageHeader
+        variant="detail"
+        icon={<ListViewObjectIcon letter="E" />}
+        breadcrumb={
+          <Breadcrumbs items={[{ label: "Exchanges", href: "/dashboard/exchanges" }, { label: "Detail" }]} />
+        }
+        back={{ href: "/dashboard/exchanges", label: "← All exchanges" }}
+        eyebrow="Exchange"
+        title={ex.name}
+        highlights={
+          <>
+            <Output label="Code" type="text" value={ex.code} />
+            <Output label="Markets" type="text" value={countLabel} />
+          </>
+        }
+        meta={`id: ${ex.id}`}
+      />
 
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{ex.name}</h1>
-        <p className="mt-1 font-mono text-sm text-zinc-600 dark:text-zinc-400">{ex.code}</p>
-        <p className="mt-1 text-xs text-zinc-500">id: {ex.id}</p>
-      </div>
+      <RecordDetailCard>
+        <RecordDetailSection title="Details">
+          <RecordDetailGrid>
+            <Output label="Record ID" type="text" value={ex.id} span="full" />
+            <Output label="Code" type="text" value={ex.code} />
+            <Output label="Name" type="text" value={ex.name?.trim() ? ex.name : "—"} />
+            <Output label="Created" type="datetime" value={ex.created_at} />
+          </RecordDetailGrid>
+        </RecordDetailSection>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          Markets {typeof count === "number" ? `(showing ${markets?.length ?? 0} of ${count})` : ""}
-        </h2>
-        <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
-          {(markets ?? []).map((m) => (
-            <li key={m.id} className="py-2">
-              <Link
-                href={`/dashboard/markets/${m.id}`}
-                className="font-mono text-sm font-medium text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
-              >
-                {m.market_symbol}
-              </Link>
-              <span className="ml-2 text-xs text-zinc-500">
-                {m.quote_code} · {m.status}
-              </span>
-            </li>
-          ))}
-          {!markets?.length ? (
-            <li className="py-4 text-sm text-zinc-500">No markets synced for this exchange yet.</li>
-          ) : null}
-        </ul>
-      </section>
-    </div>
+        <RecordDetailSection
+          title="Markets"
+          description={typeof count === "number" ? `Showing ${list.length} of ${count} listings.` : undefined}
+        >
+          <ul className="bk-list-divided">
+            {list.map((m) => (
+              <li key={m.id} className="py-2">
+                <Link href={`/dashboard/markets/${m.id}`} className="bk-link font-mono" style={{ fontWeight: 600 }}>
+                  {m.market_symbol}
+                </Link>
+                <span className="bk-text-muted ml-2" style={{ fontSize: "0.75rem" }}>
+                  {m.quote_code} · {m.status}
+                </span>
+              </li>
+            ))}
+            {!list.length ? (
+              <li className="bk-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
+                No markets synced for this exchange yet.
+              </li>
+            ) : null}
+          </ul>
+        </RecordDetailSection>
+      </RecordDetailCard>
+    </RecordDetailLayout>
   );
 }

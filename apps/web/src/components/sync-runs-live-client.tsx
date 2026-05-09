@@ -1,6 +1,7 @@
 "use client";
 
 import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sync-jobs-overview-table";
+import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { type BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
 import { createClient } from "@/lib/supabase/client";
@@ -68,15 +69,12 @@ function rowFromPayload(rec: Record<string, unknown>): SyncRunRow | null {
 }
 
 function useClientTick(): { ready: boolean; nowMs: number } {
-  const [ready, setReady] = useState(false);
-  const [nowMs, setNowMs] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    setNowMs(Date.now());
-    setReady(true);
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  return { ready, nowMs };
+  return { ready: true, nowMs };
 }
 
 function formatElapsedMs(ms: number): string {
@@ -95,13 +93,13 @@ function metadataIsEmpty(m: Record<string, unknown> | null): boolean {
 
 function MetadataCell({ metadata }: { metadata: Record<string, unknown> | null }) {
   if (metadataIsEmpty(metadata)) {
-    return <span className="text-zinc-400">—</span>;
+    return <span className="bk-text-muted">—</span>;
   }
   const compact = JSON.stringify(metadata);
   const title = JSON.stringify(metadata, null, 2);
   const shown = compact.length > 100 ? `${compact.slice(0, 97)}…` : compact;
   return (
-    <span className="font-mono text-[10px] text-zinc-600 dark:text-zinc-400" title={title}>
+    <span className="bk-text-muted font-mono text-[10px]" title={title}>
       {shown}
     </span>
   );
@@ -109,15 +107,15 @@ function MetadataCell({ metadata }: { metadata: Record<string, unknown> | null }
 
 function ElapsedCell({ r, nowMs, ready }: { r: SyncRunRow; nowMs: number; ready: boolean }) {
   const startMs = r.created_at ? Date.parse(r.created_at) : NaN;
-  if (!Number.isFinite(startMs)) return <span className="text-zinc-400">—</span>;
+  if (!Number.isFinite(startMs)) return <span className="bk-text-muted">—</span>;
   const endedMs = r.ended_at ? Date.parse(r.ended_at) : NaN;
   const endMs = Number.isFinite(endedMs) ? endedMs : ready ? nowMs : NaN;
-  if (!Number.isFinite(endMs)) return <span className="text-zinc-400">…</span>;
+  if (!Number.isFinite(endMs)) return <span className="bk-text-muted">…</span>;
   const live = r.status === "running" && !r.ended_at;
   return (
-    <span className={live ? "text-amber-800 dark:text-amber-300" : undefined} title={live ? "Live (run still open)" : undefined}>
+    <span style={live ? { color: "var(--bk-color-warning)" } : undefined} title={live ? "Live (run still open)" : undefined}>
       {formatElapsedMs(endMs - startMs)}
-      {live ? <span className="ml-1 text-[9px] font-normal text-zinc-400">live</span> : null}
+      {live ? <span className="bk-text-muted ml-1 text-[9px] font-normal">live</span> : null}
     </span>
   );
 }
@@ -142,7 +140,7 @@ export function SyncRunsLiveClient({
 }) {
   const router = useRouter();
   const [runs, setRuns] = useState<SyncRunRow[]>(() => [...initialRuns].sort(sortByCreatedDesc));
-  const [fetchError, setFetchError] = useState<string | null>(initialError);
+  const [fetchError] = useState<string | null>(initialError);
   const { ready, nowMs } = useClientTick();
 
   const overviewRows: SyncJobsOverviewRow[] = useMemo(() => {
@@ -199,80 +197,86 @@ export function SyncRunsLiveClient({
     <>
       <SyncJobsOverviewTable rows={overviewRows} onSyncDone={() => router.refresh()} />
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Recent sync runs</h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via Realtime.
-          Click a row to open the detail page.
-        </p>
-        {fetchError ? (
-          <p className="mt-2 text-xs text-red-600 dark:text-red-400">{fetchError}</p>
-        ) : null}
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-left text-[11px]">
-            <thead>
-              <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-2">Job</th>
-                <th className="py-2 pr-2">Status</th>
-                <th className="py-2 pr-2">Reason</th>
-                <th className="py-2 pr-2">Metadata</th>
-                <th className="py-2 pr-2">Trigger</th>
-                <th className="py-2 pr-2">Started</th>
-                <th className="py-2 pr-2">Ended</th>
-                <th className="py-2 pr-2">Elapsed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentRuns.map((r) => (
-                <tr
-                  key={r.id}
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Open sync run ${r.job_key} ${r.id}`}
-                  className="cursor-pointer border-b border-zinc-100 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60"
-                  onClick={() => router.push(`/dashboard/sync-runs/${r.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      router.push(`/dashboard/sync-runs/${r.id}`);
-                    }
-                  }}
-                >
-                  <td className="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{r.job_key}</td>
-                  <td className="py-1.5 pr-2">{r.status}</td>
-                  <td className="max-w-[200px] truncate py-1.5 pr-2 text-zinc-600 dark:text-zinc-400" title={r.reason ?? ""}>
-                    {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
-                  </td>
-                  <td className="max-w-[min(320px,40vw)] truncate py-1.5 pr-2 align-top">
-                    <MetadataCell metadata={r.metadata} />
-                  </td>
-                  <td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</td>
-                  <td className="py-1.5 pr-2 font-mono text-zinc-600 dark:text-zinc-400">
-                    {r.created_at
-                      ? new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                      : "—"}
-                  </td>
-                  <td className="py-1.5 pr-2 font-mono text-zinc-600 dark:text-zinc-400">
-                    {r.ended_at
-                      ? new Date(r.ended_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                      : "—"}
-                  </td>
-                  <td className="py-1.5 pr-2 font-mono text-zinc-600 dark:text-zinc-400">
-                    <ElapsedCell r={r} nowMs={nowMs} ready={ready} />
-                  </td>
-                </tr>
-              ))}
-              {!recentRuns.length ? (
+      <Card>
+        <CardBody>
+          <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
+            Recent sync runs
+          </h2>
+          <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+            Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via
+            Realtime. Click a row to open the detail page.
+          </p>
+          {fetchError ? (
+            <Alert tone="error" className="mt-2 !text-xs">
+              {fetchError}
+            </Alert>
+          ) : null}
+          <TableWrap className="mt-3">
+            <Table className="text-left text-[11px]">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-zinc-500">
-                    No runs yet. Use <strong>Sync now</strong> in the table above, or wait for QStash workers.
-                  </td>
+                  <Th className="py-2 pr-2">Job</Th>
+                  <Th className="py-2 pr-2">Status</Th>
+                  <Th className="py-2 pr-2">Reason</Th>
+                  <Th className="py-2 pr-2">Metadata</Th>
+                  <Th className="py-2 pr-2">Trigger</Th>
+                  <Th className="py-2 pr-2">Started</Th>
+                  <Th className="py-2 pr-2">Ended</Th>
+                  <Th className="py-2 pr-2">Elapsed</Th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {recentRuns.map((r) => (
+                  <tr
+                    key={r.id}
+                    role="link"
+                    tabIndex={0}
+                    aria-label={`Open sync run ${r.job_key} ${r.id}`}
+                    className="bk-tr-clickable"
+                    onClick={() => router.push(`/dashboard/sync-runs/${r.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        router.push(`/dashboard/sync-runs/${r.id}`);
+                      }
+                    }}
+                  >
+                    <Td className="py-1.5 pr-2 font-mono">{r.job_key}</Td>
+                    <Td className="py-1.5 pr-2">{r.status}</Td>
+                    <Td className="max-w-[200px] truncate py-1.5 pr-2 bk-text-muted" title={r.reason ?? ""}>
+                      {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
+                    </Td>
+                    <Td className="max-w-[min(320px,40vw)] truncate py-1.5 pr-2 align-top">
+                      <MetadataCell metadata={r.metadata} />
+                    </Td>
+                    <Td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</Td>
+                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">
+                      {r.created_at
+                        ? new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+                        : "—"}
+                    </Td>
+                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">
+                      {r.ended_at
+                        ? new Date(r.ended_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+                        : "—"}
+                    </Td>
+                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">
+                      <ElapsedCell r={r} nowMs={nowMs} ready={ready} />
+                    </Td>
+                  </tr>
+                ))}
+                {!recentRuns.length ? (
+                  <tr>
+                    <Td colSpan={8} muted className="py-6 text-center">
+                      No runs yet. Use <strong>Sync now</strong> in the table above, or wait for QStash workers.
+                    </Td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </CardBody>
+      </Card>
     </>
   );
 }

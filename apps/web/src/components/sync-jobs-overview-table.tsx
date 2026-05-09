@@ -2,6 +2,7 @@
 
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 import type { BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
+import { Alert, Badge, Button, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -40,15 +41,12 @@ function formatShort(iso: string | null): string {
 }
 
 function useClientTick(): { ready: boolean; nowMs: number } {
-  const [ready, setReady] = useState(false);
-  const [nowMs, setNowMs] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    setNowMs(Date.now());
-    setReady(true);
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  return { ready, nowMs };
+  return { ready: true, nowMs };
 }
 
 export type SyncJobsOverviewRow = {
@@ -82,21 +80,23 @@ type QstashListJson = {
 function statusBadge(status: BitvavoSyncJobStatus | null) {
   if (!status) {
     return (
-      <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+      <Badge tone="neutral" className="text-[10px]">
         no runs
-      </span>
+      </Badge>
     );
   }
-  const map = {
-    running: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
-    completed: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200",
-    failed: "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200",
-    skipped: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300",
-  } as const;
+  const tone =
+    status === "running"
+      ? "warning"
+      : status === "completed"
+        ? "success"
+        : status === "failed"
+          ? "error"
+          : "neutral";
   return (
-    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize ${map[status]}`}>
+    <Badge tone={tone} className="text-[10px] capitalize">
       {status}
-    </span>
+    </Badge>
   );
 }
 
@@ -122,7 +122,7 @@ function SyncNowCell({
   );
 
   if (!action) {
-    return <span className="text-[11px] text-zinc-400">—</span>;
+    return <span className="bk-text-muted text-[11px]">—</span>;
   }
 
   async function run() {
@@ -210,17 +210,15 @@ function SyncNowCell({
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={() => void run()}
-        disabled={state === "loading"}
-        className="rounded-md bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-      >
-        {state === "loading" ? "…" : "Sync now"}
-      </button>
+      <Button type="button" variant="brand" size="sm" onClick={() => void run()} loading={state === "loading"}>
+        Sync now
+      </Button>
       {msg ? (
         <span
-          className={`max-w-[14rem] text-right text-[10px] leading-snug ${state === "error" ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`}
+          className={`max-w-[14rem] text-right text-[10px] leading-snug ${state === "error" ? "" : ""}`}
+          style={{
+            color: state === "error" ? "var(--bk-color-error)" : "var(--bk-color-success)",
+          }}
         >
           {msg}
         </span>
@@ -235,13 +233,13 @@ function NextTickCell({ intervalMs, ready, nowMs }: { intervalMs: number; ready:
       ? new Date(nextLocalWallClockBoundaryAfter(nowMs, intervalMs)).toISOString()
       : null;
   if (intervalMs <= 0) {
-    return <span className="text-[11px] text-zinc-400">Manual / external</span>;
+    return <span className="bk-text-muted text-[11px]">Manual / external</span>;
   }
-  if (!ready || !nextAt) return <span className="text-zinc-400">…</span>;
+  if (!ready || !nextAt) return <span className="bk-text-muted">…</span>;
   return (
-    <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
+    <span className="bk-text-muted text-[11px]">
       {formatIn(nextAt, nowMs)}
-      <span className="ml-1 font-normal text-zinc-400">({formatShort(nextAt)})</span>
+      <span className="ml-1 font-normal opacity-80">({formatShort(nextAt)})</span>
     </span>
   );
 }
@@ -264,26 +262,26 @@ function QstashScheduleCell({
   onPauseResume: (scheduleId: string, action: "pause" | "resume") => void;
 }) {
   if (!row.qstashScheduleId) {
-    return <span className="text-[11px] text-zinc-400">—</span>;
+    return <span className="bk-text-muted text-[11px]">—</span>;
   }
   if (loading) {
-    return <span className="text-[11px] text-zinc-400">…</span>;
+    return <span className="bk-text-muted text-[11px]">…</span>;
   }
   if (fetchError) {
     return (
-      <span className="text-right text-[10px] text-red-600 dark:text-red-400" title={fetchError}>
+      <span className="text-right text-[10px]" style={{ color: "var(--bk-color-error)" }} title={fetchError}>
         QStash: error
       </span>
     );
   }
   if (!tokenConfigured) {
-    return <span className="text-right text-[10px] leading-snug text-zinc-500">QStash token not in server env</span>;
+    return <span className="bk-text-muted text-right text-[10px] leading-snug">QStash token not in server env</span>;
   }
   if (!state || !state.exists) {
     return (
       <div className="flex flex-col items-end gap-0.5 text-right">
-        <span className="text-[10px] text-zinc-500">No schedule</span>
-        <span className="max-w-[9rem] text-[9px] leading-tight text-zinc-400">Create with pnpm qstash:schedules</span>
+        <span className="bk-text-muted text-[10px]">No schedule</span>
+        <span className="bk-text-muted max-w-[9rem] text-[9px] leading-tight">Create with pnpm qstash:schedules</span>
       </div>
     );
   }
@@ -295,37 +293,24 @@ function QstashScheduleCell({
   return (
     <div className="flex flex-col items-end gap-1 text-right">
       <span
-        className={
-          paused
-            ? "text-[10px] font-medium text-amber-800 dark:text-amber-300"
-            : "text-[10px] font-medium text-emerald-800 dark:text-emerald-300"
-        }
+        className="text-[10px] font-medium"
+        style={{ color: paused ? "var(--bk-color-warning)" : "var(--bk-color-success)" }}
       >
         {paused ? "Paused" : "Active"}
       </span>
       {state.cron ? (
-        <span className="max-w-[10rem] truncate font-mono text-[9px] text-zinc-400" title="QStash cron (UTC)">
+        <span className="bk-text-muted max-w-[10rem] truncate font-mono text-[9px]" title="QStash cron (UTC)">
           {state.cron}
         </span>
       ) : null}
       {paused ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onPauseResume(sid, "resume")}
-          className="rounded-md bg-emerald-700 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-emerald-600 disabled:opacity-60 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-        >
-          {busy ? "…" : "Resume"}
-        </button>
+        <Button type="button" variant="brand" size="sm" disabled={busy} loading={busy} onClick={() => onPauseResume(sid, "resume")}>
+          Resume
+        </Button>
       ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onPauseResume(sid, "pause")}
-          className="rounded-md border border-amber-800/40 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/50"
-        >
-          {busy ? "…" : "Pause"}
-        </button>
+        <Button type="button" variant="neutral" size="sm" disabled={busy} loading={busy} onClick={() => onPauseResume(sid, "pause")}>
+          Pause
+        </Button>
       )}
     </div>
   );
@@ -394,7 +379,10 @@ export function SyncJobsOverviewTable({
   }, []);
 
   useEffect(() => {
-    void fetchQstash();
+    const id = requestAnimationFrame(() => {
+      void fetchQstash();
+    });
+    return () => cancelAnimationFrame(id);
   }, [fetchQstash]);
 
   const afterSync = useCallback(() => {
@@ -442,97 +430,104 @@ export function SyncJobsOverviewTable({
   );
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Scheduled & manual syncs</h2>
-        <button
-          type="button"
-          onClick={() => void fetchQstash()}
-          disabled={qstashLoading}
-          className="self-start text-[11px] text-zinc-600 underline-offset-4 hover:underline disabled:opacity-50 dark:text-zinc-400"
-        >
-          Refresh QStash status
-        </button>
-      </div>
-      <p className="mt-1 text-xs text-zinc-500">
-        One row per <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">sync_runs</code> job. Status reflects
-        the latest attempt; last success is the most recent completed run (by{" "}
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">ended_at</code>). CoinGecko only advances when a
-        run finishes (QStash worker or <strong>Sync now</strong>). QStash column: Upstash recurring POST
-        (UTC cron); EUR catalog also has an hourly schedule plus <strong>Sync now</strong>.
-      </p>
-      {pauseResumeErr ? (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
-          {pauseResumeErr}
+    <Card>
+      <CardBody>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <h2 className="bk-form-label" style={{ fontSize: "0.875rem" }}>
+            Scheduled & manual syncs
+          </h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void fetchQstash()}
+            disabled={qstashLoading}
+            className="self-start !text-[11px]"
+          >
+            Refresh QStash status
+          </Button>
+        </div>
+        <p className="bk-text-muted mt-1" style={{ fontSize: "0.75rem" }}>
+          One row per <code className="bk-code">sync_runs</code> job. Status reflects the latest attempt; last success
+          is the most recent completed run (by <code className="bk-code">ended_at</code>). CoinGecko only advances when
+          a run finishes (QStash worker or <strong>Sync now</strong>). QStash column: Upstash recurring POST (UTC
+          cron); EUR catalog also has an hourly schedule plus <strong>Sync now</strong>.
         </p>
-      ) : null}
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-[11px]">
-          <thead>
-            <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-              <th className="py-2 pr-3 font-medium">Job</th>
-              <th className="py-2 pr-3 font-medium">Provider</th>
-              <th className="py-2 pr-3 font-medium">Latest</th>
-              <th className="py-2 pr-3 font-medium">Last success</th>
-              <th className="py-2 pr-3 font-medium">Last started</th>
-              <th className="py-2 pr-3 font-medium">Next grid (display)</th>
-              <th className="py-2 pr-3 text-right font-medium">QStash</th>
-              <th className="py-2 pr-0 text-right font-medium">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.jobKey} className="border-b border-zinc-100 dark:border-zinc-800">
-                <td className="py-2.5 pr-3 align-top">
-                  <div className="font-medium text-zinc-900 dark:text-zinc-100">{r.label}</div>
-                  <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{r.jobKey}</div>
-                </td>
-                <td className="py-2.5 pr-3 align-top text-zinc-700 dark:text-zinc-300">{r.provider}</td>
-                <td className="py-2.5 pr-3 align-top">
-                  <div className="flex flex-col gap-1">
-                    {statusBadge(r.status)}
-                    {r.status === "running" && r.lastStartedAt ? (
-                      <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                        {ready ? formatAgo(r.lastStartedAt, nowMs) : "…"} · {formatShort(r.lastStartedAt)}
-                      </span>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="py-2.5 pr-3 align-top font-mono text-zinc-700 dark:text-zinc-300">
-                  {r.lastSuccessAt ? (
-                    <>
-                      {ready ? formatAgo(r.lastSuccessAt, nowMs) : "—"}
-                      <div className="mt-0.5 font-normal text-zinc-500">{formatShort(r.lastSuccessAt)}</div>
-                    </>
-                  ) : (
-                    <span className="text-zinc-400">Never</span>
-                  )}
-                </td>
-                <td className="py-2.5 pr-3 align-top font-mono text-zinc-600 dark:text-zinc-400">
-                  {r.lastStartedAt ? formatShort(r.lastStartedAt) : "—"}
-                </td>
-                <td className="py-2.5 pr-3 align-top">
-                  <NextTickCell intervalMs={r.intervalMs} ready={ready} nowMs={nowMs} />
-                </td>
-                <td className="py-2.5 pr-3 align-top">
-                  <QstashScheduleCell
-                    row={r}
-                    loading={qstashLoading}
-                    fetchError={qstashFetchErr}
-                    tokenConfigured={qstashTokenOk}
-                    state={qstashByJob[r.jobKey]}
-                    actingScheduleId={actingScheduleId}
-                    onPauseResume={handlePauseResume}
-                  />
-                </td>
-                <td className="py-2.5 align-top">
-                  <SyncNowCell action={r.action} onDone={afterSync} />
-                </td>
+        {pauseResumeErr ? (
+          <Alert tone="error" className="mt-2 !text-xs" role="alert">
+            {pauseResumeErr}
+          </Alert>
+        ) : null}
+        <TableWrap className="mt-3">
+          <Table className="min-w-[860px] text-left text-[11px]">
+            <thead>
+              <tr>
+                <Th>Job</Th>
+                <Th>Provider</Th>
+                <Th>Latest</Th>
+                <Th>Last success</Th>
+                <Th>Last started</Th>
+                <Th>Next grid (display)</Th>
+                <Th className="text-right">QStash</Th>
+                <Th className="pr-0 text-right">Action</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.jobKey}>
+                  <Td className="align-top py-2.5 pr-3">
+                    <div className="bk-form-label" style={{ fontWeight: 600, margin: 0 }}>
+                      {r.label}
+                    </div>
+                    <div className="bk-text-muted mt-0.5 font-mono text-[10px]">{r.jobKey}</div>
+                  </Td>
+                  <Td className="align-top py-2.5 pr-3">{r.provider}</Td>
+                  <Td className="align-top py-2.5 pr-3">
+                    <div className="flex flex-col gap-1">
+                      {statusBadge(r.status)}
+                      {r.status === "running" && r.lastStartedAt ? (
+                        <span className="text-[10px]" style={{ color: "var(--bk-color-warning)" }}>
+                          {ready ? formatAgo(r.lastStartedAt, nowMs) : "…"} · {formatShort(r.lastStartedAt)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </Td>
+                  <Td className="align-top py-2.5 pr-3 font-mono">
+                    {r.lastSuccessAt ? (
+                      <>
+                        {ready ? formatAgo(r.lastSuccessAt, nowMs) : "—"}
+                        <div className="bk-text-muted mt-0.5 font-normal">{formatShort(r.lastSuccessAt)}</div>
+                      </>
+                    ) : (
+                      <span className="bk-text-muted">Never</span>
+                    )}
+                  </Td>
+                  <Td className="bk-text-muted align-top py-2.5 pr-3 font-mono">
+                    {r.lastStartedAt ? formatShort(r.lastStartedAt) : "—"}
+                  </Td>
+                  <Td className="align-top py-2.5 pr-3">
+                    <NextTickCell intervalMs={r.intervalMs} ready={ready} nowMs={nowMs} />
+                  </Td>
+                  <Td className="align-top py-2.5 pr-3">
+                    <QstashScheduleCell
+                      row={r}
+                      loading={qstashLoading}
+                      fetchError={qstashFetchErr}
+                      tokenConfigured={qstashTokenOk}
+                      state={qstashByJob[r.jobKey]}
+                      actingScheduleId={actingScheduleId}
+                      onPauseResume={handlePauseResume}
+                    />
+                  </Td>
+                  <Td className="align-top py-2.5">
+                    <SyncNowCell action={r.action} onDone={afterSync} />
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </CardBody>
+    </Card>
   );
 }

@@ -15,6 +15,7 @@
     "qstash:schedules:resume": "node scripts/qstash-schedules.mjs resume"
   },
   "dependencies": {
+    "@repo/blocks": "workspace:*",
     "@repo/exchange": "workspace:*",
     "@repo/redis": "workspace:*",
     "@repo/risk": "workspace:*",

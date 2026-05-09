@@ -15,7 +15,7 @@ dotenv.config({ path: path.join(monorepoRoot, ".env.local"), override: true });
 dotenv.config({ path: path.join(webRoot, ".env.local"), override: true });
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@repo/exchange", "@repo/redis", "@repo/risk", "@repo/trading"],
+  transpilePackages: ["@repo/blocks", "@repo/exchange", "@repo/redis", "@repo/risk", "@repo/trading"],
 };
 
 export default nextConfig;

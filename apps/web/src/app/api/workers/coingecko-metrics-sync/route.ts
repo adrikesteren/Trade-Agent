@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
-  let body: CoingeckoMetricsSyncBody = {};
+  const body: CoingeckoMetricsSyncBody = {};
   if (rawBody) {
     try {
       const parsed = JSON.parse(rawBody) as { syncRunId?: string | null };

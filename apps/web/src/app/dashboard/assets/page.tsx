@@ -1,5 +1,19 @@
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { createClient } from "@/lib/supabase/server";
+import {
+  Alert,
+  Card,
+  CardBody,
+  ListViewObjectIcon,
+  ListViewPlaceholderToolbar,
+  ListViewTitlePickerPlaceholder,
+  PageHeader,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  listViewOutlineActionClass,
+} from "@repo/blocks";
 import Link from "next/link";
 
 type AssetRow = {
@@ -29,79 +43,80 @@ export default async function AssetsIndexPage() {
     return (a.code ?? "").localeCompare(b.code ?? "", undefined, { sensitivity: "base" });
   });
 
+  const n = sortedRows.length;
+  const summaryBits = [
+    `${n} asset${n === 1 ? "" : "s"}`,
+    "Sorted by Market Cap",
+    "Max 2000 rows",
+  ];
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Assets</h1>
-          <p className="mt-1 max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
+    <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
+      <PageHeader
+        variant="list"
+        icon={<ListViewObjectIcon letter="A" />}
+        eyebrow="Assets"
+        title="All listings"
+        titleAddon={<ListViewTitlePickerPlaceholder />}
+        subtitle={
+          <>
             Base instruments (crypto, later stocks). Pairs live under{" "}
-            <Link href="/dashboard/markets" className="underline-offset-2 hover:underline">
+            <Link href="/dashboard/markets" className="bk-link">
               Markets
             </Link>
             .
-          </p>
-        </div>
-        <Link
-          href="/dashboard"
-          className="text-sm text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
-        >
-          Back to dashboard
-        </Link>
-      </div>
+          </>
+        }
+        summary={summaryBits.join(" · ")}
+        toolbar={<ListViewPlaceholderToolbar />}
+        actions={
+          <Link href="/dashboard" className={listViewOutlineActionClass}>
+            Dashboard
+          </Link>
+        }
+      />
 
-      {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error.message}</p>
-      ) : null}
+      {error ? <Alert tone="error">{error.message}</Alert> : null}
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          All assets{" "}
-          {sortedRows.length ? `(${sortedRows.length} shown, max 2000, by market cap ↓)` : ""}
-        </h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-3">Name</th>
-                <th className="py-2 pr-3">Code</th>
-                <th className="py-2 pr-3">Kind</th>
-                <th className="py-2 pr-3 text-right">Market cap</th>
-                <th className="py-2 pr-3 text-right">24h volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRows.map((r) => (
-                <tr key={r.id} className="border-b border-zinc-100 dark:border-zinc-800">
-                  <td className="py-2 pr-3 font-medium">
-                    <Link
-                      href={`/dashboard/assets/${r.id}`}
-                      className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
-                    >
-                      {r.name?.trim() ? r.name : r.code}
-                    </Link>
-                  </td>
-                  <td className="py-2 pr-3 font-mono text-zinc-700 dark:text-zinc-300">{r.code}</td>
-                  <td className="py-2 pr-3">{r.kind}</td>
-                  <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
-                    {formatUsdMetric(r.coingecko_market_cap_usd)}
-                  </td>
-                  <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
-                    {formatUsdMetric(r.coingecko_total_volume_usd)}
-                  </td>
-                </tr>
-              ))}
-              {!sortedRows.length ? (
+      <Card>
+        <CardBody className="!pt-0">
+          <TableWrap>
+            <Table className="text-xs">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-zinc-500">
-                    No assets yet.
-                  </td>
+                  <Th>Name</Th>
+                  <Th>Code</Th>
+                  <Th>Kind</Th>
+                  <Th className="text-right">Market cap</Th>
+                  <Th className="text-right">24h volume</Th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {sortedRows.map((r) => (
+                  <tr key={r.id}>
+                    <Td>
+                      <Link href={`/dashboard/assets/${r.id}`} className="bk-link">
+                        {r.name?.trim() ? r.name : r.code}
+                      </Link>
+                    </Td>
+                    <Td className="font-mono">{r.code}</Td>
+                    <Td>{r.kind}</Td>
+                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_market_cap_usd)}</Td>
+                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_total_volume_usd)}</Td>
+                  </tr>
+                ))}
+                {!sortedRows.length ? (
+                  <tr>
+                    <Td colSpan={5} muted className="py-8 text-center">
+                      No assets yet.
+                    </Td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </CardBody>
+      </Card>
     </div>
   );
 }

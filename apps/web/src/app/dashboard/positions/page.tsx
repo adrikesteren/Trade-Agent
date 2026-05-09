@@ -1,4 +1,6 @@
+import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { createClient } from "@/lib/supabase/server";
+import { Alert, Card, CardBody } from "@repo/blocks";
 
 export default async function PositionsPage() {
   const supabase = await createClient();
@@ -9,13 +11,23 @@ export default async function PositionsPage() {
     .order("updated_at", { ascending: false })
     .limit(200);
 
+  const list = rows ?? [];
+
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Positions</h1>
-      {error ? <p className="text-sm text-red-600 dark:text-red-400">{error.message}</p> : null}
-      <pre className="overflow-auto rounded-lg border border-zinc-200 bg-white p-3 text-xs dark:border-zinc-800 dark:bg-zinc-950">
-        {JSON.stringify(rows ?? [], null, 2)}
-      </pre>
+    <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
+      <DashboardListViewHeader
+        eyebrow="Trading"
+        title="Positions"
+        iconLetter="P"
+        rowCount={list.length}
+        sortLine="Sorted by Updated date"
+      />
+      {error ? <Alert tone="error">{error.message}</Alert> : null}
+      <Card>
+        <CardBody>
+          <pre className="bk-pre">{JSON.stringify(list, null, 2)}</pre>
+        </CardBody>
+      </Card>
     </div>
   );
 }

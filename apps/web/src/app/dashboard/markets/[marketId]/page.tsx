@@ -4,6 +4,16 @@ import { aggregateOhlcvToTarget } from "@/lib/markets/aggregate-ohlcv";
 import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { createClient } from "@/lib/supabase/server";
+import {
+  Breadcrumbs,
+  ListViewObjectIcon,
+  Output,
+  PageHeader,
+  RecordDetailCard,
+  RecordDetailGrid,
+  RecordDetailLayout,
+  RecordDetailSection,
+} from "@repo/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -93,69 +103,100 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const initialCandles = aggregateOhlcvToTarget(baseCandles, CHART_DEFAULT_TF);
   const chartDisplayTz = getChartDisplayTimeZone();
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 px-1">
-      <nav className="text-xs text-zinc-500">
-        <Link href="/dashboard/markets" className="underline-offset-2 hover:underline">
-          Markets
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-zinc-700 dark:text-zinc-300">Pair</span>
-      </nav>
+  const metadataJson =
+    market.metadata && typeof market.metadata === "object"
+      ? JSON.stringify(market.metadata, null, 2)
+      : market.metadata == null
+        ? "—"
+        : String(market.metadata);
 
-      <div>
-        <h1 className="font-mono text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          {market.market_symbol}
-        </h1>
-        <p className="mt-2 flex flex-wrap gap-3 text-sm text-zinc-600 dark:text-zinc-400">
-          {ex?.id ? (
-            <span>
-              Exchange:{" "}
-              <Link
-                href={`/dashboard/exchanges/${ex.id}`}
-                className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-100"
-              >
-                {ex.name ?? ex.code}
-              </Link>
-            </span>
-          ) : null}
-          {asset?.id ? (
-            <span>
-              Base asset:{" "}
-              <Link
-                href={`/dashboard/assets/${asset.id}`}
-                className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-100"
-              >
-                {asset.code} ({asset.kind})
-              </Link>
-            </span>
-          ) : null}
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Quote: {market.quote_code ?? "—"} · Status: {market.status} · id: {market.id}
-        </p>
-      </div>
+  const exchangeName = ex?.name?.trim() ? ex.name : (ex?.code ?? "—");
+  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
+
+  return (
+    <RecordDetailLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md px-1">
+      <PageHeader
+        variant="detail"
+        icon={<ListViewObjectIcon letter="M" />}
+        breadcrumb={<Breadcrumbs items={[{ label: "Markets", href: "/dashboard/markets" }, { label: "Pair" }]} />}
+        back={{ href: "/dashboard/markets", label: "← All markets" }}
+        eyebrow="Market"
+        title={market.market_symbol}
+        titleClassName="font-mono"
+        highlights={
+          <>
+            {ex?.id ? (
+              <Output
+                label="Exchange"
+                record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
+              />
+            ) : (
+              <Output label="Exchange" type="text" value="—" />
+            )}
+            {asset?.id ? (
+              <Output
+                label="Base asset"
+                record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
+              />
+            ) : (
+              <Output label="Base asset" type="text" value="—" />
+            )}
+          </>
+        }
+        subtitle={
+          <>
+            Quote <span className="font-mono">{market.quote_code ?? "—"}</span> · Status {market.status ?? "—"}
+          </>
+        }
+        meta={`id: ${market.id}`}
+      />
+
+      <RecordDetailCard>
+        <RecordDetailSection title="Details">
+          <RecordDetailGrid>
+            <Output label="Record ID" type="text" value={market.id} span="full" />
+            <Output label="Symbol" type="text" value={market.market_symbol} />
+            <Output label="Quote" type="text" value={market.quote_code ?? "—"} />
+            <Output label="Status" type="text" value={market.status ?? "—"} />
+            <Output label="Created" type="datetime" value={market.created_at} />
+            {ex?.id ? (
+              <Output
+                label="Exchange"
+                record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
+              />
+            ) : (
+              <Output label="Exchange" type="text" value="—" />
+            )}
+            {asset?.id ? (
+              <Output
+                label="Base asset"
+                record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
+              />
+            ) : (
+              <Output label="Base asset" type="text" value="—" />
+            )}
+            <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
+          </RecordDetailGrid>
+        </RecordDetailSection>
+      </RecordDetailCard>
 
       <MarketCandleChart
         marketId={marketId}
         initialTimeframe={CHART_DEFAULT_TF}
         initialCandles={initialCandles}
       />
-      <p className="text-xs text-zinc-500">
+      <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
         Timeframe buttons load aggregated OHLCV for this market. Axis, crosshair, and hover labels use{" "}
-        <strong className="font-mono text-zinc-600 dark:text-zinc-400">{chartDisplayTz}</strong> (
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>
-        , default Europe/Amsterdam). Bars stay the same UTC instants as Supabase{" "}
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">open_time</code> /{" "}
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code>. If the chart is empty, refresh
-        listings from{" "}
-        <Link href="/dashboard/markets" className="text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300">
+        <strong className="font-mono">{chartDisplayTz}</strong> (
+        <code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>, default Europe/Amsterdam). Bars stay the
+        same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
+        <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
+        <Link href="/dashboard/markets" className="bk-link">
           Markets
         </Link>
         . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
-        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code> values (difference{">"} 6 minutes)
-        to find missing bars.
+        <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
       </p>
-    </div>
+    </RecordDetailLayout>
   );
 }

@@ -1,5 +1,19 @@
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { createClient } from "@/lib/supabase/server";
+import {
+  Alert,
+  Card,
+  CardBody,
+  ListViewObjectIcon,
+  ListViewPlaceholderToolbar,
+  ListViewTitlePickerPlaceholder,
+  PageHeader,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  listViewOutlineActionClass,
+} from "@repo/blocks";
 import Link from "next/link";
 
 type MarketListingRow = {
@@ -50,121 +64,125 @@ export default async function MarketsIndexPage() {
     return (a.market_symbol ?? "").localeCompare(b.market_symbol ?? "", undefined, { sensitivity: "base" });
   });
 
+  const n = sortedListings.length;
+  const summaryBits = [
+    `${n} listing${n === 1 ? "" : "s"}`,
+    "Sorted by Market Cap",
+    `${exchange?.name ?? "Bitvavo"} · EUR`,
+    "Max 500 rows",
+  ];
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Markets</h1>
-          <p className="mt-1 max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
+    <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
+      <PageHeader
+        variant="list"
+        icon={<ListViewObjectIcon letter="M" />}
+        eyebrow="Markets"
+        title="Bitvavo EUR"
+        titleAddon={<ListViewTitlePickerPlaceholder />}
+        subtitle={
+          <>
             Tradable pairs (e.g. BTC-EUR). Base assets live under{" "}
-            <Link href="/dashboard/assets" className="font-medium underline-offset-2 hover:underline">
+            <Link href="/dashboard/assets" className="bk-link">
               Assets
             </Link>
             .
-          </p>
-        </div>
-        <div className="flex flex-col items-start gap-2 sm:items-end">
-          <Link
-            href="/dashboard/sync-runs"
-            className="text-sm font-medium text-zinc-800 underline-offset-4 hover:underline dark:text-zinc-200"
-          >
-            Sync runs
-          </Link>
-          <Link
-            href="/dashboard"
-            className="text-sm text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
-          >
-            Back to dashboard
-          </Link>
-        </div>
-      </div>
+          </>
+        }
+        summary={summaryBits.join(" · ")}
+        toolbar={<ListViewPlaceholderToolbar />}
+        actions={
+          <>
+            <Link href="/dashboard/sync-runs" className={listViewOutlineActionClass}>
+              Sync runs
+            </Link>
+            <Link href="/dashboard" className={listViewOutlineActionClass}>
+              Dashboard
+            </Link>
+          </>
+        }
+      />
 
-      <section className="rounded-md border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
-        <span className="font-medium text-zinc-900 dark:text-zinc-100">Jobs & history</span> — Bitvavo sync (listings
-        + candles), CoinGecko snapshots, and{" "}
-        <code className="rounded bg-zinc-200/80 px-1 text-xs dark:bg-zinc-800">sync_runs</code> on{" "}
-        <Link href="/dashboard/sync-runs" className="font-medium text-emerald-800 underline-offset-2 hover:underline dark:text-emerald-400">
+      <Alert tone="info">
+        <span className="bk-form-label" style={{ display: "inline", marginRight: "0.25rem" }}>
+          Jobs & history
+        </span>
+        — Bitvavo sync (listings + candles), CoinGecko snapshots, and{" "}
+        <code className="bk-code">sync_runs</code> on{" "}
+        <Link href="/dashboard/sync-runs" className="bk-link">
           Sync runs
         </Link>
         .
-      </section>
+      </Alert>
 
-      {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error.message}</p>
-      ) : null}
+      {error ? <Alert tone="error">{error.message}</Alert> : null}
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          Bitvavo EUR listings{" "}
-          {sortedListings.length ? `(${sortedListings.length} shown, max 500, by asset market cap ↓)` : ""}
-        </h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-3">Asset Name</th>
-                <th className="py-2 pr-3">Market</th>
-                <th className="py-2 pr-3 text-right">Market Cap</th>
-                <th className="py-2 pr-3 text-right">24h Volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedListings.map((row) => {
-                const rawA = row.assets as unknown;
-                const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
-                  id?: string;
-                  code?: string;
-                  name?: string | null;
-                  coingecko_market_cap_usd?: number | string | null;
-                  coingecko_total_volume_usd?: number | string | null;
-                } | null;
-                const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
-                return (
-                  <tr key={row.id} className="border-b border-zinc-100 dark:border-zinc-800">
-                    <td className="py-2 pr-3">
-                      {asset?.id ? (
-                        <Link
-                          href={`/dashboard/assets/${asset.id}`}
-                          className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
-                        >
-                          {assetName}
-                        </Link>
-                      ) : (
-                        assetName
-                      )}
-                    </td>
-                    <td className="py-2 pr-3 font-mono">
-                      <Link
-                        href={`/dashboard/markets/${row.id}`}
-                        className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
-                      >
-                        {row.market_symbol}
-                      </Link>
-                    </td>
-                    <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
-                      {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null)}
-                    </td>
-                    <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
-                      {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null)}
-                    </td>
-                  </tr>
-                );
-              })}
-              {!sortedListings.length ? (
+      <Card>
+        <CardBody className="!pt-0">
+          <TableWrap>
+            <Table className="text-xs">
+              <thead>
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-zinc-500">
-                    No listings yet. Open{" "}
-                    <Link href="/dashboard/sync-runs" className="font-medium underline-offset-2 hover:underline">
-                      Sync runs
-                    </Link>{" "}
-                    and use <strong>Sync now</strong> for markets.
-                  </td>
+                  <Th>Asset Name</Th>
+                  <Th>Market</Th>
+                  <Th className="text-right">Market Cap</Th>
+                  <Th className="text-right">24h Volume</Th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {sortedListings.map((row) => {
+                  const rawA = row.assets as unknown;
+                  const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
+                    id?: string;
+                    code?: string;
+                    name?: string | null;
+                    coingecko_market_cap_usd?: number | string | null;
+                    coingecko_total_volume_usd?: number | string | null;
+                  } | null;
+                  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
+                  return (
+                    <tr key={row.id}>
+                      <Td>
+                        {asset?.id ? (
+                          <Link href={`/dashboard/assets/${asset.id}`} className="bk-link">
+                            {assetName}
+                          </Link>
+                        ) : (
+                          assetName
+                        )}
+                      </Td>
+                      <Td>
+                        <span className="font-mono">
+                          <Link href={`/dashboard/markets/${row.id}`} className="bk-link">
+                            {row.market_symbol}
+                          </Link>
+                        </span>
+                      </Td>
+                      <Td className="text-right font-mono">
+                        {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null)}
+                      </Td>
+                      <Td className="text-right font-mono">
+                        {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null)}
+                      </Td>
+                    </tr>
+                  );
+                })}
+                {!sortedListings.length ? (
+                  <tr>
+                    <Td colSpan={4} muted className="py-8 text-center">
+                      No listings yet. Open{" "}
+                      <Link href="/dashboard/sync-runs" className="bk-link">
+                        Sync runs
+                      </Link>{" "}
+                      and use <strong>Sync now</strong> for markets.
+                    </Td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </CardBody>
+      </Card>
     </div>
   );
 }

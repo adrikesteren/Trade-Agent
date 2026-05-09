@@ -31,7 +31,6 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
   const trackRun = quoteFilter === "EUR";
 
   let runId: string | null = null;
-  let skipped = false;
 
   if (trackRun) {
     try {
