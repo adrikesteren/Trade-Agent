@@ -8,6 +8,9 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
+import { enqueueMediatorCatalogCloseAfterSignals } from "@/lib/mediator/enqueue-mediator-catalog-close";
+import { closeTimesMatch } from "@/lib/trading/close-time-match";
+
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval";
 import { parseSignalUserIdsFromEnv } from "./signal-user-ids";
 
@@ -28,13 +31,6 @@ export type RunSignalsCatalogCloseResult = {
   totalMarkets: number;
   skippedReason?: string;
 };
-
-function closeTimesMatch(a: string, b: string): boolean {
-  const ta = Date.parse(a);
-  const tb = Date.parse(b);
-  if (Number.isFinite(ta) && Number.isFinite(tb)) return Math.abs(ta - tb) < 2000;
-  return a === b;
-}
 
 function signalMarketBatchSize(): number {
   const n = Number(process.env.SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE ?? 40);
@@ -264,6 +260,24 @@ export async function runSignalsCatalogClose(
       },
       retries: 3,
     });
+  }
+
+  if (
+    nextMarketOffset == null &&
+    rows.length > 0 &&
+    signalsUpserted > 0 &&
+    process.env.MEDIATOR_AFTER_SIGNALS_DISABLE !== "1" &&
+    userIds.length > 0
+  ) {
+    try {
+      await enqueueMediatorCatalogCloseAfterSignals({
+        closeTimeIso,
+        timeframe,
+        candleSyncRunId: body.candleSyncRunId ?? null,
+      });
+    } catch (e) {
+      console.error("enqueueMediatorCatalogCloseAfterSignals failed:", e);
+    }
   }
 
   return {

@@ -1,7 +1,8 @@
-export { runMediator } from "./mediator";
-export type {
-  AgentSignal,
-  MediatorDecision,
-  MediatorInput,
-  SignalAction,
+export {
+  aggregateSignalIntents,
+  evaluateTradeDecision,
+  type MediatorRailsConfig,
+  type SignalIntent,
+  type TradeDecisionInput,
+  type TradeDecisionOutput,
 } from "./mediator";

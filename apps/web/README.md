@@ -58,3 +58,24 @@ curl -sS -X POST "http://localhost:3000/api/workers/signals-catalog-close" ^
   -H "Content-Type: application/json" ^
   -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
 ```
+
+## Trade mediator (env)
+
+After the **last** batch of `signals-catalog-close` for a closed catalog bar (when at least one signal row was upserted), the app enqueues `POST /api/workers/mediator-catalog-close`, which reads `trading.signals`, `trading.positions` (paper), and `trading.risk_state` per configured user and **upserts** `trading.trade_decisions` (unique per `user_id`, `market_id`, `timeframe`, `close_time`). See [docs/how-we-use-agents.md](../../docs/how-we-use-agents.md).
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users for whom decisions are written (trusted env only). |
+| `MEDIATOR_AFTER_SIGNALS_DISABLE` | Optional | Set to `1` to skip enqueueing the mediator after the signal pass. |
+| `MEDIATOR_RISK_RAILS_JSON` | Optional | JSON object merged over defaults (`maxRiskPerTrade`, `maxOpenPositions`, …, optional `allowAdd`). |
+| `MEDIATOR_DEFAULT_NOTIONAL_EUR` | Optional | Suggested EUR size before risk clamp (default `100`). |
+| `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as the signal worker (`MARKET_BATCH_SIZE`, `MAX_TOTAL_MARKETS`, `INLINE_MAX_ITERS`). |
+
+Manual worker call (dev):
+
+```bash
+curl -sS -X POST "http://localhost:3000/api/workers/mediator-catalog-close" ^
+  -H "Authorization: Bearer %CRON_SECRET%" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
+```

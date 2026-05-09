@@ -10,7 +10,7 @@ Audience: human developers and **Cursor / automation agents** editing this codeb
 
 1. **Ingest** writes closed OHLCV to `catalog.candles` (catalog storage timeframe: `5m` — see `CATALOG_STORAGE_TIMEFRAME` in the web app).
 2. **Signal agents** (this document) read that data and append **advice** to `trading.signals` (`intent`, `confidence`, `reasons`, …). They **never** place orders.
-3. **Trade Mediator** (future step) reads signals + portfolio/risk and writes `trade_decisions`.
+3. **Trade Mediator** reads signals + portfolio/risk and upserts `trade_decisions` (see [mediator-developer.md](./mediator-developer.md)).
 4. **Executor** executes approved decisions.
 
 Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer**: stable slug `trading.signal_agents.agent_id` (e.g. `ma-cross-5m-v1`) plus row PK `trading.signal_agents.id` used as **`trading.signals.signal_agent_id`** (FK for UI and integrity).
@@ -36,7 +36,7 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 - **No orders** — no Bitvavo order placement, no `trading.orders` / `trading.fills` writes from signal code.
 - **No mediator** — do not write `trade_decisions` from a signal agent.
 - **No untrusted `user_id`** — workers use the Supabase **service role** and must take `user_id` only from **server-trusted configuration** (`SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`). Never copy `user_id` from unsigned client JSON. See [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
-- **`ADD` / `REDUCE` / `EXIT` without position context** — v1 rule agents should stick to **`ENTER` vs `HOLD`** until positions and mediator policy exist; emitting exit-style intents without position awareness creates noisy or misleading advice.
+- **`ADD` / `REDUCE` / `EXIT` without position context** — v1 rule agents should stick to **`ENTER` vs `HOLD`** where possible; exit-style intents are **safe** at the mediator (denied with clear reason codes until the executor supports exits), but can still add noise in `trading.signals` if emitted carelessly.
 
 ---
 
@@ -119,4 +119,4 @@ See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table.
 
 ---
 
-*Last updated: Signal Agent step 2 implementation.*
+*Last updated: Signal agents + Trade Mediator (step 3) cross-links.*

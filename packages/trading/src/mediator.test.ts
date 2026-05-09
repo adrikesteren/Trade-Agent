@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { runMediator } from "./mediator";
-import type { RiskRailsConfig, RiskStateSnapshot } from "@repo/risk";
+import { aggregateSignalIntents, evaluateTradeDecision, type MediatorRailsConfig } from "./mediator";
+import type { RiskStateSnapshot } from "@repo/risk";
 
-const rails: RiskRailsConfig = {
+const rails: MediatorRailsConfig = {
   maxRiskPerTrade: 0.05,
   maxOpenPositions: 5,
   maxExposurePerSymbolEur: 500,
   dailyLossLimitEur: 100,
   maxDrawdownEur: 500,
   cooldownAfterLosses: 3,
+  allowAdd: false,
 };
 
 const risk: RiskStateSnapshot = {
@@ -21,35 +22,146 @@ const risk: RiskStateSnapshot = {
   killSwitch: false,
 };
 
-describe("runMediator", () => {
-  it("denies hold signals", () => {
-    const d = runMediator({
+describe("aggregateSignalIntents", () => {
+  it("prefers EXIT over ENTER", () => {
+    expect(aggregateSignalIntents(["ENTER", "HOLD", "EXIT"])).toBe("EXIT");
+  });
+  it("prefers REDUCE over ENTER", () => {
+    expect(aggregateSignalIntents(["ENTER", "REDUCE"])).toBe("REDUCE");
+  });
+  it("prefers ADD over ENTER", () => {
+    expect(aggregateSignalIntents(["ENTER", "ADD"])).toBe("ADD");
+  });
+  it("returns HOLD when empty", () => {
+    expect(aggregateSignalIntents([])).toBe("HOLD");
+  });
+});
+
+describe("evaluateTradeDecision", () => {
+  it("denies when there are no signal intents", () => {
+    const d = evaluateTradeDecision({
       rails,
       risk,
-      signal: {
-        agentId: "t",
-        symbol: "BTC-EUR",
-        action: "hold",
-        confidence: 0.5,
-      },
+      marketSymbol: "BTC-EUR",
+      signalIntents: [],
+      inPosition: false,
     });
     expect(d.approved).toBe(false);
-    expect(d.reasonCodes).toContain("hold_signal");
+    expect(d.reasonCodes).toContain("no_signals");
+    expect(d.resolvedIntent).toBe("HOLD");
   });
 
-  it("approves buy when rails pass", () => {
-    const d = runMediator({
+  it("denies HOLD aggregate", () => {
+    const d = evaluateTradeDecision({
       rails,
       risk,
-      signal: {
-        agentId: "t",
-        symbol: "BTC-EUR",
-        action: "buy",
-        confidence: 0.8,
-        notionalEur: 50,
-      },
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["HOLD", "HOLD"],
+      inPosition: false,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("hold_intent");
+    expect(d.resolvedIntent).toBe("HOLD");
+  });
+
+  it("approves ENTER when flat and rails pass", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["ENTER"],
+      inPosition: false,
+      notionalEurSuggested: 50,
     });
     expect(d.approved).toBe(true);
-    expect(d.proposed?.side).toBe("buy");
+    expect(d.proposedOrder?.side).toBe("buy");
+    expect(d.resolvedIntent).toBe("ENTER");
+  });
+
+  it("denies ENTER when already in position", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["ENTER"],
+      inPosition: true,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("already_in_position");
+  });
+
+  it("denies ADD by default when in position", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "ETH-EUR",
+      signalIntents: ["ADD"],
+      inPosition: true,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("add_not_enabled");
+  });
+
+  it("allows ADD when allowAdd and rails pass", () => {
+    const d = evaluateTradeDecision({
+      rails: { ...rails, allowAdd: true },
+      risk: { ...risk, openPositionCount: 1 },
+      marketSymbol: "ETH-EUR",
+      signalIntents: ["ADD"],
+      inPosition: true,
+      notionalEurSuggested: 50,
+    });
+    expect(d.approved).toBe(true);
+    expect(d.proposedOrder?.side).toBe("buy");
+    expect(d.resolvedIntent).toBe("ADD");
+  });
+
+  it("denies EXIT without position", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["EXIT"],
+      inPosition: false,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("no_position");
+  });
+
+  it("denies EXIT with position until executor exists", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["EXIT"],
+      inPosition: true,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("exit_not_implemented");
+  });
+
+  it("denies REDUCE with position until executor exists", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["REDUCE"],
+      inPosition: true,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("reduce_not_implemented");
+  });
+
+  it("respects kill switch on ENTER", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk: { ...risk, killSwitch: true },
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["ENTER"],
+      inPosition: false,
+      notionalEurSuggested: 50,
+    });
+    expect(d.approved).toBe(false);
+    expect(d.reasonCodes).toContain("kill_switch");
   });
 });
