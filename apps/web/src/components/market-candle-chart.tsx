@@ -116,7 +116,7 @@ function hoverTooltipLayout(
 ): { left: number; top: number; transform: string } {
   const gap = 20;
   const estW = 200;
-  const estH = 104;
+  const estH = 128;
   const pad = 6;
   const ax = point.x;
   const ay = point.y;
@@ -185,6 +185,8 @@ type Props = {
 
 type HoverOhlcv = {
   timeLabel: string;
+  /** Bar `close_time` from DB, formatted like the chart (display timezone). */
+  closeTimeLabel: string | null;
   open: number;
   high: number;
   low: number;
@@ -314,8 +316,21 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
       }
       const px = { x: Number(param.point.x), y: Number(param.point.y) };
       const pos = hoverTooltipLayout(el.clientWidth, el.clientHeight, px);
+
+      let closeTimeLabel: string | null = null;
+      if (typeof param.time === "number" && Number.isFinite(param.time)) {
+        const hit = candlesRef.current.find((r) => candleTimeToUnixSeconds(r.openTime) === param.time);
+        if (hit?.closeTime) {
+          const closeSec = candleTimeToUnixSeconds(hit.closeTime);
+          if (Number.isFinite(closeSec)) {
+            closeTimeLabel = formatChartCrosshairTime(closeSec as UTCTimestamp, displayTz);
+          }
+        }
+      }
+
       setHoverOhlcv({
         timeLabel: formatChartCrosshairTime(param.time, displayTz),
+        closeTimeLabel,
         open: o.open,
         high: o.high,
         low: o.low,
@@ -446,7 +461,9 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Price chart</h2>
-          <p className="text-xs text-zinc-500">Candlesticks + volume · OHLCV tooltip follows cursor · auto fit</p>
+          <p className="text-xs text-zinc-500">
+            Candlesticks + volume · OHLCV + bar close time in tooltip · auto fit
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {CHART_TIMEFRAMES.map((tf) => (
@@ -501,6 +518,12 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
           >
             <p className="font-medium text-zinc-700 dark:text-zinc-200">{hoverOhlcv.timeLabel}</p>
             <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums text-zinc-600 dark:text-zinc-400">
+              <dt className="text-zinc-400 dark:text-zinc-500" title="catalog.candle_timestamps.close_time">
+                Bar closes
+              </dt>
+              <dd className="text-right font-mono text-zinc-800 dark:text-zinc-100">
+                {hoverOhlcv.closeTimeLabel ?? "—"}
+              </dd>
               <dt className="text-zinc-400 dark:text-zinc-500">O</dt>
               <dd className="text-right text-zinc-800 dark:text-zinc-100">{fmtPrice(hoverOhlcv.open)}</dd>
               <dt className="text-zinc-400 dark:text-zinc-500">H</dt>
