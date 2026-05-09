@@ -13,11 +13,11 @@
  *   pnpm qstash:schedules:pause        → pause managed schedules
  *   pnpm qstash:schedules:resume       → resume managed schedules
  *
- * Cron expressions are interpreted by QStash (UTC). Defaults align with dashboard defaults (5m).
+ * Cron expressions are interpreted by QStash (UTC). Defaults align with dashboard defaults (5m where applicable).
  * Override per job or globally:
- *   QSTASH_DEFAULT_CRON — if unset, the script uses the same 5-minute cadence as `sync-schedule` defaults (see `defaultCron()`).
+ *   QSTASH_DEFAULT_CRON — if unset, the script uses `*/5 * * * *` (see `defaultCron()`).
  *   QSTASH_CRON_BITVAVO_CANDLES, QSTASH_CRON_BITVAVO_MARKETS, QSTASH_CRON_COINGECKO_METRICS, QSTASH_CRON_COINGECKO_COIN_ID
- *   Jobs without QSTASH_DEFAULT_CRON use their own fallback (e.g. markets = hourly UTC).
+ *   Jobs without QSTASH_DEFAULT_CRON use their own fallback (e.g. markets & coingecko-coin-id = hourly UTC).
  *
  * Each schedule uses a stable `scheduleId` so re-running **upsert** updates the same schedule.
  *
@@ -84,6 +84,7 @@ const MANAGED = [
     path: "/api/workers/coingecko-coin-id-sync",
     label: "trade-agent.coingecko-coin-id",
     cronEnv: "QSTASH_CRON_COINGECKO_COIN_ID",
+    fallbackCron: "0 * * * *",
   },
 ];
 

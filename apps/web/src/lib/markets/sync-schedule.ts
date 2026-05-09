@@ -23,9 +23,9 @@ export function getCoingeckoMetricsSyncIntervalMs(): number {
   return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_METRICS_SYNC_INTERVAL_MS, 300_000);
 }
 
-/** CoinGecko coin-id backfill worker (default 5m). */
+/** CoinGecko coin-id backfill worker (default 1h). Override via `NEXT_PUBLIC_COINGECKO_COIN_ID_SYNC_INTERVAL_MS`. */
 export function getCoingeckoCoinIdSyncIntervalMs(): number {
-  return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_COIN_ID_SYNC_INTERVAL_MS, 300_000);
+  return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_COIN_ID_SYNC_INTERVAL_MS, 3_600_000);
 }
 
 /**

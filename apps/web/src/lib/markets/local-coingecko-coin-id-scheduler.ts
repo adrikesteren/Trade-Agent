@@ -6,7 +6,7 @@ import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
  * **Not imported by default** — use QStash schedules. Re-import from `layout`/`instrumentation` and set
  * `ENABLE_LOCAL_COINGECKO_COIN_ID_SYNC=1` to enable.
  *
- * Dev-only: every 5 minutes (aligned), fill `assets.coingecko_coin_id` when empty.
+ * Dev-only: every hour on the local wall-clock grid (aligned), fill `assets.coingecko_coin_id` when empty.
  */
 function startLocalCoingeckoCoinIdScheduler(): void {
   if (process.env.NODE_ENV !== "development") return;
@@ -16,8 +16,8 @@ function startLocalCoingeckoCoinIdScheduler(): void {
   if (g.__tradeAgentLocalCoingeckoCoinId) return;
   g.__tradeAgentLocalCoingeckoCoinId = true;
 
-  const intervalMs = Number(process.env.LOCAL_COINGECKO_COIN_ID_INTERVAL_MS ?? 300_000);
-  const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : 300_000;
+  const intervalMs = Number(process.env.LOCAL_COINGECKO_COIN_ID_INTERVAL_MS ?? 3_600_000);
+  const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : 3_600_000;
 
   let inFlight = false;
 
