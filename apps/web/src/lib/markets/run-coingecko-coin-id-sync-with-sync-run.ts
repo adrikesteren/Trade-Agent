@@ -16,7 +16,18 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
 ): Promise<SyncCoingeckoCoinIdResult & { syncRunId: string | null }> {
   let runId: string | null = null;
   try {
-    runId = await beginBitvavoSyncRun(admin, COINGECKO_SYNC_JOB_COIN_ID, source);
+    const begun = await beginBitvavoSyncRun(admin, COINGECKO_SYNC_JOB_COIN_ID, source);
+    if (begun.outcome === "skipped") {
+      return {
+        copiedFromMetadata: 0,
+        filledViaSearch: 0,
+        searchAttempts: 0,
+        stillMissingCoinId: 0,
+        failures: [],
+        syncRunId: begun.runId,
+      };
+    }
+    runId = begun.runId;
   } catch {
     /* non-fatal */
   }
@@ -42,7 +53,7 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
           runId,
           jobKey: COINGECKO_SYNC_JOB_COIN_ID,
           source,
-          failedReason: e instanceof Error ? e.message : "sync failed",
+          reason: e instanceof Error ? e.message : "sync failed",
         });
       } catch {
         /* non-fatal */

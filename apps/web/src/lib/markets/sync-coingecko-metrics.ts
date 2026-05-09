@@ -1,12 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  coingeckoFetchMarketsByIds,
-  coingeckoSearchCoinId,
-  sleep,
-  type CoinGeckoMarketRow,
-} from "@/lib/markets/coingecko-client";
+import { coingeckoFetchMarketsByIds, type CoinGeckoMarketRow } from "@/lib/markets/coingecko-client";
 
 function parsePositiveInt(envVal: string | undefined, fallback: number): number {
   if (envVal === undefined || envVal === "") return fallback;
@@ -15,27 +10,10 @@ function parsePositiveInt(envVal: string | undefined, fallback: number): number 
   return n;
 }
 
-/**
- * Max CoinGecko /search calls in one HTTP invocation (serverless time limit).
- * The sync always targets the full crypto catalog; QStash chains until everyone has `coingecko_id` or max depth.
- */
-const MAX_SEARCH_CALLS_PER_JOB = parsePositiveInt(
-  process.env.COINGECKO_MAX_SEARCH_CALLS_PER_JOB ?? process.env.COINGECKO_MAX_SEARCH_ATTEMPTS_PER_RUN,
-  200,
-);
+/** Parallel Supabase `assets` updates after /coins/markets (default 25). */
+const MARKETS_DB_CONCURRENCY = parsePositiveInt(process.env.COINGECKO_MARKETS_DB_CONCURRENCY, 25);
 
-const SEARCH_DELAY_MS = parsePositiveInt(process.env.COINGECKO_SEARCH_DELAY_MS, 1200);
-
-type AssetRow = { id: string; code: string; metadata: unknown };
-
-function asRecord(meta: unknown): Record<string, unknown> {
-  return meta && typeof meta === "object" && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
-}
-
-function getCoingeckoId(meta: unknown): string | null {
-  const v = asRecord(meta).coingecko_id;
-  return typeof v === "string" && v.trim() ? v.trim() : null;
-}
+type AssetRow = { id: string; code: string; coingecko_coin_id: string | null };
 
 /** Patches catalog `assets` with live CoinGecko /coins/markets fields (one row per asset, overwritten each sync). */
 function marketRowToAssetPatch(row: CoinGeckoMarketRow) {
@@ -63,25 +41,22 @@ function marketRowToAssetPatch(row: CoinGeckoMarketRow) {
 }
 
 /**
- * Phase 1 (callout: CoinGecko /search + DB): for every crypto asset missing `metadata.coingecko_id`,
- * call `/search` (up to MAX_SEARCH_CALLS_PER_JOB per invocation — then QStash continues the same sync run).
+ * Build CoinGecko id → asset id map for `/coins/markets` only for rows that already have
+ * `catalog.assets.coingecko_coin_id`. Coin id discovery is handled by the coin-id sync, not here.
  */
 export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseClient): Promise<{
   idByCoingecko: Map<string, string>;
   assetsConsidered: number;
   resolvedThisRun: number;
   searchAttemptsThisRun: number;
+  /** Crypto assets without `coingecko_coin_id` (skipped this run; not an error). */
   stillMissingCoingeckoId: number;
   searchFailures: string[];
 }> {
-  const searchFailures: string[] = [];
-  let resolvedThisRun = 0;
-  let searchAttemptsThisRun = 0;
-
   const { data: assets, error: selErr } = await supabase
     .schema("catalog")
     .from("assets")
-    .select("id, code, metadata")
+    .select("id, code, coingecko_coin_id")
     .eq("kind", "crypto")
     .order("code", { ascending: true });
 
@@ -91,50 +66,24 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
 
   const rows = (assets ?? []) as AssetRow[];
   const idByCoingecko = new Map<string, string>();
+  let missingCoinId = 0;
 
   for (const a of rows) {
-    let cgId = getCoingeckoId(a.metadata);
-    const canTrySearch = !cgId && searchAttemptsThisRun < MAX_SEARCH_CALLS_PER_JOB;
-    if (canTrySearch) {
-      searchAttemptsThisRun += 1;
-      try {
-        const found = await coingeckoSearchCoinId(a.code);
-        await sleep(SEARCH_DELAY_MS);
-        if (found) {
-          const meta = { ...asRecord(a.metadata), coingecko_id: found };
-          const { error: upErr } = await supabase
-            .schema("catalog")
-            .from("assets")
-            .update({ metadata: meta })
-            .eq("id", a.id);
-          if (upErr) {
-            searchFailures.push(`${a.code}: ${upErr.message}`);
-          } else {
-            cgId = found;
-            a.metadata = meta;
-            resolvedThisRun += 1;
-          }
-        } else {
-          searchFailures.push(`${a.code}: no CoinGecko match`);
-        }
-      } catch (e) {
-        searchFailures.push(`${a.code}: ${e instanceof Error ? e.message : "search error"}`);
-      }
-    }
-    if (cgId) {
-      idByCoingecko.set(cgId, a.id);
+    const cid = typeof a.coingecko_coin_id === "string" ? a.coingecko_coin_id.trim() : "";
+    if (cid) {
+      idByCoingecko.set(cid, a.id);
+    } else {
+      missingCoinId += 1;
     }
   }
-
-  const stillMissingCoingeckoId = rows.filter((a) => !getCoingeckoId(a.metadata)).length;
 
   return {
     idByCoingecko,
     assetsConsidered: rows.length,
-    resolvedThisRun,
-    searchAttemptsThisRun,
-    stillMissingCoingeckoId,
-    searchFailures,
+    resolvedThisRun: 0,
+    searchAttemptsThisRun: 0,
+    stillMissingCoingeckoId: missingCoinId,
+    searchFailures: [],
   };
 }
 
@@ -151,23 +100,33 @@ export async function syncCoingeckoAssetMetricsMarketsPhase(
   }
 
   const markets = await coingeckoFetchMarketsByIds(ids);
+
+  const work = markets
+    .map((m) => {
+      const assetId = idByCoingecko.get(m.id);
+      if (!assetId) return null;
+      return { assetId, patch: marketRowToAssetPatch(m) };
+    })
+    .filter((x): x is { assetId: string; patch: ReturnType<typeof marketRowToAssetPatch> } => x != null);
+
   let assetsUpdated = 0;
-  for (const m of markets) {
-    const assetId = idByCoingecko.get(m.id);
-    if (!assetId) continue;
-    const patch = marketRowToAssetPatch(m);
-    const { error: upErr } = await supabase.schema("catalog").from("assets").update(patch).eq("id", assetId);
-    if (upErr) {
-      throw new Error(upErr.message);
-    }
-    assetsUpdated += 1;
+  for (let i = 0; i < work.length; i += MARKETS_DB_CONCURRENCY) {
+    const chunk = work.slice(i, i + MARKETS_DB_CONCURRENCY);
+    await Promise.all(
+      chunk.map(async ({ assetId, patch }) => {
+        const { error: upErr } = await supabase.schema("catalog").from("assets").update(patch).eq("id", assetId);
+        if (upErr) throw new Error(upErr.message);
+      }),
+    );
+    assetsUpdated += chunk.length;
   }
 
   return { assetsUpdated };
 }
 
 /**
- * Full metrics sync (both phases). Prefer `runCoingeckoMetricsSyncWithSyncRun` from workers/UI so `sync_runs` is updated.
+ * Full metrics sync (resolve map from `coingecko_coin_id`, then markets). Prefer
+ * `runCoingeckoMetricsSyncWithSyncRun` from workers/UI so `sync_runs` is updated.
  */
 export async function syncCoingeckoAssetMetrics(supabase: SupabaseClient): Promise<{
   assetsConsidered: number;

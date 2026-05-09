@@ -7,7 +7,7 @@ export default async function ExchangesIndexPage() {
   const { data: rows, error } = await supabase
     .schema("catalog")
     .from("exchanges")
-    .select("id, code, name, created_at")
+    .select("id, code, name")
     .order("code", { ascending: true })
     .limit(500);
 
@@ -41,35 +41,27 @@ export default async function ExchangesIndexPage() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-3">Code</th>
                 <th className="py-2 pr-3">Name</th>
-                <th className="py-2 pr-3">Created</th>
-                <th className="py-2 pr-3">id</th>
+                <th className="py-2 pr-3">Code</th>
               </tr>
             </thead>
             <tbody>
               {(rows ?? []).map((r) => (
                 <tr key={r.id} className="border-b border-zinc-100 dark:border-zinc-800">
-                  <td className="py-2 pr-3 font-mono font-medium">
+                  <td className="py-2 pr-3 font-medium">
                     <Link
                       href={`/dashboard/exchanges/${r.id}`}
                       className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
                     >
-                      {r.code}
+                      {r.name?.trim() ? r.name : r.code}
                     </Link>
                   </td>
-                  <td className="py-2 pr-3">{r.name ?? "—"}</td>
-                  <td className="py-2 pr-3 font-mono text-zinc-600 dark:text-zinc-400">
-                    {r.created_at
-                      ? new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                      : "—"}
-                  </td>
-                  <td className="py-2 pr-3 font-mono text-[10px] text-zinc-500">{r.id}</td>
+                  <td className="py-2 pr-3 font-mono text-zinc-700 dark:text-zinc-300">{r.code}</td>
                 </tr>
               ))}
               {!rows?.length ? (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-zinc-500">
+                  <td colSpan={2} className="py-8 text-center text-zinc-500">
                     No exchanges in the database yet.
                   </td>
                 </tr>

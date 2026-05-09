@@ -3,14 +3,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const BITVAVO_SYNC_JOB_MARKETS_EUR = "bitvavo_markets_eur";
 export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
 /**
- * CoinGecko USD fundamentals refresh (writes `catalog.assets` live columns).
+ * CoinGecko USD fundamentals refresh (`/coins/markets` → `catalog.assets` live columns).
+ * Only rows with `coingecko_coin_id` set; id backfill is `coingecko_asset_coin_id`.
  * Value is `sync_runs.job_key` only — not a table name (legacy key was `coingecko_asset_metrics`).
  */
 export const COINGECKO_SYNC_JOB_METRICS = "coingecko_assets_usd_live";
 /** Fills `assets.coingecko_coin_id` from `metadata.coingecko_id` or CoinGecko /search when empty (e.g. every 5 min). */
 export const COINGECKO_SYNC_JOB_COIN_ID = "coingecko_asset_coin_id";
 export type BitvavoSyncTriggerSource = "manual" | "automated";
-export type BitvavoSyncJobStatus = "running" | "completed" | "failed";
+export type BitvavoSyncJobStatus = "running" | "completed" | "failed" | "skipped";
+
+/** `sync_runs.reason` when status is `skipped` (automated overlap guard). */
+export const SKIPPED_PREVIOUS_SYNC_STILL_RUNNING = "Previous sync still running";
+
+export type BeginBitvavoSyncRunResult =
+  | { outcome: "started"; runId: string }
+  | { outcome: "skipped"; runId: string };
 
 const TABLE = "sync_runs" as const;
 const AUTOMATION_SCHEMA = "automation" as const;
@@ -42,13 +50,40 @@ async function resolveRunIdForUpdate(
   return resolveLatestRunningBitvavoRunId(admin, jobKey);
 }
 
-/** Inserts a new `running` row for this sync attempt (append-only). */
+/**
+ * Starts a new sync run, or records a `skipped` row when `source` is `automated` and the same `job_key`
+ * already has a `running` row (scheduler overlap).
+ */
 export async function beginBitvavoSyncRun(
   admin: SupabaseClient,
   jobKey: string,
   source: BitvavoSyncTriggerSource,
-): Promise<string> {
+): Promise<BeginBitvavoSyncRunResult> {
   const now = new Date().toISOString();
+
+  if (source === "automated") {
+    const existingRunningId = await resolveLatestRunningBitvavoRunId(admin, jobKey);
+    if (existingRunningId) {
+      const { data, error } = await admin
+        .schema(AUTOMATION_SCHEMA)
+        .from(TABLE)
+        .insert({
+          job_key: jobKey,
+          status: "skipped",
+          trigger_source: source,
+          reason: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+          created_at: now,
+          ended_at: now,
+          updated_at: now,
+        })
+        .select("id")
+        .single();
+
+      if (error) throw new Error(`${TABLE}: ${error.message}`);
+      if (!data?.id) throw new Error(`${TABLE}: skipped insert returned no id`);
+      return { outcome: "skipped", runId: data.id as string };
+    }
+  }
 
   const { data, error } = await admin
     .schema(AUTOMATION_SCHEMA)
@@ -65,7 +100,7 @@ export async function beginBitvavoSyncRun(
 
   if (error) throw new Error(`${TABLE}: ${error.message}`);
   if (!data?.id) throw new Error(`${TABLE}: insert returned no id`);
-  return data.id as string;
+  return { outcome: "started", runId: data.id as string };
 }
 
 /**
@@ -84,7 +119,6 @@ export async function recordBitvavoSyncCompleted(
     .from(TABLE)
     .update({
       status: "completed",
-      completed_at: now,
       ended_at: now,
       updated_at: now,
       trigger_source: args.source,
@@ -98,7 +132,7 @@ export async function recordBitvavoSyncCompleted(
 
 /**
  * Marks the run failed. Only updates rows still in `running`.
- * `failedReason` is persisted to `failed_reason` (DB requires it when status is `failed`).
+ * `reason` is required by the DB when status is `failed` or `skipped`.
  */
 export async function recordBitvavoSyncFailed(
   admin: SupabaseClient,
@@ -106,21 +140,21 @@ export async function recordBitvavoSyncFailed(
     runId: string | null | undefined;
     jobKey: string;
     source: BitvavoSyncTriggerSource;
-    failedReason: string;
+    reason: string;
   },
 ): Promise<void> {
   const now = new Date().toISOString();
   const runId = await resolveRunIdForUpdate(admin, args.jobKey, args.runId);
   if (!runId) return;
 
-  const reason = String(args.failedReason || "").trim() || "Unknown error";
+  const resolvedReason = String(args.reason || "").trim() || "Unknown error";
 
   const { error } = await admin
     .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
       status: "failed",
-      failed_reason: reason,
+      reason: resolvedReason,
       ended_at: now,
       updated_at: now,
       trigger_source: args.source,

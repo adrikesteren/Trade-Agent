@@ -10,6 +10,7 @@ import {
   recordBitvavoSyncCompleted,
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
+  SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
 } from "@/lib/markets/record-bitvavo-sync-status";
 import {
   syncBitvavoCandlesChunk,
@@ -73,7 +74,16 @@ export async function POST(request: Request) {
   if (isEurQuote) {
     if (marketOffset === 0 && !runId) {
       try {
-        runId = await beginBitvavoSyncRun(admin, BITVAVO_SYNC_JOB_CANDLES_EUR, source);
+        const begun = await beginBitvavoSyncRun(admin, BITVAVO_SYNC_JOB_CANDLES_EUR, source);
+        if (begun.outcome === "skipped") {
+          return NextResponse.json({
+            ok: true,
+            skipped: true,
+            syncRunId: begun.runId,
+            message: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+          });
+        }
+        runId = begun.runId;
       } catch {
         /* non-fatal */
       }
@@ -90,11 +100,7 @@ export async function POST(request: Request) {
   let candleTimestampId: string | null = null;
   let targetCloseTimeIso: string | null = null;
 
-  if (body.syncMode === "incremental" && body.candleTimestampId && body.targetCloseTimeIso) {
-    syncMode = "incremental";
-    candleTimestampId = body.candleTimestampId;
-    targetCloseTimeIso = body.targetCloseTimeIso;
-  } else if (body.syncMode === "full") {
+  if (body.syncMode === "full") {
     syncMode = "full";
   } else if (isEurQuote && timeframe === CATALOG_STORAGE_TIMEFRAME && marketOffset === 0) {
     const prep = await prepareEurCandleTimestampWindow(admin, timeframe);
@@ -105,7 +111,7 @@ export async function POST(request: Request) {
             runId,
             jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
             source,
-            failedReason: prep.reason,
+            reason: prep.reason,
           });
         } catch {
           /* non-fatal */
@@ -117,6 +123,22 @@ export async function POST(request: Request) {
       syncMode = "incremental";
       candleTimestampId = prep.candleTimestampId;
       targetCloseTimeIso = prep.closeTime;
+    }
+  } else if (
+    body.syncMode === "incremental" &&
+    body.candleTimestampId &&
+    body.targetCloseTimeIso
+  ) {
+    const { data: tsHit, error: tsErr } = await admin
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id")
+      .eq("id", body.candleTimestampId)
+      .maybeSingle();
+    if (!tsErr && tsHit) {
+      syncMode = "incremental";
+      candleTimestampId = body.candleTimestampId;
+      targetCloseTimeIso = body.targetCloseTimeIso;
     }
   }
 
@@ -170,7 +192,7 @@ export async function POST(request: Request) {
           runId,
           jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
           source,
-          failedReason: message,
+          reason: message,
         });
       } catch {
         /* non-fatal */

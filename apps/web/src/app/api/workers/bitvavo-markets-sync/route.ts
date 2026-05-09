@@ -1,16 +1,12 @@
 import { Client } from "@upstash/qstash";
 import { NextResponse } from "next/server";
-import {
-  runCoingeckoMetricsSyncWithSyncRun,
-  type CoingeckoMetricsSyncBody,
-} from "@/lib/markets/run-coingecko-sync-with-sync-run";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/markets/run-bitvavo-markets-eur-sync-with-sync-run";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 /**
- * GET: trusted caller with Authorization: Bearer CRON_SECRET (e.g. Vercel Cron). Always enqueues a signed QStash POST
- * to this path — same pattern as Bitvavo EUR candles worker (no long inline run on the cron request).
+ * GET: Bearer CRON_SECRET — enqueue QStash POST (hourly schedule target).
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -25,7 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: "missing_config",
-        hint: "Set APP_BASE_URL (or NEXT_PUBLIC_APP_URL) and QSTASH_TOKEN so the cron can enqueue a signed POST to run CoinGecko metrics sync.",
+        hint: "Set APP_BASE_URL (or NEXT_PUBLIC_APP_URL) and QSTASH_TOKEN to enqueue Bitvavo markets sync.",
       },
       { status: 501 },
     );
@@ -33,7 +29,7 @@ export async function GET(request: Request) {
 
   const client = new Client({ token });
   await client.publishJSON({
-    url: `${base}/api/workers/coingecko-metrics-sync`,
+    url: `${base}/api/workers/bitvavo-markets-sync`,
     body: {},
     retries: 3,
   });
@@ -42,8 +38,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * POST: QStash signed callback or `Authorization: Bearer CRON_SECRET` (manual). Runs sync inline.
- * Body optional: `{ "syncRunId": "<uuid>" }` to attach to an existing run (legacy payloads only).
+ * POST: QStash signed callback or Bearer CRON_SECRET — EUR Bitvavo catalog sync (`sync_runs` job `bitvavo_markets_eur`).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
@@ -55,21 +50,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
-  let body: CoingeckoMetricsSyncBody = {};
-  if (rawBody) {
-    try {
-      const parsed = JSON.parse(rawBody) as { syncRunId?: string | null };
-      if (typeof parsed?.syncRunId === "string" || parsed?.syncRunId === null) {
-        body.syncRunId = parsed.syncRunId;
-      }
-    } catch {
-      /* ignore invalid JSON; treat as empty body */
-    }
-  }
-
   try {
     const admin = createServiceRoleClient();
-    const result = await runCoingeckoMetricsSyncWithSyncRun(admin, "automated", body);
+    const result = await runBitvavoMarketsEurSyncWithSyncRun(admin, "automated", { quoteFilter: "EUR" });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const message = e instanceof Error ? e.message : "sync failed";

@@ -3,7 +3,10 @@ import "server-only";
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 
 /**
- * Dev-only: poll CoinGecko metrics on a wall-clock grid (same idea as EUR candle local sync).
+ * **Not imported by default** — use QStash schedules. Re-import from `layout`/`instrumentation` and set
+ * `ENABLE_LOCAL_COINGECKO_METRICS_SYNC=1` to enable.
+ *
+ * Dev-only: poll CoinGecko metrics on a wall-clock grid.
  */
 function startLocalCoingeckoMetricsScheduler(): void {
   if (process.env.NODE_ENV !== "development") return;

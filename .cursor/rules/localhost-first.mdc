@@ -9,8 +9,9 @@ The maintainer builds, runs, and tests **only on localhost** (`next dev`, local 
 
 ## Do
 
-- Prefer instructions that work **on the same machine**: repo-root `.env`, `pnpm dev` / `turbo dev`, `ENABLE_LOCAL_CANDLE_AUTO_SYNC`, `Invoke-WebRequest` to `http://localhost:3000`, Supabase local/remote from env, etc.
-- When documenting syncs, workers, or cron-like behaviour, lead with **local automation** (instrumentation, manual button, OS scheduler hitting localhost) before any hosted option.
+- Prefer instructions that work **on the same machine**: repo-root `.env`, `pnpm dev` / `turbo dev`, `Invoke-WebRequest` to `http://localhost:3000`, Supabase local/remote from env, etc.
+- Recurring catalog/candle jobs: **QStash schedules** from `apps/web` (`pnpm qstash:schedules`) against a public dev URL (e.g. ngrok); in-process dev timers are not wired by default.
+- When documenting syncs or workers, lead with **QStash + manual Sync now** (dashboard) for localhost; optional legacy env `ENABLE_LOCAL_CANDLE_AUTO_SYNC` only if someone re-imports the local scheduler modules.
 
 ## Do not (unless the user explicitly asks about deploy or names a host)
 

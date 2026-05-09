@@ -1,14 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
-import {
-  runCoingeckoMetricsSyncWithSyncRun,
-  type CoingeckoMetricsSyncBody,
-} from "@/lib/markets/run-coingecko-sync-with-sync-run";
+import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/markets/run-eur-candle-sweep";
 import { NextResponse } from "next/server";
 
 /**
- * One-shot CoinGecko metrics sync for catalog crypto assets. Requires logged-in user.
- * POST with ?source=manual from the dashboard (same pattern as Bitvavo markets sync).
+ * Full EUR candle sweep (same engine as POST /api/workers/bitvavo-candles-sync): multi-chunk in one
+ * request when possible, then QStash chain if configured. Requires logged-in user.
  */
 export async function POST(request: Request) {
   const supabaseUser = await createClient();
@@ -24,14 +20,14 @@ export async function POST(request: Request) {
   if (url.searchParams.get("source") !== "manual") {
     return NextResponse.json(
       {
-        error: "coingecko_metrics_manual_only",
+        error: "eur_candles_sweep_manual_only",
         hint: "POST with ?source=manual from Sync runs, or use the worker with CRON_SECRET / QStash.",
       },
       { status: 400 },
     );
   }
 
-  let body: CoingeckoMetricsSyncBody = {};
+  let body: EurCandleSweepBody = {};
   const text = (await request.text()).trim();
   if (text) {
     let parsed: unknown;
@@ -40,17 +36,14 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
-    const o = parsed as CoingeckoMetricsSyncBody;
-    body = {};
-    if (typeof o?.syncRunId === "string" || o?.syncRunId === null) {
-      body.syncRunId = o.syncRunId;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as EurCandleSweepBody;
     }
   }
 
-  const admin = createServiceRoleClient();
   try {
-    const result = await runCoingeckoMetricsSyncWithSyncRun(admin, "manual", body);
-    return NextResponse.json({ ok: true, ...result });
+    const result = await runEurCandleSweep({ ...body, triggerSource: "manual" });
+    return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : "sync failed";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,16 +1,11 @@
+import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 type MarketListingRow = {
   id: string;
-  exchange_id: string;
-  asset_id: string;
   market_symbol: string;
-  quote_code: string | null;
-  status: string | null;
-  metadata: unknown;
   assets: unknown;
-  exchanges: unknown;
 };
 
 export default async function MarketsIndexPage() {
@@ -30,14 +25,8 @@ export default async function MarketsIndexPage() {
         .select(
           `
           id,
-          exchange_id,
-          asset_id,
           market_symbol,
-          quote_code,
-          status,
-          metadata,
-          assets ( id, code, kind, name ),
-          exchanges ( id, code, name )
+          assets ( id, code, name, coingecko_market_cap_usd, coingecko_total_volume_usd )
         `,
         )
         .eq("exchange_id", exchange.id)
@@ -45,25 +34,18 @@ export default async function MarketsIndexPage() {
     : { data: null, error: null };
 
   const rows = (listings ?? []) as MarketListingRow[];
-  const assetIds = [...new Set(rows.map((r) => r.asset_id).filter(Boolean))] as string[];
 
-  const mcapByAsset = new Map<string, number>();
-  if (assetIds.length > 0) {
-    const { data: mcapRows, error: mcapErr } = await supabase.rpc("latest_market_cap_by_assets", {
-      _asset_ids: assetIds,
-    });
-    if (!mcapErr && mcapRows) {
-      for (const r of mcapRows as { asset_id: string; market_cap_usd: number | string | null }[]) {
-        if (r.asset_id == null || r.market_cap_usd == null) continue;
-        const n = typeof r.market_cap_usd === "number" ? r.market_cap_usd : Number(r.market_cap_usd);
-        if (Number.isFinite(n)) mcapByAsset.set(r.asset_id, n);
-      }
-    }
+  function mcapFromRow(row: MarketListingRow): number {
+    const rawA = row.assets as unknown;
+    const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
+      coingecko_market_cap_usd?: number | string | null;
+    } | null;
+    return numericOrNegInf(asset?.coingecko_market_cap_usd ?? null);
   }
 
   const sortedListings = [...rows].sort((a, b) => {
-    const na = mcapByAsset.get(a.asset_id) ?? Number.NEGATIVE_INFINITY;
-    const nb = mcapByAsset.get(b.asset_id) ?? Number.NEGATIVE_INFINITY;
+    const na = mcapFromRow(a);
+    const nb = mcapFromRow(b);
     if (nb !== na) return nb - na;
     return (a.market_symbol ?? "").localeCompare(b.market_symbol ?? "", undefined, { sensitivity: "base" });
   });
@@ -120,43 +102,35 @@ export default async function MarketsIndexPage() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-3">Exchange</th>
+                <th className="py-2 pr-3">Asset Name</th>
                 <th className="py-2 pr-3">Market</th>
-                <th className="py-2 pr-3">Asset</th>
-                <th className="py-2 pr-3">Kind</th>
-                <th className="py-2 pr-3">Quote</th>
-                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3 text-right">Market Cap</th>
+                <th className="py-2 pr-3 text-right">24h Volume</th>
               </tr>
             </thead>
             <tbody>
               {sortedListings.map((row) => {
                 const rawA = row.assets as unknown;
-                const rawE = row.exchanges as unknown;
                 const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
                   id?: string;
                   code?: string;
-                  kind?: string;
-                  name?: string;
+                  name?: string | null;
+                  coingecko_market_cap_usd?: number | string | null;
+                  coingecko_total_volume_usd?: number | string | null;
                 } | null;
-                const ex = (Array.isArray(rawE) ? rawE[0] : rawE) as {
-                  id?: string;
-                  code?: string;
-                  name?: string;
-                } | null;
-                const exchangeId = ex?.id ?? (row as { exchange_id?: string }).exchange_id;
-                const assetId = asset?.id ?? (row as { asset_id?: string }).asset_id;
+                const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
                 return (
                   <tr key={row.id} className="border-b border-zinc-100 dark:border-zinc-800">
                     <td className="py-2 pr-3">
-                      {exchangeId ? (
+                      {asset?.id ? (
                         <Link
-                          href={`/dashboard/exchanges/${exchangeId}`}
-                          className="font-medium text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
+                          href={`/dashboard/assets/${asset.id}`}
+                          className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
                         >
-                          {ex?.code ?? "—"}
+                          {assetName}
                         </Link>
                       ) : (
-                        ex?.code ?? "—"
+                        assetName
                       )}
                     </td>
                     <td className="py-2 pr-3 font-mono">
@@ -167,27 +141,18 @@ export default async function MarketsIndexPage() {
                         {row.market_symbol}
                       </Link>
                     </td>
-                    <td className="py-2 pr-3 font-mono">
-                      {assetId ? (
-                        <Link
-                          href={`/dashboard/assets/${assetId}`}
-                          className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
-                        >
-                          {asset?.code ?? "—"}
-                        </Link>
-                      ) : (
-                        asset?.code ?? "—"
-                      )}
+                    <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                      {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null)}
                     </td>
-                    <td className="py-2 pr-3">{asset?.kind ?? "—"}</td>
-                    <td className="py-2 pr-3">{row.quote_code ?? "—"}</td>
-                    <td className="py-2 pr-3">{row.status}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                      {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null)}
+                    </td>
                   </tr>
                 );
               })}
               {!sortedListings.length ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-zinc-500">
+                  <td colSpan={4} className="py-8 text-center text-zinc-500">
                     No listings yet. Open{" "}
                     <Link href="/dashboard/sync-runs" className="font-medium underline-offset-2 hover:underline">
                       Sync runs

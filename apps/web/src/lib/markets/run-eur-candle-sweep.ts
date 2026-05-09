@@ -9,6 +9,7 @@ import {
   recordBitvavoSyncCompleted,
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
+  SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
   type BitvavoSyncTriggerSource,
 } from "@/lib/markets/record-bitvavo-sync-status";
 import {
@@ -94,21 +95,12 @@ async function resolveChunkTiming(
     triggerSource: BitvavoSyncTriggerSource;
   },
 ): Promise<ChunkTiming> {
-  if (
-    body.syncMode === "incremental" &&
-    body.candleTimestampId &&
-    body.targetCloseTimeIso
-  ) {
-    return {
-      syncMode: "incremental",
-      candleTimestampId: body.candleTimestampId,
-      targetCloseTimeIso: body.targetCloseTimeIso,
-    };
-  }
   if (body.syncMode === "full") {
     return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
   }
 
+  // Fresh EUR sweep at offset 0: DB state wins (empty `candle_timestamps` => full). Do not trust a stale
+  // `body.syncMode === "incremental"` from an old QStash payload before this runs.
   if (
     args.isEurQuote &&
     args.timeframe === CATALOG_STORAGE_TIMEFRAME &&
@@ -122,7 +114,7 @@ async function resolveChunkTiming(
             runId: args.syncRunId,
             jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
             source: args.triggerSource,
-            failedReason: prep.reason,
+            reason: prep.reason,
           });
         } catch {
           /* non-fatal */
@@ -138,6 +130,27 @@ async function resolveChunkTiming(
       };
     }
     return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
+  }
+
+  // Chunk continuations (or non-prep paths): incremental only if the timestamp row still exists.
+  if (
+    body.syncMode === "incremental" &&
+    body.candleTimestampId &&
+    body.targetCloseTimeIso
+  ) {
+    const { data: tsHit, error: tsErr } = await admin
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id")
+      .eq("id", body.candleTimestampId)
+      .maybeSingle();
+    if (!tsErr && tsHit) {
+      return {
+        syncMode: "incremental",
+        candleTimestampId: body.candleTimestampId,
+        targetCloseTimeIso: body.targetCloseTimeIso,
+      };
+    }
   }
 
   return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
@@ -165,11 +178,21 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   if (isEurQuote) {
     try {
       if (marketOffset === 0 && !syncRunId) {
-        syncRunId = await beginBitvavoSyncRun(
-          admin,
-          BITVAVO_SYNC_JOB_CANDLES_EUR,
-          triggerSource,
-        );
+        const begun = await beginBitvavoSyncRun(admin, BITVAVO_SYNC_JOB_CANDLES_EUR, triggerSource);
+        if (begun.outcome === "skipped") {
+          return {
+            ok: true,
+            incomplete: false,
+            chunksProcessed: 0,
+            candleRowsUpserted: 0,
+            marketsProcessed: 0,
+            totalMarkets: 0,
+            nextMarketOffset: null,
+            syncRunId: begun.runId,
+            warning: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+          };
+        }
+        syncRunId = begun.runId;
       } else if (marketOffset > 0 && !syncRunId) {
         syncRunId = await resolveLatestRunningBitvavoRunId(admin, BITVAVO_SYNC_JOB_CANDLES_EUR);
       }

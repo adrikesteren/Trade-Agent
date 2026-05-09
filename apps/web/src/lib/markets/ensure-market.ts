@@ -94,5 +94,15 @@ export async function ensureMarket(
     throw new Error(mErr?.message ?? "markets upsert failed");
   }
 
-  return { marketId: row.id as string, exchangeId, assetId };
+  const marketId = row.id as string;
+  try {
+    const { sweepBitvavoSingleMarketCatalogCandles } = await import(
+      "@/lib/markets/sweep-bitvavo-single-market-catalog-candles"
+    );
+    await sweepBitvavoSingleMarketCatalogCandles(supabase, marketId);
+  } catch {
+    /* non-fatal: listing exists; candles can be filled by the EUR sweep */
+  }
+
+  return { marketId, exchangeId, assetId };
 }

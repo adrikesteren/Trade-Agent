@@ -4,6 +4,10 @@
 
 Append-only **sync run** rows per `job_key` (e.g. Bitvavo markets EUR, candles EUR). **Read** for `authenticated`; **insert/update** via service role from API routes / workers (`record-bitvavo-sync-status`, candle sweep).
 
+**Realtime:** `automation.sync_runs` is included in `supabase_realtime` (migration `20260519120000_enable_realtime_sync_runs.sql`) so the dashboard Sync runs page can subscribe to INSERT/UPDATE without refresh.
+
+**Overlap:** For `trigger_source = automated`, `beginBitvavoSyncRun` (app) inserts `skipped` with `reason = 'Previous sync still running'` when a row for the same `job_key` is already `running`, so schedulers do not stack concurrent runs. Manual triggers still start a new `running` row.
+
 ## Global market catalog (`exchanges`, `assets`, `markets`, `candles`, `candle_timestamps`)
 
 These tables hold **shared** reference data (not per-user). **RLS** allows any `authenticated` user to **read** them; **writes** are intended to go through the **service role** (Bitvavo catalog sync routes, candle workers, CoinGecko metrics worker) so the app can bulk-upsert without per-row `user_id`.

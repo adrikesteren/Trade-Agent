@@ -1,3 +1,4 @@
+import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
@@ -6,7 +7,8 @@ type AssetRow = {
   code: string;
   kind: string;
   name: string | null;
-  created_at: string | null;
+  coingecko_market_cap_usd: number | string | null;
+  coingecko_total_volume_usd: number | string | null;
 };
 
 export default async function AssetsIndexPage() {
@@ -15,29 +17,14 @@ export default async function AssetsIndexPage() {
   const { data: rows, error } = await supabase
     .schema("catalog")
     .from("assets")
-    .select("id, code, kind, name, created_at")
+    .select("id, code, kind, name, coingecko_market_cap_usd, coingecko_total_volume_usd")
     .limit(2000);
 
   const assets = (rows ?? []) as AssetRow[];
-  const assetIds = assets.map((a) => a.id);
-
-  const mcapByAsset = new Map<string, number>();
-  if (assetIds.length > 0) {
-    const { data: mcapRows, error: mcapErr } = await supabase.rpc("latest_market_cap_by_assets", {
-      _asset_ids: assetIds,
-    });
-    if (!mcapErr && mcapRows) {
-      for (const r of mcapRows as { asset_id: string; market_cap_usd: number | string | null }[]) {
-        if (r.asset_id == null || r.market_cap_usd == null) continue;
-        const n = typeof r.market_cap_usd === "number" ? r.market_cap_usd : Number(r.market_cap_usd);
-        if (Number.isFinite(n)) mcapByAsset.set(r.asset_id, n);
-      }
-    }
-  }
 
   const sortedRows = [...assets].sort((a, b) => {
-    const na = mcapByAsset.get(a.id) ?? Number.NEGATIVE_INFINITY;
-    const nb = mcapByAsset.get(b.id) ?? Number.NEGATIVE_INFINITY;
+    const na = numericOrNegInf(a.coingecko_market_cap_usd);
+    const nb = numericOrNegInf(b.coingecko_market_cap_usd);
     if (nb !== na) return nb - na;
     return (a.code ?? "").localeCompare(b.code ?? "", undefined, { sensitivity: "base" });
   });
@@ -76,32 +63,32 @@ export default async function AssetsIndexPage() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
-                <th className="py-2 pr-3">Code</th>
                 <th className="py-2 pr-3">Name</th>
+                <th className="py-2 pr-3">Code</th>
                 <th className="py-2 pr-3">Kind</th>
-                <th className="py-2 pr-3">Created</th>
-                <th className="py-2 pr-3">id</th>
+                <th className="py-2 pr-3 text-right">Market cap</th>
+                <th className="py-2 pr-3 text-right">24h volume</th>
               </tr>
             </thead>
             <tbody>
               {sortedRows.map((r) => (
                 <tr key={r.id} className="border-b border-zinc-100 dark:border-zinc-800">
-                  <td className="py-2 pr-3 font-mono font-medium">
+                  <td className="py-2 pr-3 font-medium">
                     <Link
                       href={`/dashboard/assets/${r.id}`}
                       className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
                     >
-                      {r.code}
+                      {r.name?.trim() ? r.name : r.code}
                     </Link>
                   </td>
-                  <td className="py-2 pr-3">{r.name ?? "—"}</td>
+                  <td className="py-2 pr-3 font-mono text-zinc-700 dark:text-zinc-300">{r.code}</td>
                   <td className="py-2 pr-3">{r.kind}</td>
-                  <td className="py-2 pr-3 font-mono text-zinc-600 dark:text-zinc-400">
-                    {r.created_at
-                      ? new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                      : "—"}
+                  <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                    {formatUsdMetric(r.coingecko_market_cap_usd)}
                   </td>
-                  <td className="py-2 pr-3 font-mono text-[10px] text-zinc-500">{r.id}</td>
+                  <td className="py-2 pr-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                    {formatUsdMetric(r.coingecko_total_volume_usd)}
+                  </td>
                 </tr>
               ))}
               {!sortedRows.length ? (

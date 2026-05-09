@@ -1,13 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import {
-  beginBitvavoSyncRun,
-  BITVAVO_SYNC_JOB_MARKETS_EUR,
-  type BitvavoSyncTriggerSource,
-  recordBitvavoSyncCompleted,
-  recordBitvavoSyncFailed,
-} from "@/lib/markets/record-bitvavo-sync-status";
-import { syncBitvavoMarkets } from "@/lib/markets/sync-bitvavo-markets";
+import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/markets/run-bitvavo-markets-eur-sync-with-sync-run";
+import { SKIPPED_PREVIOUS_SYNC_STILL_RUNNING } from "@/lib/markets/record-bitvavo-sync-status";
 import { NextResponse } from "next/server";
 
 /**
@@ -32,54 +26,35 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "markets_sync_manual_only",
-        hint: "EUR market catalog sync is manual-only. Open Assets → Sync Now, or POST with ?source=manual.",
+        hint: "Open Sync runs → Sync now, or POST with ?source=manual. Automated runs use QStash /api/workers/bitvavo-markets-sync.",
       },
       { status: 400 },
     );
   }
-  const source: BitvavoSyncTriggerSource = "manual";
 
   const admin = createServiceRoleClient();
-  let marketsRunId: string | null = null;
   try {
-    if (quote === "EUR") {
-      try {
-        marketsRunId = await beginBitvavoSyncRun(admin, BITVAVO_SYNC_JOB_MARKETS_EUR, source);
-      } catch {
-        /* non-fatal */
-      }
+    const result = await runBitvavoMarketsEurSyncWithSyncRun(admin, "manual", {
+      quoteFilter: quote === "all" ? null : quote,
+    });
+
+    if (result.skipped) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        syncRunId: result.syncRunId,
+        message: SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+      });
     }
-    const stats = await syncBitvavoMarkets(admin, quote === "all" ? null : quote);
-    if (quote === "EUR" && marketsRunId) {
-      try {
-        await recordBitvavoSyncCompleted(admin, {
-          runId: marketsRunId,
-          jobKey: BITVAVO_SYNC_JOB_MARKETS_EUR,
-          source,
-        });
-      } catch {
-        /* non-fatal: sync data is already persisted */
-      }
-    }
+
     return NextResponse.json({
       ok: true,
       quoteFilter: quote === "all" ? null : quote,
-      ...stats,
+      upsertedListings: result.upsertedListings,
+      upsertedAssets: result.upsertedAssets,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "sync failed";
-    if (quote === "EUR" && marketsRunId) {
-      try {
-        await recordBitvavoSyncFailed(admin, {
-          runId: marketsRunId,
-          jobKey: BITVAVO_SYNC_JOB_MARKETS_EUR,
-          source,
-          failedReason: message,
-        });
-      } catch {
-        /* non-fatal */
-      }
-    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

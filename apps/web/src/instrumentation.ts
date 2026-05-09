@@ -1,12 +1,7 @@
 /**
- * Node only. Ensures local EUR candle interval is registered when instrumentation runs
- * (e.g. before any page layout). The scheduler module is idempotent; root layout also imports it.
+ * Node only. Catalog/candle automation is driven by **QStash schedules** (see `pnpm qstash:schedules`),
+ * not in-process dev timers. Re-add imports from `local-*-scheduler.ts` only if you explicitly want that.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === "edge") return;
-  await Promise.all([
-    import("@/lib/markets/local-candle-sync-scheduler"),
-    import("@/lib/markets/local-coingecko-metrics-scheduler"),
-    import("@/lib/markets/local-coingecko-coin-id-scheduler"),
-  ]);
 }

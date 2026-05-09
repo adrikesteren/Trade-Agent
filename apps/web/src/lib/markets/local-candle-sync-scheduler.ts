@@ -3,9 +3,11 @@ import "server-only";
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 
 /**
+ * **Not imported by default** — production and local dev use QStash schedules (`pnpm qstash:schedules`).
+ * To use this again, import this module from `app/layout.tsx` or `instrumentation.ts` and set
+ * `ENABLE_LOCAL_CANDLE_AUTO_SYNC=1` (development only).
+ *
  * Starts at most one interval per Node process (HMR / double import safe).
- * Loaded from root `layout.tsx` (reliable in `next dev`) and from `instrumentation.ts`
- * (covers API-only traffic that never renders the layout).
  *
  * Ticks align to the same local wall-clock grid as the Assets page “Next … mark” hint
  * (`nextLocalWallClockBoundaryAfter`), not to “every 5m since server boot” — avoids :39/:44/:49 drift.
