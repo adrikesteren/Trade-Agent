@@ -439,26 +439,18 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       /* non-fatal */
     }
 
-    /** Signal run: incremental uses the bar being synced; full/window uses latest global catalog close (same 5m grid). */
-    const signalCloseIso =
-      chunkTiming.syncMode === "incremental" && chunkTiming.targetCloseTimeIso
-        ? chunkTiming.targetCloseTimeIso
-        : timeframe === CATALOG_STORAGE_TIMEFRAME
-          ? await resolveLatestCatalogCandleCloseIso(admin)
-          : null;
-
-    const shouldEnqueueSignals =
-      timeframe === CATALOG_STORAGE_TIMEFRAME &&
-      Boolean(signalCloseIso) &&
-      (candleRowsUpserted > 0 || chunkTiming.syncMode === "incremental");
-
-    if (shouldEnqueueSignals && signalCloseIso) {
+    // Signal pass: candle sync internally picks full / incremental / window; after a successful EUR catalog
+    // sweep with new rows we always evaluate the latest closed bar on the global `candle_timestamps` grid.
+    if (timeframe === CATALOG_STORAGE_TIMEFRAME && candleRowsUpserted > 0) {
       try {
-        await enqueueSignalsCatalogCloseAfterIncremental({
-          closeTimeIso: signalCloseIso,
-          timeframe,
-          candleSyncRunId: syncRunId,
-        });
+        const signalCloseIso = await resolveLatestCatalogCandleCloseIso(admin);
+        if (signalCloseIso) {
+          await enqueueSignalsCatalogCloseAfterIncremental({
+            closeTimeIso: signalCloseIso,
+            timeframe,
+            candleSyncRunId: syncRunId,
+          });
+        }
       } catch (e) {
         console.error("enqueueSignalsCatalogCloseAfterIncremental failed:", e);
       }

@@ -7,7 +7,7 @@ import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 import { runSignalsCatalogCloseDrain, type SignalsCatalogCloseBody } from "./run-signals-catalog-close";
 import { parseSignalUserIdsFromEnv } from "./signal-user-ids";
 
-/** After a completed EUR catalog candle sweep (`runEurCandleSweep`), enqueue one signal pass for the resolved bar `closeTimeIso`. */
+/** After a completed EUR catalog candle sweep (`runEurCandleSweep`), enqueue one signal pass for `closeTimeIso` (latest closed bar on the catalog grid). */
 export async function enqueueSignalsCatalogCloseAfterIncremental(params: {
   closeTimeIso: string;
   timeframe: string;
