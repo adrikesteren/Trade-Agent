@@ -91,6 +91,9 @@ async function listCandlesForWindow(
 /**
  * For each row in `markets`, fetch OHLCV from Bitvavo REST and upsert `catalog.candles`.
  * Call repeatedly with increasing `marketOffset` until `nextMarketOffset` is null.
+ *
+ * Processing order: base asset `coingecko_market_cap_usd` descending (nulls last), then `market_symbol`
+ * (see `catalog.bitvavo_markets_for_candle_sync_slice`).
  */
 export async function syncBitvavoCandlesChunk(
   supabase: SupabaseClient,
@@ -145,21 +148,20 @@ export async function syncBitvavoCandlesChunk(
     effectiveBars = Math.min(Math.max(opts.barsPerMarket, 1), maxBars);
   }
 
-  let listQuery = supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol")
-    .eq("exchange_id", exchangeId)
-    .order("market_symbol", { ascending: true });
-
-  if (opts.quote) {
-    listQuery = listQuery.eq("quote_code", opts.quote.toUpperCase());
-  }
-
   const from = opts.marketOffset;
-  const to = opts.marketOffset + opts.marketBatchSize - 1;
+  const quoteArg =
+    opts.quote != null && String(opts.quote).trim() !== ""
+      ? String(opts.quote).trim().toUpperCase()
+      : null;
 
-  const { data: markets, error: listErr } = await listQuery.range(from, to);
+  const { data: markets, error: listErr } = await supabase
+    .schema("catalog")
+    .rpc("bitvavo_markets_for_candle_sync_slice", {
+      p_exchange_id: exchangeId,
+      p_quote: quoteArg,
+      p_offset: from,
+      p_limit: opts.marketBatchSize,
+    });
 
   if (listErr) {
     throw new Error(listErr.message);

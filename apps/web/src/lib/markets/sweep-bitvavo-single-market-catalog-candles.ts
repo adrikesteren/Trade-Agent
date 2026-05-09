@@ -42,14 +42,15 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
 
   const { data: ordered, error: listErr } = await supabase
     .schema("catalog")
-    .from("markets")
-    .select("id")
-    .eq("exchange_id", mrow.exchange_id as string)
-    .eq("quote_code", quote)
-    .order("market_symbol", { ascending: true });
+    .rpc("bitvavo_markets_for_candle_sync_slice", {
+      p_exchange_id: mrow.exchange_id as string,
+      p_quote: quote,
+      p_offset: 0,
+      p_limit: 50_000,
+    });
 
   if (listErr) throw new Error(listErr.message);
-  const ids = (ordered ?? []).map((r) => r.id as string);
+  const ids = (ordered ?? []).map((r: { id: string }) => r.id);
   const offset = ids.indexOf(marketId);
   if (offset < 0) {
     throw new Error("market not in Bitvavo quote slice");
