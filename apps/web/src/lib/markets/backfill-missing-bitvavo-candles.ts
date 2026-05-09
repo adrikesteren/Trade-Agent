@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter } from "@repo/exchange";
-import { barsForRetention, deleteExpiredMarketCandles } from "@/lib/markets/candle-retention";
+import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 
 export type BackfillMissingCandlesResult = {
@@ -9,6 +9,10 @@ export type BackfillMissingCandlesResult = {
   missingTotal: number;
   error?: string;
 };
+
+function keyForTs(openIso: string, closeIso: string): string {
+  return `${openIso}\0${closeIso}`;
+}
 
 /**
  * For Bitvavo markets with `quote` that have no rows in `candles` for the catalog timeframe,
@@ -61,24 +65,50 @@ export async function backfillMissingBitvavoCandles(
       limit: barsPerMarket,
     });
 
-    const ecRows = candles.map((c) => ({
-      market_id: marketId,
-      timeframe: c.timeframe,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      volume: c.volume,
-      open_time: c.openTime,
-      close_time: c.closeTime,
-    }));
+    const distinctPairs = new Map<string, { open_time: string; close_time: string }>();
+    for (const c of candles) {
+      const k = keyForTs(c.openTime, c.closeTime);
+      if (!distinctPairs.has(k)) {
+        distinctPairs.set(k, { open_time: c.openTime, close_time: c.closeTime });
+      }
+    }
+    const pairList = [...distinctPairs.values()];
+    const idByKey = new Map<string, string>();
+    if (pairList.length) {
+      const { data: tsRows, error: tsErr } = await supabase
+        .schema("catalog")
+        .from("candle_timestamps")
+        .upsert(pairList, { onConflict: "open_time,close_time" })
+        .select("id, open_time, close_time");
+      if (tsErr) {
+        throw new Error(`${marketSymbol}: candle_timestamps: ${tsErr.message}`);
+      }
+      for (const r of tsRows ?? []) {
+        idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id as string);
+      }
+    }
 
-    if (ecRows.length) {
+    const rowsToWrite = candles.map((c) => {
+      const id = idByKey.get(keyForTs(c.openTime, c.closeTime));
+      if (!id) throw new Error(`${marketSymbol}: missing candle_timestamp_id for bar`);
+      return {
+        market_id: marketId,
+        timeframe: c.timeframe,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+        candle_timestamp_id: id,
+      };
+    });
+
+    if (rowsToWrite.length) {
       const chunkSize = 500;
-      for (let j = 0; j < ecRows.length; j += chunkSize) {
-        const part = ecRows.slice(j, j + chunkSize);
+      for (let j = 0; j < rowsToWrite.length; j += chunkSize) {
+        const part = rowsToWrite.slice(j, j + chunkSize);
         const { error: upErr } = await supabase.schema("catalog").from("candles").upsert(part, {
-          onConflict: "market_id,timeframe,close_time",
+          onConflict: "market_id,timeframe,candle_timestamp_id",
         });
         if (upErr) {
           throw new Error(`${marketSymbol}: ${upErr.message}`);
@@ -92,7 +122,7 @@ export async function backfillMissingBitvavoCandles(
     }
   }
 
-  await deleteExpiredMarketCandles(supabase);
+  await deleteExpiredCandleTimestamps(supabase);
 
   return {
     seededMarkets: batch.length,

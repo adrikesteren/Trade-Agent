@@ -12,17 +12,22 @@ type PageProps = { params: Promise<{ marketId: string }> };
 const CHART_DEFAULT_TF = "5m" as const;
 
 function mapCandleRow(r: {
-  open_time: string;
-  close_time: string;
   open: unknown;
   high: unknown;
   low: unknown;
   close: unknown;
   volume: unknown;
-}): CandleRowJson {
+  candle_timestamps: unknown;
+}): CandleRowJson | null {
+  const rawTs = r.candle_timestamps;
+  const ts = (Array.isArray(rawTs) ? rawTs[0] : rawTs) as
+    | { open_time: string; close_time: string }
+    | null
+    | undefined;
+  if (!ts?.open_time || !ts?.close_time) return null;
   return {
-    openTime: r.open_time,
-    closeTime: r.close_time,
+    openTime: ts.open_time,
+    closeTime: ts.close_time,
     open: Number(r.open),
     high: Number(r.high),
     low: Number(r.low),
@@ -76,13 +81,15 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const { data: candleRows } = await supabase
     .schema("catalog")
     .from("candles")
-    .select("open_time, close_time, open, high, low, close, volume")
+    .select("open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
     .eq("market_id", marketId)
     .eq("timeframe", CATALOG_STORAGE_TIMEFRAME)
-    .order("close_time", { ascending: true })
     .limit(1500);
 
-  const baseCandles = (candleRows ?? []).map(mapCandleRow);
+  const baseCandles = (candleRows ?? [])
+    .map(mapCandleRow)
+    .filter((c): c is CandleRowJson => c != null)
+    .sort((a, b) => Date.parse(a.closeTime) - Date.parse(b.closeTime));
   const initialCandles = aggregateOhlcvToTarget(baseCandles, CHART_DEFAULT_TF);
   const chartDisplayTz = getChartDisplayTimeZone();
 

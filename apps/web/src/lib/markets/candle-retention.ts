@@ -29,15 +29,20 @@ export function barsForRetention(timeframe: string, retentionHours = CANDLE_RETE
 }
 
 /**
- * Deletes closed candles older than the retention window (`candles` catalog table).
+ * Deletes `catalog.candle_timestamps` whose bar has fully ended before the retention cutoff.
+ * Related `catalog.candles` rows are removed via ON DELETE CASCADE.
  */
-export async function deleteExpiredMarketCandles(
+export async function deleteExpiredCandleTimestamps(
   supabase: SupabaseClient,
   retentionHours = CANDLE_RETENTION_HOURS,
 ): Promise<void> {
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
 
-  const { error } = await supabase.schema("catalog").from("candles").delete().lt("close_time", cutoff);
+  const { error } = await supabase
+    .schema("catalog")
+    .from("candle_timestamps")
+    .delete()
+    .lt("close_time", cutoff);
 
   if (error) {
     throw new Error(error.message);

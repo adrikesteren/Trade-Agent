@@ -2,14 +2,19 @@ import { Client } from "@upstash/qstash";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { barsForRetention } from "@/lib/markets/candle-retention";
+import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 import {
   beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   recordBitvavoSyncCompleted,
+  recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
   type BitvavoSyncTriggerSource,
 } from "@/lib/markets/record-bitvavo-sync-status";
-import { syncBitvavoCandlesChunk } from "@/lib/markets/sync-bitvavo-candles-chunk";
+import {
+  syncBitvavoCandlesChunk,
+  type CandleSyncMode,
+} from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type EurCandleSweepBody = {
@@ -23,6 +28,10 @@ export type EurCandleSweepBody = {
   triggerSource?: BitvavoSyncTriggerSource;
   /** Same logical run across QStash chunks (from first `beginBitvavoSyncRun`). */
   syncRunId?: string | null;
+  /** Carried across QStash continuations together with `candleTimestampId` / `targetCloseTimeIso`. */
+  syncMode?: CandleSyncMode;
+  candleTimestampId?: string | null;
+  targetCloseTimeIso?: string | null;
 };
 
 export type EurCandleSweepResult = {
@@ -36,6 +45,12 @@ export type EurCandleSweepResult = {
   /** Populated for EUR sweeps when a run row exists for this execution. */
   syncRunId: string | null;
   warning?: string;
+};
+
+type ChunkTiming = {
+  syncMode: CandleSyncMode;
+  candleTimestampId: string | null;
+  targetCloseTimeIso: string | null;
 };
 
 function maxChunksPerRun(): number {
@@ -68,6 +83,66 @@ function inlineSweepDeadlineMs(): number {
   return process.env.NODE_ENV === "development" ? 900_000 : 300_000;
 }
 
+async function resolveChunkTiming(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  body: EurCandleSweepBody,
+  args: {
+    isEurQuote: boolean;
+    timeframe: string;
+    marketOffset: number;
+    syncRunId: string | null;
+    triggerSource: BitvavoSyncTriggerSource;
+  },
+): Promise<ChunkTiming> {
+  if (
+    body.syncMode === "incremental" &&
+    body.candleTimestampId &&
+    body.targetCloseTimeIso
+  ) {
+    return {
+      syncMode: "incremental",
+      candleTimestampId: body.candleTimestampId,
+      targetCloseTimeIso: body.targetCloseTimeIso,
+    };
+  }
+  if (body.syncMode === "full") {
+    return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
+  }
+
+  if (
+    args.isEurQuote &&
+    args.timeframe === CATALOG_STORAGE_TIMEFRAME &&
+    args.marketOffset === 0
+  ) {
+    const prep = await prepareEurCandleTimestampWindow(admin, args.timeframe);
+    if (prep.mode === "blocked_future_close") {
+      if (args.syncRunId) {
+        try {
+          await recordBitvavoSyncFailed(admin, {
+            runId: args.syncRunId,
+            jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+            source: args.triggerSource,
+            failedReason: prep.reason,
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
+      throw new Error(prep.reason);
+    }
+    if (prep.mode === "incremental") {
+      return {
+        syncMode: "incremental",
+        candleTimestampId: prep.candleTimestampId,
+        targetCloseTimeIso: prep.closeTime,
+      };
+    }
+    return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
+  }
+
+  return { syncMode: "full", candleTimestampId: null, targetCloseTimeIso: null };
+}
+
 /**
  * One EUR candle sweep run (same behaviour as POST /api/workers/bitvavo-candles-sync).
  * Used by the worker route and by local dev auto-sync (instrumentation).
@@ -85,6 +160,7 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   const delayMsBetweenMarkets = Math.min(Math.max(body.delayMsBetweenMarkets ?? 120, 0), 2000);
 
   const isEurQuote = quote === null || String(quote).toUpperCase() === "EUR";
+  const triggerSource = body.triggerSource ?? "automated";
   let syncRunId: string | null = body.syncRunId ?? null;
   if (isEurQuote) {
     try {
@@ -92,7 +168,7 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
         syncRunId = await beginBitvavoSyncRun(
           admin,
           BITVAVO_SYNC_JOB_CANDLES_EUR,
-          body.triggerSource ?? "automated",
+          triggerSource,
         );
       } else if (marketOffset > 0 && !syncRunId) {
         syncRunId = await resolveLatestRunningBitvavoRunId(admin, BITVAVO_SYNC_JOB_CANDLES_EUR);
@@ -102,6 +178,14 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     }
   }
 
+  const chunkTiming = await resolveChunkTiming(admin, body, {
+    isEurQuote,
+    timeframe,
+    marketOffset,
+    syncRunId,
+    triggerSource,
+  });
+
   const maxChunks = maxChunksPerRun();
   let chunksProcessed = 0;
   let candleRowsUpserted = 0;
@@ -109,14 +193,21 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   let lastTotalMarkets = 0;
   let lastResult: Awaited<ReturnType<typeof syncBitvavoCandlesChunk>> | null = null;
 
+  const chunkOptsBase = {
+    timeframe,
+    barsPerMarket,
+    quote,
+    marketBatchSize,
+    delayMsBetweenMarkets,
+    syncMode: chunkTiming.syncMode,
+    candleTimestampId: chunkTiming.candleTimestampId,
+    targetCloseTimeIso: chunkTiming.targetCloseTimeIso,
+  };
+
   for (; chunksProcessed < maxChunks; chunksProcessed++) {
     lastResult = await syncBitvavoCandlesChunk(admin, {
-      timeframe,
-      barsPerMarket,
-      quote,
+      ...chunkOptsBase,
       marketOffset,
-      marketBatchSize,
-      delayMsBetweenMarkets,
     });
     candleRowsUpserted += lastResult.candleRowsUpserted;
     marketsProcessed += lastResult.marketsProcessed;
@@ -143,12 +234,8 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     ) {
       marketOffset = lastResult.nextMarketOffset;
       lastResult = await syncBitvavoCandlesChunk(admin, {
-        timeframe,
-        barsPerMarket,
-        quote,
+        ...chunkOptsBase,
         marketOffset,
-        marketBatchSize,
-        delayMsBetweenMarkets,
       });
       candleRowsUpserted += lastResult.candleRowsUpserted;
       marketsProcessed += lastResult.marketsProcessed;
@@ -164,7 +251,7 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       await recordBitvavoSyncCompleted(admin, {
         runId: syncRunId,
         jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
-        source: body.triggerSource ?? "automated",
+        source: triggerSource,
       });
     } catch {
       /* non-fatal */
@@ -180,8 +267,11 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       barsPerMarket,
       marketBatchSize,
       delayMsBetweenMarkets,
-      triggerSource: body.triggerSource ?? "automated",
+      triggerSource,
       syncRunId: syncRunId ?? undefined,
+      syncMode: chunkTiming.syncMode,
+      candleTimestampId: chunkTiming.candleTimestampId ?? undefined,
+      targetCloseTimeIso: chunkTiming.targetCloseTimeIso ?? undefined,
     };
     await client.publishJSON({
       url: `${base}/api/workers/bitvavo-candles-sync`,

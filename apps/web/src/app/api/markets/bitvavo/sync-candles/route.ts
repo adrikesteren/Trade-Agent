@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { barsForRetention, CANDLE_RETENTION_HOURS } from "@/lib/markets/candle-retention";
+import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 import {
   beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
@@ -9,7 +11,10 @@ import {
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
 } from "@/lib/markets/record-bitvavo-sync-status";
-import { syncBitvavoCandlesChunk } from "@/lib/markets/sync-bitvavo-candles-chunk";
+import {
+  syncBitvavoCandlesChunk,
+  type CandleSyncMode,
+} from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { NextResponse } from "next/server";
 
 type Body = {
@@ -21,6 +26,9 @@ type Body = {
   delayMsBetweenMarkets?: number;
   /** Same logical EUR sweep across chunked POSTs. */
   syncRunId?: string | null;
+  syncMode?: CandleSyncMode;
+  candleTimestampId?: string | null;
+  targetCloseTimeIso?: string | null;
 };
 
 /**
@@ -78,6 +86,40 @@ export async function POST(request: Request) {
     }
   }
 
+  let syncMode: CandleSyncMode = "full";
+  let candleTimestampId: string | null = null;
+  let targetCloseTimeIso: string | null = null;
+
+  if (body.syncMode === "incremental" && body.candleTimestampId && body.targetCloseTimeIso) {
+    syncMode = "incremental";
+    candleTimestampId = body.candleTimestampId;
+    targetCloseTimeIso = body.targetCloseTimeIso;
+  } else if (body.syncMode === "full") {
+    syncMode = "full";
+  } else if (isEurQuote && timeframe === CATALOG_STORAGE_TIMEFRAME && marketOffset === 0) {
+    const prep = await prepareEurCandleTimestampWindow(admin, timeframe);
+    if (prep.mode === "blocked_future_close") {
+      if (runId) {
+        try {
+          await recordBitvavoSyncFailed(admin, {
+            runId,
+            jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+            source,
+            failedReason: prep.reason,
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
+      return NextResponse.json({ error: prep.reason }, { status: 400 });
+    }
+    if (prep.mode === "incremental") {
+      syncMode = "incremental";
+      candleTimestampId = prep.candleTimestampId;
+      targetCloseTimeIso = prep.closeTime;
+    }
+  }
+
   try {
     const result = await syncBitvavoCandlesChunk(admin, {
       timeframe,
@@ -86,6 +128,9 @@ export async function POST(request: Request) {
       marketOffset,
       marketBatchSize,
       delayMsBetweenMarkets,
+      syncMode,
+      candleTimestampId,
+      targetCloseTimeIso,
     });
 
     const isFullSweepDone = result.nextMarketOffset == null;
@@ -114,22 +159,23 @@ export async function POST(request: Request) {
         approxMbThisChunk: Math.round(approxMbStored * 1000) / 1000,
         retentionHours: CANDLE_RETENTION_HOURS,
         retentionMaxBars: result.retentionMaxBars,
-        hint: `Bars are capped to the retention window (${CANDLE_RETENTION_HOURS}h); old rows are deleted after each chunk.`,
+        hint: `Bars are capped to the retention window (${CANDLE_RETENTION_HOURS}h); expired catalog.candle_timestamps are deleted after each chunk (candles cascade).`,
       },
     });
   } catch (e) {
+    const message = e instanceof Error ? e.message : "sync failed";
     if (isEurQuote) {
       try {
         await recordBitvavoSyncFailed(admin, {
           runId,
           jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
           source,
+          failedReason: message,
         });
       } catch {
         /* non-fatal */
       }
     }
-    const message = e instanceof Error ? e.message : "sync failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

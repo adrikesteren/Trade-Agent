@@ -38,25 +38,35 @@ export async function GET(request: Request) {
   const { data: rows, error } = await supabase
     .schema("catalog")
     .from("candles")
-    .select("open_time, close_time, open, high, low, close, volume")
+    .select("open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
     .eq("market_id", marketId)
     .eq("timeframe", CATALOG_STORAGE_TIMEFRAME)
-    .order("close_time", { ascending: true })
     .limit(1500);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const baseCandles = (rows ?? []).map((r) => ({
-    openTime: r.open_time as string,
-    closeTime: r.close_time as string,
-    open: Number(r.open),
-    high: Number(r.high),
-    low: Number(r.low),
-    close: Number(r.close),
-    volume: Number(r.volume),
-  }));
+  const baseCandles = (rows ?? [])
+    .map((r) => {
+      const rawTs = r.candle_timestamps as unknown;
+      const ts = (Array.isArray(rawTs) ? rawTs[0] : rawTs) as
+        | { open_time: string; close_time: string }
+        | null
+        | undefined;
+      if (!ts?.open_time || !ts?.close_time) return null;
+      return {
+        openTime: ts.open_time as string,
+        closeTime: ts.close_time as string,
+        open: Number(r.open),
+        high: Number(r.high),
+        low: Number(r.low),
+        close: Number(r.close),
+        volume: Number(r.volume),
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => c != null)
+    .sort((a, b) => Date.parse(a.closeTime) - Date.parse(b.closeTime));
 
   const candles = aggregateOhlcvToTarget(baseCandles, requested);
 

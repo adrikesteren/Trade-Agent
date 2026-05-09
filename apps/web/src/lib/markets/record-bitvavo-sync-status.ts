@@ -98,20 +98,29 @@ export async function recordBitvavoSyncCompleted(
 
 /**
  * Marks the run failed. Only updates rows still in `running`.
+ * `failedReason` is persisted to `failed_reason` (DB requires it when status is `failed`).
  */
 export async function recordBitvavoSyncFailed(
   admin: SupabaseClient,
-  args: { runId: string | null | undefined; jobKey: string; source: BitvavoSyncTriggerSource },
+  args: {
+    runId: string | null | undefined;
+    jobKey: string;
+    source: BitvavoSyncTriggerSource;
+    failedReason: string;
+  },
 ): Promise<void> {
   const now = new Date().toISOString();
   const runId = await resolveRunIdForUpdate(admin, args.jobKey, args.runId);
   if (!runId) return;
+
+  const reason = String(args.failedReason || "").trim() || "Unknown error";
 
   const { error } = await admin
     .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
       status: "failed",
+      failed_reason: reason,
       ended_at: now,
       updated_at: now,
       trigger_source: args.source,

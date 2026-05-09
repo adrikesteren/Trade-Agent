@@ -42,6 +42,7 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
           runId,
           jobKey: COINGECKO_SYNC_JOB_COIN_ID,
           source,
+          failedReason: e instanceof Error ? e.message : "sync failed",
         });
       } catch {
         /* non-fatal */

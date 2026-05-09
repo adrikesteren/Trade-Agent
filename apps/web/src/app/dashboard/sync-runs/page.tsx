@@ -23,6 +23,7 @@ type SyncRunRow = {
   created_at: string | null;
   completed_at: string | null;
   ended_at: string | null;
+  failed_reason: string | null;
 };
 
 function lastCompletedAtForJob(rows: SyncRunRow[], jobKey: string): string | null {
@@ -45,7 +46,7 @@ export default async function SyncRunsPage() {
   const { data: runRows, error: runsError } = await supabase
     .schema("automation")
     .from("sync_runs")
-    .select("id, job_key, status, trigger_source, created_at, completed_at, ended_at")
+    .select("id, job_key, status, trigger_source, created_at, completed_at, ended_at, failed_reason")
     .in("job_key", [...SYNC_JOB_KEYS])
     .order("created_at", { ascending: false })
     .limit(200);
@@ -153,6 +154,7 @@ export default async function SyncRunsPage() {
                 <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800">
                   <th className="py-2 pr-2">Job</th>
                   <th className="py-2 pr-2">Status</th>
+                  <th className="py-2 pr-2">Failed reason</th>
                   <th className="py-2 pr-2">Trigger</th>
                   <th className="py-2 pr-2">Started</th>
                   <th className="py-2 pr-2">Ended</th>
@@ -164,6 +166,9 @@ export default async function SyncRunsPage() {
                   <tr key={r.id} className="border-b border-zinc-100 dark:border-zinc-800">
                     <td className="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{r.job_key}</td>
                     <td className="py-1.5 pr-2">{r.status}</td>
+                    <td className="max-w-[200px] truncate py-1.5 pr-2 text-zinc-600 dark:text-zinc-400" title={r.failed_reason ?? ""}>
+                      {r.status === "failed" ? (r.failed_reason ?? "—") : "—"}
+                    </td>
                     <td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</td>
                     <td className="py-1.5 pr-2 font-mono text-zinc-600 dark:text-zinc-400">
                       {r.created_at
@@ -184,7 +189,7 @@ export default async function SyncRunsPage() {
                 ))}
                 {!recentRuns.length ? (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-zinc-500">
+                    <td colSpan={7} className="py-6 text-center text-zinc-500">
                       No runs yet. Use <strong>Sync now</strong> on Bitvavo or CoinGecko above, or run workers / local
                       dev timers.
                     </td>

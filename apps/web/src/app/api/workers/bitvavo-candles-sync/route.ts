@@ -78,6 +78,7 @@ export async function POST(request: Request) {
         runId: body.syncRunId,
         jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
         source: body.triggerSource ?? "automated",
+        failedReason: e instanceof Error ? e.message : "sync failed",
       });
     } catch {
       /* non-fatal */

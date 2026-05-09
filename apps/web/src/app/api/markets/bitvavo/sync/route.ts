@@ -67,18 +67,19 @@ export async function POST(request: Request) {
       ...stats,
     });
   } catch (e) {
+    const message = e instanceof Error ? e.message : "sync failed";
     if (quote === "EUR" && marketsRunId) {
       try {
         await recordBitvavoSyncFailed(admin, {
           runId: marketsRunId,
           jobKey: BITVAVO_SYNC_JOB_MARKETS_EUR,
           source,
+          failedReason: message,
         });
       } catch {
         /* non-fatal */
       }
     }
-    const message = e instanceof Error ? e.message : "sync failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
