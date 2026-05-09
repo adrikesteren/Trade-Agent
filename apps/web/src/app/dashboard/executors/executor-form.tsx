@@ -138,12 +138,15 @@ export function ExecutorForm({
               type="number"
               min={0.0001}
               max={1}
-              step="0.001"
+              step="any"
+              inputMode="decimal"
               className="bk-input mt-1 w-full max-w-md font-mono text-sm"
               defaultValue={initial?.max_risk_per_trade ?? "0.05"}
               required
             />
-            <p className="bk-text-muted mt-1 text-xs">Fraction of equity per trade cap, e.g. 0.05 = 5%.</p>
+            <p className="bk-text-muted mt-1 text-xs">
+              Fraction of equity per trade cap, e.g. 0.05 = 5%. Use a dot as decimal separator (not a comma).
+            </p>
           </div>
 
           <div>
