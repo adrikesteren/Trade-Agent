@@ -115,8 +115,8 @@ function hoverTooltipLayout(
   point: { readonly x: number; readonly y: number },
 ): { left: number; top: number; transform: string } {
   const gap = 20;
-  const estW = 200;
-  const estH = 128;
+  const estW = 272;
+  const estH = 148;
   const pad = 6;
   const ax = point.x;
   const ay = point.y;
@@ -508,7 +508,7 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
         <div ref={containerRef} className="h-[420px] w-full min-w-0" />
         {hoverOhlcv ? (
           <div
-            className="pointer-events-none absolute z-10 w-[200px] rounded-md border border-zinc-200 bg-white/95 px-2.5 py-2 text-[11px] shadow-md backdrop-blur-sm dark:border-zinc-600 dark:bg-zinc-900/95"
+            className="pointer-events-none absolute z-10 w-[272px] rounded-md border border-zinc-200 bg-white/95 px-3 py-2.5 text-[12px] leading-snug shadow-md backdrop-blur-sm dark:border-zinc-600 dark:bg-zinc-900/95"
             style={{
               left: hoverOhlcv.left,
               top: hoverOhlcv.top,
@@ -516,8 +516,8 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
             }}
             aria-live="polite"
           >
-            <p className="font-medium text-zinc-700 dark:text-zinc-200">{hoverOhlcv.timeLabel}</p>
-            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums text-zinc-600 dark:text-zinc-400">
+            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{hoverOhlcv.timeLabel}</p>
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 tabular-nums text-zinc-600 dark:text-zinc-400">
               <dt className="text-zinc-400 dark:text-zinc-500" title="catalog.candle_timestamps.close_time">
                 Bar closes
               </dt>
