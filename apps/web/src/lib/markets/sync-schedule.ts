@@ -18,6 +18,11 @@ export function getCandlesSyncIntervalMs(): number {
   return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_CANDLES_SYNC_INTERVAL_MS, 300_000);
 }
 
+/** Display grid for CoinGecko worker (default 5m). Set to 0 to hide “next tick” on the sync dashboard. */
+export function getCoingeckoMetricsSyncIntervalMs(): number {
+  return parseIntervalMs(process.env.NEXT_PUBLIC_COINGECKO_METRICS_SYNC_INTERVAL_MS, 300_000);
+}
+
 /**
  * Next local wall-clock instant strictly after `afterMs` on a grid of `intervalMs` from local
  * midnight (e.g. every hour → …:00; every 5 minutes → …:00, …:05, …:10, …).

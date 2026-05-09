@@ -1,8 +1,16 @@
+import {
+  AssetCoingeckoMetricsBlock,
+  AssetCoingeckoMetricsNoSnapshot,
+  AssetCoingeckoMetricsPlaceholder,
+} from "@/components/asset-coingecko-metrics-block";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ assetId: string }> };
+
+const CG_METRICS_SELECT =
+  "fetched_at, coingecko_id, price_usd, market_cap_usd, fully_diluted_valuation_usd, total_volume_usd, high_24h_usd, low_24h_usd, price_change_24h_usd, price_change_24h_pct, price_change_7d_pct, market_cap_rank, circulating_supply, total_supply, max_supply, ath_usd, ath_change_pct";
 
 export default async function AssetDetailPage({ params }: PageProps) {
   const { assetId } = await params;
@@ -33,14 +41,31 @@ export default async function AssetDetailPage({ params }: PageProps) {
     .order("market_symbol", { ascending: true })
     .limit(100);
 
+  const isCrypto = asset.kind === "crypto";
+  const { data: cgRow } = isCrypto
+    ? await supabase
+        .from("asset_coingecko_metrics")
+        .select(CG_METRICS_SELECT)
+        .eq("asset_id", assetId)
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+
+  const meta =
+    asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
+      ? (asset.metadata as Record<string, unknown>)
+      : {};
+  const coingeckoIdHint = typeof meta.coingecko_id === "string" ? meta.coingecko_id : null;
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-1">
       <nav className="text-xs text-zinc-500">
         <Link href="/dashboard/assets" className="underline-offset-2 hover:underline">
-          Markets & assets
+          Assets
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-zinc-700 dark:text-zinc-300">Asset</span>
+        <span className="text-zinc-700 dark:text-zinc-300">Detail</span>
       </nav>
 
       <div>
@@ -49,10 +74,26 @@ export default async function AssetDetailPage({ params }: PageProps) {
           <span className="font-mono text-lg text-zinc-500">({asset.code})</span>
         </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Kind: <span className="font-medium">{asset.kind}</span> · id:{" "}
+          Kind: <span className="font-medium">{asset.kind}</span> ·{" "}
+          {(markets ?? []).length} pair{(markets ?? []).length === 1 ? "" : "s"} · id:{" "}
           <span className="font-mono text-xs">{asset.id}</span>
         </p>
       </div>
+
+      {isCrypto && coingeckoIdHint ? (
+        <section className="rounded-md border border-zinc-200 bg-zinc-50/80 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400">
+          <span className="font-medium text-zinc-800 dark:text-zinc-200">CoinGecko id (catalog)</span>:{" "}
+          <span className="font-mono text-zinc-700 dark:text-zinc-300">{coingeckoIdHint}</span>
+        </section>
+      ) : null}
+
+      {isCrypto && cgRow ? (
+        <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} />
+      ) : isCrypto ? (
+        <AssetCoingeckoMetricsNoSnapshot assetCode={asset.code} resolvedCoingeckoId={coingeckoIdHint} />
+      ) : (
+        <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
+      )}
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Markets (pairs)</h2>
@@ -68,7 +109,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
             return (
               <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <Link
-                  href={`/dashboard/assets/markets/${m.id}`}
+                  href={`/dashboard/markets/${m.id}`}
                   className="font-mono font-medium text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
                 >
                   {m.market_symbol}
@@ -76,7 +117,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
                   {ex?.id ? (
                     <Link
-                      href={`/dashboard/assets/exchanges/${ex.id}`}
+                      href={`/dashboard/exchanges/${ex.id}`}
                       className="underline-offset-2 hover:underline"
                     >
                       {ex.code ?? "—"}

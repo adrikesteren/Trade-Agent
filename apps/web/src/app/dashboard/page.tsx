@@ -47,10 +47,24 @@ export default async function DashboardPage() {
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Read-only overview of signals and mediator decisions. Execution stays on workers (QStash).{" "}
           <Link
+            href="/dashboard/markets"
+            className="font-medium text-zinc-800 underline underline-offset-4 hover:text-zinc-950 dark:text-zinc-200 dark:hover:text-zinc-50"
+          >
+            Markets
+          </Link>{" "}
+          ·{" "}
+          <Link
             href="/dashboard/assets"
             className="font-medium text-zinc-800 underline underline-offset-4 hover:text-zinc-950 dark:text-zinc-200 dark:hover:text-zinc-50"
           >
-            Browse markets & assets
+            Assets
+          </Link>{" "}
+          ·{" "}
+          <Link
+            href="/dashboard/sync-runs"
+            className="font-medium text-zinc-800 underline underline-offset-4 hover:text-zinc-950 dark:text-zinc-200 dark:hover:text-zinc-50"
+          >
+            Sync runs
           </Link>
         </p>
       </div>

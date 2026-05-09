@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 /**
  * POST: QStash (signed) or manual trigger with Bearer CRON_SECRET. Runs up to N candle chunks,
  * then queues the next chunk via QStash until the full EUR sweep completes; then updates
- * `bitvavo_sync_runs` for `bitvavo_candles_eur`.
+ * `sync_runs` for `bitvavo_candles_eur`.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

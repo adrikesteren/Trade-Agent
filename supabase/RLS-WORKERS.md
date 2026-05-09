@@ -1,8 +1,8 @@
 # RLS and workers (service role)
 
-## `bitvavo_sync_status`
+## `sync_runs`
 
-Dashboard-only metadata: **last successful** manual or worker run for Bitvavo markets/candles (EUR). **Read** for `authenticated`; **writes** via service role from API routes after sync.
+Append-only **sync run** rows per `job_key` (e.g. Bitvavo markets EUR, candles EUR). **Read** for `authenticated`; **insert/update** via service role from API routes / workers (`record-bitvavo-sync-status`, candle sweep).
 
 ## Global market catalog (`exchanges`, `assets`, `markets`, `candles`)
 

@@ -2,10 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const BITVAVO_SYNC_JOB_MARKETS_EUR = "bitvavo_markets_eur";
 export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
+/** CoinGecko catalog metrics worker / manual sync — same `sync_runs` table as Bitvavo jobs. */
+export const COINGECKO_SYNC_JOB_METRICS = "coingecko_asset_metrics";
 export type BitvavoSyncTriggerSource = "manual" | "automated";
 export type BitvavoSyncJobStatus = "running" | "completed" | "failed";
 
-const TABLE = "bitvavo_sync_runs" as const;
+const TABLE = "sync_runs" as const;
 
 /** Latest still-running row for a job (e.g. QStash continuation missing syncRunId). */
 export async function resolveLatestRunningBitvavoRunId(

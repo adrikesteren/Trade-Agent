@@ -4,5 +4,8 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === "edge") return;
-  await import("@/lib/markets/local-candle-sync-scheduler");
+  await Promise.all([
+    import("@/lib/markets/local-candle-sync-scheduler"),
+    import("@/lib/markets/local-coingecko-metrics-scheduler"),
+  ]);
 }

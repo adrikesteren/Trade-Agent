@@ -44,6 +44,7 @@ Zo voorkom je dat een los agent direct geld riskeert en houd je één plek voor 
 - Bitvavo (eerst) via REST en/of websocket.
 - Detecteert **candle close** en triggert de pipeline (event: `CANDLE_CLOSED`).
 - Schrijft naar database (bijv. Supabase): OHLCV + `close_time`.
+- **CoinGecko** (ca. elke 5 minuten, worker + optioneel lokale dev-timer): fundamentals per catalogus-asset (`market_cap`, `total_volume`, FDV, 24h/7d %, rank, supplies, ATH, …) in `public.asset_coingecko_metrics` (append-only snapshots). `metadata.coingecko_id` op `assets` wordt waar nodig via search gevuld.
 
 **Output:** feiten over de markt, geen trade-intent.
 
@@ -67,6 +68,7 @@ Zo voorkom je dat een los agent direct geld riskeert en houd je één plek voor 
 De mediator:
 
 - Leest signalen van toegestane agents voor het symbol/timeframe.
+- Kan **laatste fundamentals** meenemen (bv. uit `asset_coingecko_metrics` op tijd van besluit): market cap/volume/rank helpen context (“illiquid”, “macro cap”) zonder zelf een aparte “fundamentals-agent” te verplichten — policy bepaalt of en hoe dat meetelt.
 - Past **operationele modus** toe: `Paper` / `Micro` / `BigSpender`.
 - Past **risk rails** toe: daily loss, max posities, allowlist, kill switch, cooldown, enz.
 - Kijkt naar **bestaande positie** en **beleid** (zie expliciete signalen hieronder).

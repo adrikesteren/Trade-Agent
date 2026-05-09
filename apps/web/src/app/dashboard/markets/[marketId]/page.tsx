@@ -87,11 +87,11 @@ export default async function MarketDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-1">
       <nav className="text-xs text-zinc-500">
-        <Link href="/dashboard/assets" className="underline-offset-2 hover:underline">
-          Markets & assets
+        <Link href="/dashboard/markets" className="underline-offset-2 hover:underline">
+          Markets
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-zinc-700 dark:text-zinc-300">Market</span>
+        <span className="text-zinc-700 dark:text-zinc-300">Pair</span>
       </nav>
 
       <div>
@@ -103,7 +103,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
             <span>
               Exchange:{" "}
               <Link
-                href={`/dashboard/assets/exchanges/${ex.id}`}
+                href={`/dashboard/exchanges/${ex.id}`}
                 className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-100"
               >
                 {ex.name ?? ex.code}
@@ -114,7 +114,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
             <span>
               Base asset:{" "}
               <Link
-                href={`/dashboard/assets/asset/${asset.id}`}
+                href={`/dashboard/assets/${asset.id}`}
                 className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-100"
               >
                 {asset.code} ({asset.kind})
@@ -140,8 +140,8 @@ export default async function MarketDetailPage({ params }: PageProps) {
         <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">open_time</code> /{" "}
         <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code>. If the chart is empty, refresh
         listings from{" "}
-        <Link href="/dashboard/assets" className="text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300">
-          Markets &amp; assets
+        <Link href="/dashboard/markets" className="text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300">
+          Markets
         </Link>
         . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
         <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">close_time</code> values (difference{">"} 6 minutes)

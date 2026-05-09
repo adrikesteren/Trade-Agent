@@ -70,10 +70,28 @@ export default async function DashboardLayout({
               Overview
             </Link>
             <Link
-              href="/dashboard/assets"
+              href="/dashboard/markets"
               className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
             >
               Markets
+            </Link>
+            <Link
+              href="/dashboard/assets"
+              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              Assets
+            </Link>
+            <Link
+              href="/dashboard/exchanges"
+              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              Exchanges
+            </Link>
+            <Link
+              href="/dashboard/sync-runs"
+              className="text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              Sync runs
             </Link>
           </nav>
           <span className="hidden text-xs text-zinc-500 sm:inline">Paper · Bitvavo</span>

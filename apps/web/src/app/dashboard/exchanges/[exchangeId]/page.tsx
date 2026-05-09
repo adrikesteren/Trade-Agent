@@ -28,11 +28,11 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-1">
       <nav className="text-xs text-zinc-500">
-        <Link href="/dashboard/assets" className="underline-offset-2 hover:underline">
-          Markets & assets
+        <Link href="/dashboard/exchanges" className="underline-offset-2 hover:underline">
+          Exchanges
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-zinc-700 dark:text-zinc-300">Exchange</span>
+        <span className="text-zinc-700 dark:text-zinc-300">Detail</span>
       </nav>
 
       <div>
@@ -49,7 +49,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
           {(markets ?? []).map((m) => (
             <li key={m.id} className="py-2">
               <Link
-                href={`/dashboard/assets/markets/${m.id}`}
+                href={`/dashboard/markets/${m.id}`}
                 className="font-mono text-sm font-medium text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
               >
                 {m.market_symbol}

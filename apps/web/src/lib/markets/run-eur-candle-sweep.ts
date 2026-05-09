@@ -19,7 +19,7 @@ export type EurCandleSweepBody = {
   quote?: string | null;
   marketBatchSize?: number;
   delayMsBetweenMarkets?: number;
-  /** Who triggered this sweep (stored on `bitvavo_sync_runs`). */
+  /** Who triggered this sweep (stored on `sync_runs`). */
   triggerSource?: BitvavoSyncTriggerSource;
   /** Same logical run across QStash chunks (from first `beginBitvavoSyncRun`). */
   syncRunId?: string | null;
