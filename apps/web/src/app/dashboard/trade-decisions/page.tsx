@@ -15,12 +15,12 @@ import Link from "next/link";
 
 type DecisionRow = {
   id: string;
+  executor_id: string;
   market_id: string;
   approved: boolean;
   reason_codes: string[] | null;
   close_time: string;
   timeframe: string;
-  paper: boolean;
   decision_payload: Record<string, unknown> | null;
   created_at: string;
 };
@@ -94,6 +94,27 @@ async function fetchMarketSymbolsById(
   return map;
 }
 
+async function fetchExecutorNamesById(
+  supabase: SupabaseClient,
+  executorIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (executorIds.length === 0) return map;
+  const unique = [...new Set(executorIds)];
+  for (let i = 0; i < unique.length; i += MARKET_ID_CHUNK) {
+    const chunk = unique.slice(i, i + MARKET_ID_CHUNK);
+    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
+    if (error) {
+      console.error("trade-decisions page: executors batch:", error.message);
+      continue;
+    }
+    for (const e of data ?? []) {
+      map.set(e.id as string, String(e.name ?? "").trim() || (e.id as string));
+    }
+  }
+  return map;
+}
+
 function marketLabel(row: DecisionRow, symbolByMarketId: Map<string, string>): string {
   const fromPayload = payloadString(row.decision_payload, "market_symbol");
   if (fromPayload) return fromPayload;
@@ -106,7 +127,7 @@ export default async function TradeDecisionsPage() {
     .schema("trading")
     .from("trade_decisions")
     .select(
-      "id, market_id, approved, reason_codes, close_time, timeframe, paper, decision_payload, created_at",
+      "id, executor_id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -114,6 +135,8 @@ export default async function TradeDecisionsPage() {
   const list = (rows ?? []) as DecisionRow[];
   const marketIds = [...new Set(list.map((r) => r.market_id))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
+  const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
+  const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -148,12 +171,12 @@ export default async function TradeDecisionsPage() {
               <thead>
                 <tr>
                   <Th>Market</Th>
+                  <Th>Executor</Th>
                   <Th>TF</Th>
                   <Th>Bar close (UTC)</Th>
                   <Th>Resolved</Th>
                   <Th>Approved</Th>
                   <Th>Reason codes</Th>
-                  <Th>Paper</Th>
                   <Th>Created (UTC)</Th>
                 </tr>
               </thead>
@@ -162,11 +185,17 @@ export default async function TradeDecisionsPage() {
                   const label = marketLabel(row, symbolByMarketId);
                   const resolved = resolvedIntentFromRow(row);
                   const reasons = formatReasonCodes(row.reason_codes);
+                  const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
                   return (
                     <tr key={row.id}>
                       <Td>
                         <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
                           {label}
+                        </Link>
+                      </Td>
+                      <Td>
+                        <Link href={`/dashboard/executors/${row.executor_id}`} className="bk-link font-mono">
+                          {exName}
                         </Link>
                       </Td>
                       <Td>{row.timeframe}</Td>
@@ -180,7 +209,6 @@ export default async function TradeDecisionsPage() {
                       <Td className="max-w-[14rem] truncate font-mono" title={reasons}>
                         {reasons}
                       </Td>
-                      <Td>{row.paper ? "yes" : "no"}</Td>
                       <Td className="whitespace-nowrap font-mono">{fmtUtc(row.created_at)}</Td>
                     </tr>
                   );

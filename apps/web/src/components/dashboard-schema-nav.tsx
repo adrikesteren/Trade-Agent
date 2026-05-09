@@ -56,7 +56,7 @@ export function DashboardSchemaNav() {
             <Link href="/dashboard/risk-state">Risk State</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href="/dashboard/settings/execution">Execution mode</Link>
+            <Link href="/dashboard/executors">Executors</Link>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

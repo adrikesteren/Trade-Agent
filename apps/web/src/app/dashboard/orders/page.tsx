@@ -16,6 +16,7 @@ import Link from "next/link";
 type OrderRow = {
   id: string;
   decision_id: string | null;
+  executor_id: string;
   market_id: string;
   side: string;
   quantity: string | number | null;
@@ -77,13 +78,34 @@ async function fetchMarketSymbolsById(
   return map;
 }
 
+async function fetchExecutorNamesById(
+  supabase: SupabaseClient,
+  executorIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (executorIds.length === 0) return map;
+  const unique = [...new Set(executorIds)];
+  for (let i = 0; i < unique.length; i += MARKET_ID_CHUNK) {
+    const chunk = unique.slice(i, i + MARKET_ID_CHUNK);
+    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
+    if (error) {
+      console.error("orders page: executors batch:", error.message);
+      continue;
+    }
+    for (const e of data ?? []) {
+      map.set(e.id as string, String(e.name ?? "").trim() || e.id as string);
+    }
+  }
+  return map;
+}
+
 export default async function OrdersPage() {
   const supabase = await createClient();
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at",
+      "id, decision_id, executor_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -91,6 +113,8 @@ export default async function OrdersPage() {
   const list = (rows ?? []) as OrderRow[];
   const marketIds = [...new Set(list.map((r) => r.market_id))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
+  const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
+  const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -122,6 +146,7 @@ export default async function OrdersPage() {
               <thead>
                 <tr>
                   <Th>Market</Th>
+                  <Th>Executor</Th>
                   <Th>Side</Th>
                   <Th className="text-right">Quantity</Th>
                   <Th className="text-right">Notional (EUR)</Th>
@@ -136,11 +161,17 @@ export default async function OrdersPage() {
                 {list.map((row) => {
                   const label = symbolByMarketId.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
                   const ext = row.external_id?.trim() || "—";
+                  const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
                   return (
                     <tr key={row.id}>
                       <Td>
                         <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
                           {label}
+                        </Link>
+                      </Td>
+                      <Td>
+                        <Link href={`/dashboard/executors/${row.executor_id}`} className="bk-link font-mono">
+                          {exName}
                         </Link>
                       </Td>
                       <Td className="font-mono">{row.side}</Td>
@@ -166,14 +197,14 @@ export default async function OrdersPage() {
                 })}
                 {!list.length ? (
                   <tr>
-                    <Td colSpan={9} muted className="py-8 text-center">
+                    <Td colSpan={10} muted className="py-8 text-center">
                       No orders yet. When the executor runs on approved trade decisions, rows appear here. See{" "}
                       <Link href="/dashboard/trade-decisions" className="bk-link">
                         Trade decisions
                       </Link>{" "}
                       and{" "}
-                      <Link href="/dashboard/settings/execution" className="bk-link">
-                        Execution mode
+                      <Link href="/dashboard/executors" className="bk-link">
+                        Executors
                       </Link>
                       .
                     </Td>

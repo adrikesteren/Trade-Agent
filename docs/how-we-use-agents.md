@@ -161,7 +161,7 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 ## Event flow (samenvatting)
 
 1. `CANDLE_CLOSED` → signal agents draaien → `signals` in DB.
-2. Mediator leest signalen + positie + risk → `trade_decision` (met `paper`-snapshot uit gebruikersvoorkeur).
+2. Mediator leest signalen + positie per **executor** + risk → `trade_decision` per `(user, executor, market, bar)` (zonder `paper`-kolom; uitvoeringsmodus alleen op de executor).
 3. Bij approved → **executor**-worker → `orders` / `fills` / `positions` (paper-simulatie of live Bitvavo; zie [executor-developer.md](./executor-developer.md)).
 4. Reconciliatie en monitoring op de achtergrond (verder uit te breiden).
 

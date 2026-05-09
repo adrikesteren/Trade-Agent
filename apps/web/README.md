@@ -61,7 +61,7 @@ curl -sS -X POST "http://localhost:3000/api/workers/signals-catalog-close" ^
 
 ## Trade mediator (env)
 
-After the **last** batch of `signals-catalog-close` for a closed catalog bar (when at least one signal row was upserted), the app enqueues `POST /api/workers/mediator-catalog-close`, which reads `trading.signals`, `trading.positions` (paper), and `trading.risk_state` per configured user and **upserts** `trading.trade_decisions` (unique per `user_id`, `market_id`, `timeframe`, `close_time`). See [docs/how-we-use-agents.md](../../docs/how-we-use-agents.md).
+After the **last** batch of `signals-catalog-close` for a closed catalog bar (when at least one signal row was upserted), the app enqueues `POST /api/workers/mediator-catalog-close`, which reads `trading.signals`, `trading.executors` (enabled rows per user), `trading.positions` per executor, and `trading.risk_state` per configured user and **upserts** `trading.trade_decisions` (unique per `user_id`, `executor_id`, `market_id`, `timeframe`, `close_time`). See [docs/how-we-use-agents.md](../../docs/how-we-use-agents.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ curl -sS -X POST "http://localhost:3000/api/workers/mediator-catalog-close" ^
 
 ## Trade executor (env)
 
-After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsUpserted > 0`), the app enqueues `POST /api/workers/executor-catalog-close`, which turns **approved** `trading.trade_decisions` into `trading.orders` (+ `fills` / `positions`). Paper vs live follows the `paper` flag on each decision (snapshot from the user’s `trading.user_execution_preferences` at mediator time). See [docs/executor-developer.md](../../docs/executor-developer.md).
+After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsUpserted > 0`), the app enqueues `POST /api/workers/executor-catalog-close`, which turns **approved** `trading.trade_decisions` into `trading.orders` (+ `fills` / `positions`) with **`executor_id`**. Paper vs live follows **`trading.executors.execution_mode`** at execution time (decisions are mode-agnostic). Optional per-executor **budget** and **asset whitelist/blacklist** are enforced in mediator (filter) and executor (budget). See [docs/executor-developer.md](../../docs/executor-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 | `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
 
-**Execution mode (UI):** logged-in users set **Paper / Live** under Dashboard → Trading → **Execution mode** (`/dashboard/settings/execution`), stored in `trading.user_execution_preferences`.
+**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, optional EUR budget, enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings/execution` redirects to Executors.
 
 Manual worker call (dev):
 

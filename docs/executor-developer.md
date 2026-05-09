@@ -10,19 +10,19 @@ Audience: human developers and automation agents editing this repo.
 
 1. Ingest → candles  
 2. Signal agents → `trading.signals`  
-3. Trade Mediator → `trading.trade_decisions` (includes `paper` snapshot from user preference)  
-4. **Executor** (this document) → `trading.orders` (+ `fills`, `positions`)  
+3. Trade Mediator → `trading.trade_decisions` (one row per **enabled executor** per market/bar; mode-agnostic — paper vs live is only `trading.executors.execution_mode` at order time)  
+4. **Executor** (this document) → `trading.orders` (+ `fills`, `positions`) keyed by `executor_id`  
 5. Ops / reconciliation (future hardening)
 
 The executor **does not** re-run risk logic; it only executes what the mediator already approved (`approved = true` and a `proposedOrder` in `decision_payload`).
 
 ---
 
-## Execution mode (Paper / Live)
+## Executors (portfolios, Paper / Live, budget, asset filter)
 
-- Stored per user in **`trading.user_execution_preferences.execution_mode`** (`paper` | `live`), RLS-scoped to `auth.uid()`.  
-- Dashboard: **Trading → Execution mode** → [`/dashboard/settings/execution`](../apps/web/src/app/dashboard/settings/execution/page.tsx).  
-- The **mediator** reads this row (via service role for configured `SIGNAL_*` users) and sets `trade_decisions.paper` to match at decision time.  
+- **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live`), optional **`budget_eur`** (cap on cumulative **filled buy** `orders.notional_eur` for that executor), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array.  
+- Dashboard: **Trading → Executors** → [`/dashboard/executors`](../apps/web/src/app/dashboard/executors/page.tsx) (detail + PnL snapshot per executor). Legacy **`/dashboard/settings/execution`** redirects here.  
+- The **mediator** loads **enabled** executors per `SIGNAL_*` user, skips markets outside the executor’s asset filter (via `catalog.markets.asset_id`), reads **`positions`** for `(user_id, executor_id, market_id)`, and writes **mode-agnostic** decisions (`trade_decisions` has no `paper` column).  
 - **Live Bitvavo keys** are **not** in the database: use server env `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` (and optional `BITVAVO_OPERATOR_ID`, default `1`). See [apps/web/README.md](../apps/web/README.md).
 
 ---
@@ -35,10 +35,10 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 **Behaviour (v1):**
 
-- For each configured `user_id` and each market in the batch, load the `trade_decision` for that bar.  
-- If `approved`, payload has a **buy** `proposedOrder`, and there is **no** `orders` row with `decision_id` yet (partial unique index on `decision_id`):  
-  - **Paper (`trade_decisions.paper = true`):** use catalog candle **close** at that bar as fill price; insert `orders` (`status=filled`), one `fills` row, upsert `positions` for `(user_id, market_id, paper=true)`.  
-  - **Live (`paper = false`):** `POST /v2/order` (market buy with `amountQuote` = EUR notional). On success insert `orders` with `external_id`; if Bitvavo returns `filled` and fill data, insert `fills` and update `positions` for `paper=false`. On failure insert `orders` with `status=rejected` (best-effort; duplicate errors ignored).
+- For each configured `user_id`, each **enabled** executor, and each market in the batch: skip if the market’s base **`asset_id`** is excluded by the executor’s whitelist/blacklist; load the `trade_decision` for `(user_id, executor_id, market_id, timeframe, close_time)`.  
+- If `approved`, payload has a **buy** `proposedOrder`, optional **budget** still allows the trade (`filled` notional sum + proposed ≤ `budget_eur` when set), and there is **no** `orders` row for that `decision_id` yet (partial unique index on `decision_id`):  
+  - **Paper executor (`executors.execution_mode = paper`):** use catalog candle **close** at that bar as fill price; insert `orders` (`status=filled`, `executor_id`), one `fills` row, upsert `positions` for `(user_id, executor_id, market_id)` with `orders.paper` / `positions.paper` true.  
+  - **Live executor:** `POST /v2/order` (market buy with `amountQuote` = EUR notional). On success insert `orders` with `executor_id` and `external_id`; if Bitvavo returns `filled` and fill data, insert `fills` and update `positions` with `paper=false`. On failure insert `orders` with `status=rejected` (best-effort; duplicate errors ignored).
 
 Entry points:
 
@@ -51,7 +51,7 @@ Entry points:
 
 ## Idempotency
 
-- `CREATE UNIQUE INDEX … ON trading.orders (decision_id) WHERE decision_id IS NOT NULL` — at most **one** order per decision.
+- `CREATE UNIQUE INDEX … ON trading.orders (decision_id) WHERE decision_id IS NOT NULL` — at most **one** order per decision (decisions are scoped per executor, so the same bar may produce multiple decisions/orders across executors).
 
 ---
 
@@ -63,4 +63,4 @@ Entry points:
 
 ---
 
-*Last updated: Executor step 4 + execution preferences.*
+*Last updated: Executor step 4 + multi-executor portfolios (`trading.executors`).*

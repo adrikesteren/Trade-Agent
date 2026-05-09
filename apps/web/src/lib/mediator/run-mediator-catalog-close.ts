@@ -10,7 +10,13 @@ import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { enqueueExecutorCatalogCloseAfterMediator } from "@/lib/executor/enqueue-executor-catalog-close";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
-import { fetchUserUsesPaperBook } from "@/lib/trading/user-execution-paper";
+import {
+  ensureDefaultExecutorsForUsers,
+  executorAllowsMarketAsset,
+  fetchExecutorsForUsers,
+  fetchMarketAssetIds,
+  type ExecutorRow,
+} from "@/lib/trading/executors";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type MediatorCatalogCloseBody = {
@@ -202,15 +208,27 @@ export async function runMediatorCatalogClose(
   const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
   const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
 
+  await ensureDefaultExecutorsForUsers(admin, userIds);
+  const executorRows = await fetchExecutorsForUsers(admin, userIds);
+  const executorsByUser = new Map<string, ExecutorRow[]>();
+  for (const uid of userIds) executorsByUser.set(uid, []);
+  for (const ex of executorRows) {
+    const cur = executorsByUser.get(ex.user_id) ?? [];
+    cur.push(ex);
+    executorsByUser.set(ex.user_id, cur);
+  }
+
+  const marketIdsForAssets = rows.map((r) => r.id as string);
+  const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
+
   let decisionsUpserted = 0;
 
   for (const m of rows) {
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
+    const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
     for (const userId of userIds) {
-      const { decisionPaperColumn } = await fetchUserUsesPaperBook(admin, userId);
-
       const { data: riskUser, error: riskUserErr } = await admin
         .schema("trading")
         .from("risk_state")
@@ -220,18 +238,6 @@ export async function runMediatorCatalogClose(
 
       if (riskUserErr) throw new Error(riskUserErr.message);
       const riskSnap = buildRiskSnapshot(riskUser ?? {}, marketId, marketSymbol);
-
-      const { data: posRow, error: posErr } = await admin
-        .schema("trading")
-        .from("positions")
-        .select("quantity")
-        .eq("user_id", userId)
-        .eq("market_id", marketId)
-        .eq("paper", decisionPaperColumn)
-        .maybeSingle();
-
-      if (posErr) throw new Error(posErr.message);
-      const inPosition = Number(posRow?.quantity ?? 0) > 0;
 
       const { data: sigData, error: sigErr } = await admin
         .schema("trading")
@@ -248,52 +254,70 @@ export async function runMediatorCatalogClose(
       const matched = ((sigData ?? []) as SignalRow[]).filter((r) => closeTimesMatch(r.close_time, closeTimeIso));
       matched.sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
 
-      const intents = matched.map((r) => r.intent as SignalIntent);
-      const decision = evaluateTradeDecision({
-        rails,
-        risk: riskSnap,
-        marketSymbol,
-        signalIntents: intents,
-        inPosition,
-        notionalEurSuggested: notionalSuggested,
-      });
+      const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
+      for (const ex of executors) {
+        if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
 
-      const canonicalClose = matched[0]?.close_time ?? closeTimeIso;
-      const primarySignalId = matched[0]?.id ?? null;
+        const { data: posRow, error: posErr } = await admin
+          .schema("trading")
+          .from("positions")
+          .select("quantity")
+          .eq("user_id", userId)
+          .eq("executor_id", ex.id)
+          .eq("market_id", marketId)
+          .maybeSingle();
 
-      const signalsIn = matched.map((r) => ({
-        id: r.id,
-        intent: r.intent,
-        agent_id: agentSlugFromRow(r),
-      }));
+        if (posErr) throw new Error(posErr.message);
+        const inPosition = Number(posRow?.quantity ?? 0) > 0;
 
-      const decisionRow = {
-        user_id: userId,
-        market_id: marketId,
-        close_time: canonicalClose,
-        timeframe,
-        paper: decisionPaperColumn,
-        signal_id: primarySignalId,
-        approved: decision.approved,
-        reason_codes: decision.reasonCodes,
-        risk_snapshot: decision.riskSnapshot,
-        decision_payload: {
-          resolvedIntent: decision.resolvedIntent,
-          policyVersion: "v1-priority",
-          signalIds: matched.map((r) => r.id),
-          signalsIn,
-          proposedOrder: decision.proposedOrder ?? null,
-          market_symbol: marketSymbol,
-          executionModeSnapshot: decisionPaperColumn ? "paper" : "live",
-          ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
-        },
-      };
+        const intents = matched.map((r) => r.intent as SignalIntent);
+        const decision = evaluateTradeDecision({
+          rails,
+          risk: riskSnap,
+          marketSymbol,
+          signalIntents: intents,
+          inPosition,
+          notionalEurSuggested: notionalSuggested,
+        });
 
-      const { error: upErr } = await admin.schema("trading").from("trade_decisions").upsert(decisionRow, {
-        onConflict: "user_id,market_id,timeframe,close_time",
-      });
-      if (upErr) throw new Error(`${marketSymbol}: trade_decisions upsert: ${upErr.message}`);
-      decisionsUpserted += 1;
+        const canonicalClose = matched[0]?.close_time ?? closeTimeIso;
+        const primarySignalId = matched[0]?.id ?? null;
+
+        const signalsIn = matched.map((r) => ({
+          id: r.id,
+          intent: r.intent,
+          agent_id: agentSlugFromRow(r),
+        }));
+
+        const decisionRow = {
+          user_id: userId,
+          executor_id: ex.id,
+          market_id: marketId,
+          close_time: canonicalClose,
+          timeframe,
+          signal_id: primarySignalId,
+          approved: decision.approved,
+          reason_codes: decision.reasonCodes,
+          risk_snapshot: decision.riskSnapshot,
+          decision_payload: {
+            resolvedIntent: decision.resolvedIntent,
+            policyVersion: "v1-priority",
+            signalIds: matched.map((r) => r.id),
+            signalsIn,
+            proposedOrder: decision.proposedOrder ?? null,
+            market_symbol: marketSymbol,
+            executorId: ex.id,
+            executorName: ex.name,
+            ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
+          },
+        };
+
+        const { error: upErr } = await admin.schema("trading").from("trade_decisions").upsert(decisionRow, {
+          onConflict: "user_id,executor_id,market_id,timeframe,close_time",
+        });
+        if (upErr) throw new Error(`${marketSymbol}: trade_decisions upsert: ${upErr.message}`);
+        decisionsUpserted += 1;
+      }
     }
   }
 

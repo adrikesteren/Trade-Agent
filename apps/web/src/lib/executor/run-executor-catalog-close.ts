@@ -9,6 +9,15 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
+import {
+  ensureDefaultExecutorsForUsers,
+  executorAllowsMarketAsset,
+  fetchExecutorsForUsers,
+  fetchFilledNotionalSumByExecutorIds,
+  fetchMarketAssetIds,
+  type ExecutorRow,
+} from "@/lib/trading/executors";
+import { wouldExceedExecutorBudget } from "@/lib/trading/executor-rules";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
@@ -105,7 +114,6 @@ type DecisionRow = {
   user_id: string;
   market_id: string;
   approved: boolean;
-  paper: boolean;
   close_time: string;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
@@ -130,6 +138,7 @@ async function upsertPositionAfterBuy(
   admin: SupabaseClient,
   args: {
     userId: string;
+    executorId: string;
     marketId: string;
     paper: boolean;
     addQty: number;
@@ -141,8 +150,8 @@ async function upsertPositionAfterBuy(
     .from("positions")
     .select("id, quantity, avg_price")
     .eq("user_id", args.userId)
+    .eq("executor_id", args.executorId)
     .eq("market_id", args.marketId)
-    .eq("paper", args.paper)
     .maybeSingle();
   if (selErr) throw new Error(selErr.message);
 
@@ -157,6 +166,7 @@ async function upsertPositionAfterBuy(
 
   const row = {
     user_id: args.userId,
+    executor_id: args.executorId,
     market_id: args.marketId,
     paper: args.paper,
     quantity,
@@ -165,7 +175,7 @@ async function upsertPositionAfterBuy(
   };
 
   const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
-    onConflict: "user_id,market_id,paper",
+    onConflict: "user_id,executor_id,market_id",
   });
   if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
 }
@@ -250,177 +260,224 @@ export async function runExecutorCatalogClose(
   const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
   const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
 
+  await ensureDefaultExecutorsForUsers(admin, userIds);
+  const executorRows = await fetchExecutorsForUsers(admin, userIds);
+  const executorsByUser = new Map<string, ExecutorRow[]>();
+  for (const uid of userIds) executorsByUser.set(uid, []);
+  for (const ex of executorRows) {
+    const cur = executorsByUser.get(ex.user_id) ?? [];
+    cur.push(ex);
+    executorsByUser.set(ex.user_id, cur);
+  }
+
+  const marketIdsForAssets = rows.map((r) => r.id as string);
+  const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
+
+  const spentByUserExecutor = new Map<string, Map<string, number>>();
+  for (const userId of userIds) {
+    const exs = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
+    const sums = await fetchFilledNotionalSumByExecutorIds(
+      admin,
+      exs.map((e) => e.id),
+    );
+    spentByUserExecutor.set(userId, sums);
+  }
+
   let ordersInserted = 0;
 
   for (const m of rows) {
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
+    const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
     for (const userId of userIds) {
-      const { data: decList, error: decErr } = await admin
-        .schema("trading")
-        .from("trade_decisions")
-        .select("id, user_id, market_id, approved, paper, close_time, timeframe, decision_payload")
-        .eq("user_id", userId)
-        .eq("market_id", marketId)
-        .eq("timeframe", timeframe)
-        .gte("close_time", closeLow)
-        .lte("close_time", closeHigh);
+      const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
+      const spentMap = spentByUserExecutor.get(userId) ?? new Map<string, number>();
 
-      if (decErr) throw new Error(decErr.message);
+      for (const ex of executors) {
+        if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
 
-      const decisions = ((decList ?? []) as DecisionRow[]).filter((d) => closeTimesMatch(d.close_time, closeTimeIso));
-      const dec = decisions[0];
-      if (!dec) continue;
-      if (!dec.approved) continue;
+        const { data: decList, error: decErr } = await admin
+          .schema("trading")
+          .from("trade_decisions")
+          .select("id, user_id, market_id, approved, close_time, timeframe, decision_payload")
+          .eq("user_id", userId)
+          .eq("executor_id", ex.id)
+          .eq("market_id", marketId)
+          .eq("timeframe", timeframe)
+          .gte("close_time", closeLow)
+          .lte("close_time", closeHigh);
 
-      const proposed = parseProposedBuy(dec.decision_payload);
-      if (!proposed) continue;
+        if (decErr) throw new Error(decErr.message);
 
-      const { data: existingOrder, error: ordSelErr } = await admin
-        .schema("trading")
-        .from("orders")
-        .select("id")
-        .eq("decision_id", dec.id)
-        .maybeSingle();
-      if (ordSelErr) throw new Error(ordSelErr.message);
-      if (existingOrder) continue;
+        const decisions = ((decList ?? []) as DecisionRow[]).filter((d) => closeTimesMatch(d.close_time, closeTimeIso));
+        const dec = decisions[0];
+        if (!dec) continue;
+        if (!dec.approved) continue;
 
-      const paper = dec.paper;
-      const notionalEur = proposed.notionalEur;
+        const proposed = parseProposedBuy(dec.decision_payload);
+        if (!proposed) continue;
 
-      if (paper) {
-        const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
-        if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
-
-        const qty = baseQuantityFromNotionalEur(notionalEur, px.price);
-        if (!Number.isFinite(qty) || qty <= 0) continue;
-
-        const feeEur = Math.round(notionalEur * 0.0025 * 1e8) / 1e8;
-
-        const { data: inserted, error: insOrdErr } = await admin
+        const { data: existingOrder, error: ordSelErr } = await admin
           .schema("trading")
           .from("orders")
-          .insert({
-            user_id: userId,
-            decision_id: dec.id,
-            market_id: marketId,
-            side: "buy",
-            quantity: qty,
-            notional_eur: notionalEur,
-            status: "filled",
-            paper: true,
-            external_id: null,
-          })
           .select("id")
-          .single();
-        if (insOrdErr) throw new Error(`${marketSymbol}: order insert: ${insOrdErr.message}`);
-        const orderId = inserted?.id as string;
+          .eq("decision_id", dec.id)
+          .maybeSingle();
+        if (ordSelErr) throw new Error(ordSelErr.message);
+        if (existingOrder) continue;
 
-        const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-          user_id: userId,
-          order_id: orderId,
-          price: px.price,
-          quantity: qty,
-          fee: feeEur,
-        });
-        if (fillErr) throw new Error(`${marketSymbol}: fill insert: ${fillErr.message}`);
+        const paperExecution = ex.execution_mode !== "live";
+        const notionalEur = proposed.notionalEur;
 
-        await upsertPositionAfterBuy(admin, {
-          userId,
-          marketId,
-          paper: true,
-          addQty: qty,
-          price: px.price,
-        });
-        ordersInserted += 1;
-        continue;
-      }
+        const budgetRaw = ex.budget_eur;
+        const budgetCap =
+          budgetRaw !== null && budgetRaw !== undefined && String(budgetRaw).trim() !== ""
+            ? Number(budgetRaw)
+            : null;
+        const spent = spentMap.get(ex.id) ?? 0;
+        if (wouldExceedExecutorBudget(spent, notionalEur, budgetCap)) continue;
 
-      /* Live */
-      try {
-        const live = await placeBitvavoMarketBuyQuote({
-          market: marketSymbol,
-          amountQuoteEur: notionalEur,
-          clientOrderId: dec.id,
-        });
-        const dbStatus = bitvavoStatusToDbOrderStatus(live.status);
-        const { data: insLive, error: insLiveErr } = await admin
-          .schema("trading")
-          .from("orders")
-          .insert({
+        if (paperExecution) {
+          const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+          if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
+
+          const qty = baseQuantityFromNotionalEur(notionalEur, px.price);
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+
+          const feeEur = Math.round(notionalEur * 0.0025 * 1e8) / 1e8;
+
+          const { data: inserted, error: insOrdErr } = await admin
+            .schema("trading")
+            .from("orders")
+            .insert({
+              user_id: userId,
+              executor_id: ex.id,
+              decision_id: dec.id,
+              market_id: marketId,
+              side: "buy",
+              quantity: qty,
+              notional_eur: notionalEur,
+              status: "filled",
+              paper: paperExecution,
+              external_id: null,
+            })
+            .select("id")
+            .single();
+          if (insOrdErr) throw new Error(`${marketSymbol}: order insert: ${insOrdErr.message}`);
+          const orderId = inserted?.id as string;
+
+          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
             user_id: userId,
+            order_id: orderId,
+            price: px.price,
+            quantity: qty,
+            fee: feeEur,
+          });
+          if (fillErr) throw new Error(`${marketSymbol}: fill insert: ${fillErr.message}`);
+
+          await upsertPositionAfterBuy(admin, {
+            userId,
+            executorId: ex.id,
+            marketId,
+            paper: paperExecution,
+            addQty: qty,
+            price: px.price,
+          });
+          spentMap.set(ex.id, (spentMap.get(ex.id) ?? 0) + notionalEur);
+          ordersInserted += 1;
+          continue;
+        }
+
+        /* Live */
+        try {
+          const live = await placeBitvavoMarketBuyQuote({
+            market: marketSymbol,
+            amountQuoteEur: notionalEur,
+            clientOrderId: dec.id,
+          });
+          const dbStatus = bitvavoStatusToDbOrderStatus(live.status);
+          const { data: insLive, error: insLiveErr } = await admin
+            .schema("trading")
+            .from("orders")
+            .insert({
+              user_id: userId,
+              executor_id: ex.id,
+              decision_id: dec.id,
+              market_id: marketId,
+              side: "buy",
+              quantity: 0,
+              notional_eur: notionalEur,
+              status: dbStatus,
+              paper: false,
+              external_id: live.orderId,
+            })
+            .select("id")
+            .single();
+          if (insLiveErr) throw new Error(`${marketSymbol}: live order insert: ${insLiveErr.message}`);
+          const localOrderId = insLive?.id as string;
+
+          const fills = live.raw.fills;
+          if (dbStatus === "filled") {
+            let fillPrice = Number.NaN;
+            let fillQty = Number.NaN;
+            let fillFee = 0;
+            if (Array.isArray(fills) && fills.length > 0) {
+              const f0 = fills[0] as Record<string, unknown>;
+              fillPrice = Number(f0.price);
+              fillQty = Number(f0.amount);
+              fillFee = Number(f0.fee ?? 0);
+            } else {
+              fillQty = Number(live.raw.filledAmount ?? Number.NaN);
+              fillPrice =
+                Number.isFinite(fillQty) && fillQty > 0
+                  ? notionalEur / fillQty
+                  : Number(live.raw.price ?? Number.NaN);
+            }
+            if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
+              await admin.schema("trading").from("fills").insert({
+                user_id: userId,
+                order_id: localOrderId,
+                price: fillPrice,
+                quantity: fillQty,
+                fee: Number.isFinite(fillFee) ? fillFee : 0,
+              });
+              await upsertPositionAfterBuy(admin, {
+                userId,
+                executorId: ex.id,
+                marketId,
+                paper: paperExecution,
+                addQty: fillQty,
+                price: fillPrice,
+              });
+              await admin
+                .schema("trading")
+                .from("orders")
+                .update({ quantity: fillQty, updated_at: new Date().toISOString() })
+                .eq("id", localOrderId);
+              spentMap.set(ex.id, (spentMap.get(ex.id) ?? 0) + notionalEur);
+            }
+          }
+          ordersInserted += 1;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const { error: rejErr } = await admin.schema("trading").from("orders").insert({
+            user_id: userId,
+            executor_id: ex.id,
             decision_id: dec.id,
             market_id: marketId,
             side: "buy",
             quantity: 0,
             notional_eur: notionalEur,
-            status: dbStatus,
+            status: "rejected",
             paper: false,
-            external_id: live.orderId,
-          })
-          .select("id")
-          .single();
-        if (insLiveErr) throw new Error(`${marketSymbol}: live order insert: ${insLiveErr.message}`);
-        const localOrderId = insLive?.id as string;
-
-        const fills = live.raw.fills;
-        if (dbStatus === "filled") {
-          let fillPrice = Number.NaN;
-          let fillQty = Number.NaN;
-          let fillFee = 0;
-          if (Array.isArray(fills) && fills.length > 0) {
-            const f0 = fills[0] as Record<string, unknown>;
-            fillPrice = Number(f0.price);
-            fillQty = Number(f0.amount);
-            fillFee = Number(f0.fee ?? 0);
-          } else {
-            fillQty = Number(live.raw.filledAmount ?? Number.NaN);
-            fillPrice =
-              Number.isFinite(fillQty) && fillQty > 0
-                ? notionalEur / fillQty
-                : Number(live.raw.price ?? Number.NaN);
+            external_id: null,
+          });
+          if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
+            throw new Error(`${marketSymbol}: live reject insert: ${rejErr.message}`);
           }
-          if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
-            await admin.schema("trading").from("fills").insert({
-              user_id: userId,
-              order_id: localOrderId,
-              price: fillPrice,
-              quantity: fillQty,
-              fee: Number.isFinite(fillFee) ? fillFee : 0,
-            });
-            await upsertPositionAfterBuy(admin, {
-              userId,
-              marketId,
-              paper: false,
-              addQty: fillQty,
-              price: fillPrice,
-            });
-            await admin
-              .schema("trading")
-              .from("orders")
-              .update({ quantity: fillQty, updated_at: new Date().toISOString() })
-              .eq("id", localOrderId);
-          }
+          console.error(`executor live order failed ${marketSymbol}:`, msg);
         }
-        ordersInserted += 1;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const { error: rejErr } = await admin.schema("trading").from("orders").insert({
-          user_id: userId,
-          decision_id: dec.id,
-          market_id: marketId,
-          side: "buy",
-          quantity: 0,
-          notional_eur: notionalEur,
-          status: "rejected",
-          paper: false,
-          external_id: null,
-        });
-        if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
-          throw new Error(`${marketSymbol}: live reject insert: ${rejErr.message}`);
-        }
-        console.error(`executor live order failed ${marketSymbol}:`, msg);
       }
     }
   }

@@ -12,7 +12,7 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 
 1. **Ingest** schrijft gesloten OHLCV naar `catalog.candles` (opslag-timeframe `5m` — zie `CATALOG_STORAGE_TIMEFRAME` in de webapp).
 2. **Signal agents** schrijven advies naar `trading.signals` (`intent`, `confidence`, `reasons`, …). Zij plaatsen **geen** orders.
-3. **Trade Mediator** (dit document) leest signalen + positie op het **juiste boek** (`trading.positions.paper` gelijk aan de gebruikersmodus) + `trading.risk_state` en **upsert** één rij in `trading.trade_decisions` per `(user_id, market_id, timeframe, close_time)` (kolom `paper` is een snapshot van die modus).
+3. **Trade Mediator** (dit document) leest signalen + positie per **executor** (`trading.positions` op `(user_id, executor_id, market_id)`) + `trading.risk_state` (nog **user-globaal** in v1) en **upsert** één rij in `trading.trade_decisions` per `(user_id, executor_id, market_id, timeframe, close_time)`. Beslissingen zijn **zonder** `paper`-kolom; paper vs live volgt alleen uit `trading.executors.execution_mode` bij de executor.
 4. **Executor** leest goedgekeurde beslissingen en schrijft `orders` / `fills` ([executor-developer.md](./executor-developer.md)).
 
 ---
@@ -20,12 +20,13 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 ## Taken die de Mediator **wel** moet doen
 
 - **Signalen lezen** voor de doel-bar: alle rijen in `trading.signals` voor dezelfde `market_id`, `timeframe` en `close_time` (tolerantie ±2s ten opzichte van `closeTimeIso` uit de worker), met join naar `trading.signal_agents` voor het `agent_id`-slug in logs/payload.
-- **Positie meenemen:** `trading.positions` voor `(user_id, market_id, paper)` waarbij `paper` overeenkomt met `trading.user_execution_preferences` (`paper` boek vs `live` boek) — `quantity > 0` betekent “in positie”.
+- **Executors & filters:** alleen **enabled** rijen in `trading.executors` per gebruiker; sla markten over die niet voldoen aan whitelist/blacklist (`catalog.markets.asset_id` vs `executors.filter_asset_ids`).  
+- **Positie meenemen:** `trading.positions` voor `(user_id, executor_id, market_id)` — `quantity > 0` betekent “in positie” voor die executor.
 - **Risk state meenemen:** `trading.risk_state` voor `user_id`; `exposure_by_market` wordt voor de risk-check op **symbool** gemapt (o.a. huidige `market_id` → `market_symbol` voor `ProposedOrder.symbol` in `@repo/risk`).
 - **Eén geaggregeerde intent** per bar volgens prioriteit (sterkste wint): **EXIT** > **REDUCE** > **ADD** > **ENTER** > **HOLD** — zie ook [asset-selection-workflow.md](./asset-selection-workflow.md) (Mediator-beslisvolgorde).
 - **Risk rails toepassen** voor nieuwe **koop**-exposure (`ENTER`, en `ADD` alleen als `allowAdd` aan staat): via `evaluateNewEntry` in `[packages/risk](../packages/risk/src/evaluate.ts)`.
 - **Beslissing vastleggen:** `approved`, `reason_codes`, `risk_snapshot`, `decision_payload` (o.a. `resolvedIntent`, `signalIds`, `signalsIn`, `proposedOrder` bij approve), optioneel `signal_id` naar de eerste bron-signal.
-- **Idempotentie:** upsert op unieke sleutel `(user_id, market_id, timeframe, close_time)` (migratie `20260528120000_trade_decisions_bar_scope.sql`).
+- **Idempotentie:** upsert op unieke sleutel `(user_id, executor_id, market_id, timeframe, close_time)` (migratie `20260530120000_trading_executors.sql`; vervangt de eerdere sleutel zonder `executor_id`).
 
 ---
 
@@ -76,7 +77,7 @@ Zelfde **batch + QStash self-chain** als signalen: `[apps/web/src/lib/mediator/r
 
 - **Auth:** QStash-handtekening **of** `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`), zie andere workers.
 - **Body (JSON):** `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`
-- **Gedrag:** voor elke markt in de batch en elke geconfigureerde `user_id`: signalen ophalen → positie → risk → `evaluateTradeDecision` → upsert `trading.trade_decisions`.
+- **Gedrag:** voor elke markt in de batch, elke geconfigureerde `user_id`, en elke **enabled executor** van die gebruiker (asset-filter toegepast): signalen ophalen → positie op dat executor-boek → risk → `evaluateTradeDecision` → upsert `trading.trade_decisions`.
 
 Implementatie-entrypoints:
 
@@ -105,15 +106,15 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 ## Dashboard & database
 
 - Dashboard: **Trading → Trading Decisions** — `[apps/web/src/app/dashboard/trade-decisions/page.tsx](../apps/web/src/app/dashboard/trade-decisions/page.tsx)`
-- Tabel: `trading.trade_decisions` — kolommen o.a. `close_time`, `timeframe`, `paper`, `approved`, `reason_codes`, `risk_snapshot`, `decision_payload`, `signal_id`
+- Tabel: `trading.trade_decisions` — kolommen o.a. `executor_id`, `close_time`, `timeframe`, `approved`, `reason_codes`, `risk_snapshot`, `decision_payload`, `signal_id`
 
 ---
 
 ## Troubleshooting
 
-- **Geen rijen in `trading.trade_decisions`:** controleer `SIGNAL_`* env, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, en of migratie `20260528120000_trade_decisions_bar_scope.sql` is toegepast (unique + `close_time`/`timeframe`).
+- **Geen rijen in `trading.trade_decisions`:** controleer `SIGNAL_`* env, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, of er minstens één **enabled** `trading.executors`-rij is voor die gebruiker, en of migraties t/m `20260530120000_trading_executors.sql` zijn toegepast (unique met `executor_id`).
 - **Alleen denied beslissingen met `non_positive_equity`:** vaak ontbreekt een rij in `trading.risk_state` voor die gebruiker — vul realistische `equity_eur` e.d. of seed defaults.
-- **Upsert-fouten op unique:** `onConflict` moet overeenkomen met `(user_id, market_id, timeframe, close_time)`.
+- **Upsert-fouten op unique:** `onConflict` moet overeenkomen met `(user_id, executor_id, market_id, timeframe, close_time)`.
 
 ---
 
