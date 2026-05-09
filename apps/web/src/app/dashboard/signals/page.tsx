@@ -51,6 +51,16 @@ function compareSignals(a: SignalRow, b: SignalRow, mcapByMarketId: Map<string, 
   return Date.parse(b.created_at) - Date.parse(a.created_at);
 }
 
+/** After global relevance sort, keep the first row per market (that row is “most relevant” for that market). */
+function topSignalPerMarket(sorted: SignalRow[]): SignalRow[] {
+  const seen = new Set<string>();
+  return sorted.filter((row) => {
+    if (seen.has(row.market_id)) return false;
+    seen.add(row.market_id);
+    return true;
+  });
+}
+
 function fmtUtc(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -112,7 +122,15 @@ export default async function SignalsPage() {
     }
   }
 
-  const list = [...raw].sort((a, b) => compareSignals(a, b, mcapByMarketId));
+  const sorted = [...raw].sort((a, b) => compareSignals(a, b, mcapByMarketId));
+  const list = topSignalPerMarket(sorted);
+
+  const sortLineParts = [
+    `${list.length} market${list.length === 1 ? "" : "s"}`,
+    raw.length > list.length ? `${raw.length} signals in DB` : null,
+    "one row per market (top rank)",
+    "ENTER → EXIT → other · mcap desc · tie: newest",
+  ].filter((s): s is string => Boolean(s));
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -121,7 +139,7 @@ export default async function SignalsPage() {
         title="Signals"
         iconLetter="S"
         rowCount={list.length}
-        sortLine="ENTER → EXIT → other intents · CoinGecko mcap (desc) · tie: newest"
+        sortLine={sortLineParts.join(" · ")}
         uncapped
         actions={
           <>
@@ -135,6 +153,13 @@ export default async function SignalsPage() {
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
+      {raw.length > 0 ? (
+        <Alert tone="info">
+          One row per market: the highest-ranked signal after the sort below (ENTER → EXIT → other, then mcap,
+          then newest). Other bars and agents for the same market stay in{" "}
+          <code className="bk-code">trading.signals</code> but are not listed here.
+        </Alert>
+      ) : null}
       <Card>
         <CardBody className="!pt-0">
           <TableWrap>
