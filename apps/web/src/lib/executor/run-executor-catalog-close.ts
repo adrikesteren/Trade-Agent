@@ -1,0 +1,483 @@
+import "server-only";
+
+import { Client } from "@upstash/qstash";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { placeBitvavoMarketBuyQuote } from "@/lib/bitvavo/place-market-order";
+import { barsForRetention } from "@/lib/markets/candle-retention";
+import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { closeTimesMatch } from "@/lib/trading/close-time-match";
+import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
+
+import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
+
+export type ExecutorCatalogCloseBody = {
+  closeTimeIso: string;
+  timeframe?: string;
+  quote?: string | null;
+  marketOffset?: number;
+  marketBatchSize?: number;
+  candleSyncRunId?: string | null;
+};
+
+export type RunExecutorCatalogCloseResult = {
+  ok: true;
+  marketsProcessed: number;
+  ordersInserted: number;
+  nextMarketOffset: number | null;
+  totalMarkets: number;
+  skippedReason?: string;
+};
+
+function marketBatchSize(): number {
+  const n = Number(process.env.SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE ?? 40);
+  if (!Number.isFinite(n)) return 40;
+  return Math.min(Math.max(Math.floor(n), 1), 120);
+}
+
+function maxTotalMarkets(): number | null {
+  const raw = process.env.SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS?.trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+type CandleRow = {
+  id: string;
+  close: string | number;
+  candle_timestamps: { close_time: string; open_time: string } | { close_time: string; open_time: string }[] | null;
+};
+
+function mapCandleRows(rows: CandleRow[]): { id: string; close: number; closeTimeIso: string }[] {
+  const mapped = (rows ?? [])
+    .map((r) => {
+      const rawTs = r.candle_timestamps as unknown;
+      const ts = (Array.isArray(rawTs) ? rawTs[0] : rawTs) as { close_time?: string } | null | undefined;
+      const closeTime = ts?.close_time;
+      if (!closeTime) return null;
+      return { id: r.id, close: Number(r.close), closeTimeIso: closeTime };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
+  mapped.sort((a, b) => Date.parse(a.closeTimeIso) - Date.parse(b.closeTimeIso));
+  return mapped;
+}
+
+async function fetchCandlesForMarket(
+  admin: SupabaseClient,
+  args: { marketId: string; timeframe: string; barLimit: number },
+): Promise<CandleRow[]> {
+  const { data, error } = await admin
+    .schema("catalog")
+    .from("candles")
+    .select("id, open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
+    .eq("market_id", args.marketId)
+    .eq("timeframe", args.timeframe)
+    .limit(args.barLimit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as CandleRow[];
+}
+
+function parseProposedBuy(payload: Record<string, unknown> | null): { symbol: string; notionalEur: number } | null {
+  const po = payload?.proposedOrder;
+  if (!po || typeof po !== "object") return null;
+  const o = po as Record<string, unknown>;
+  if (o.side !== "buy") return null;
+  const sym = typeof o.symbol === "string" ? o.symbol.trim() : "";
+  const n = Number(o.notionalEur);
+  if (!sym || !Number.isFinite(n) || n <= 0) return null;
+  return { symbol: sym, notionalEur: n };
+}
+
+function bitvavoStatusToDbOrderStatus(
+  s: string,
+): "pending" | "open" | "filled" | "cancelled" | "rejected" {
+  if (s === "filled") return "filled";
+  if (s === "new" || s === "partiallyFilled") return "open";
+  if (s === "canceled" || s === "cancelled" || s === "expired") return "cancelled";
+  return "open";
+}
+
+type DecisionRow = {
+  id: string;
+  user_id: string;
+  market_id: string;
+  approved: boolean;
+  paper: boolean;
+  close_time: string;
+  timeframe: string;
+  decision_payload: Record<string, unknown> | null;
+};
+
+async function findClosePriceForBar(
+  admin: SupabaseClient,
+  args: { marketId: string; timeframe: string; closeTimeIso: string },
+): Promise<{ price: number; candleId: string | null } | null> {
+  const raw = await fetchCandlesForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    barLimit: barsForRetention(args.timeframe),
+  });
+  const sorted = mapCandleRows(raw);
+  const hit = sorted.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
+  if (!hit) return null;
+  return { price: hit.close, candleId: hit.id };
+}
+
+async function upsertPositionAfterBuy(
+  admin: SupabaseClient,
+  args: {
+    userId: string;
+    marketId: string;
+    paper: boolean;
+    addQty: number;
+    price: number;
+  },
+): Promise<void> {
+  const { data: pos, error: selErr } = await admin
+    .schema("trading")
+    .from("positions")
+    .select("id, quantity, avg_price")
+    .eq("user_id", args.userId)
+    .eq("market_id", args.marketId)
+    .eq("paper", args.paper)
+    .maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+
+  const existingQty = Number(pos?.quantity ?? 0);
+  const existingAvg = pos?.avg_price != null ? Number(pos.avg_price) : null;
+  const { quantity, avgPrice } = mergeBuyPositionAvg({
+    existingQty,
+    existingAvg,
+    addQty: args.addQty,
+    addPrice: args.price,
+  });
+
+  const row = {
+    user_id: args.userId,
+    market_id: args.marketId,
+    paper: args.paper,
+    quantity,
+    avg_price: avgPrice,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
+    onConflict: "user_id,market_id,paper",
+  });
+  if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
+}
+
+export async function runExecutorCatalogClose(
+  body: ExecutorCatalogCloseBody,
+  opts?: { allowQStashSelfQueue?: boolean },
+): Promise<RunExecutorCatalogCloseResult> {
+  const allowQStashSelfQueue = opts?.allowQStashSelfQueue !== false;
+  const admin = createServiceRoleClient();
+  const timeframe = body.timeframe ?? CATALOG_STORAGE_TIMEFRAME;
+  const quote = body.quote === undefined ? "EUR" : body.quote;
+  const marketOffset = Math.max(body.marketOffset ?? 0, 0);
+  const marketBatchSizeVal = Math.min(Math.max(body.marketBatchSize ?? marketBatchSize(), 1), 120);
+  const closeTimeIso = body.closeTimeIso;
+
+  const userIds = parseSignalUserIdsFromEnv();
+  if (!userIds.length) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      ordersInserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      skippedReason: "no_signal_user_ids",
+    };
+  }
+
+  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
+  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
+  const exchangeId = ex.id as string;
+
+  let countQuery = admin
+    .schema("catalog")
+    .from("markets")
+    .select("id", { count: "exact", head: true })
+    .eq("exchange_id", exchangeId);
+  if (quote != null && String(quote).trim() !== "") {
+    countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
+  }
+  const { count: totalMarkets, error: countErr } = await countQuery;
+  if (countErr) throw new Error(countErr.message);
+  const total = totalMarkets ?? 0;
+  const maxTotal = maxTotalMarkets();
+  const effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
+
+  if (marketOffset >= effectiveTotal || effectiveTotal === 0) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      ordersInserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: effectiveTotal,
+      skippedReason: marketOffset >= effectiveTotal ? "market_offset_past_end" : undefined,
+    };
+  }
+
+  const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+  const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
+    p_exchange_id: exchangeId,
+    p_quote: quoteArg,
+    p_offset: marketOffset,
+    p_limit: marketBatchSizeVal,
+  });
+  if (listErr) throw new Error(listErr.message);
+  const rowsRaw = (markets ?? []) as { id: string; market_symbol: string }[];
+  const remainingBudget = Math.max(effectiveTotal - marketOffset, 0);
+  const rows = remainingBudget < rowsRaw.length ? rowsRaw.slice(0, remainingBudget) : rowsRaw;
+
+  if (rows.length === 0) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      ordersInserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: effectiveTotal,
+      skippedReason: "no_market_rows",
+    };
+  }
+
+  const t = Date.parse(closeTimeIso);
+  const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
+  const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
+
+  let ordersInserted = 0;
+
+  for (const m of rows) {
+    const marketId = m.id as string;
+    const marketSymbol = m.market_symbol as string;
+
+    for (const userId of userIds) {
+      const { data: decList, error: decErr } = await admin
+        .schema("trading")
+        .from("trade_decisions")
+        .select("id, user_id, market_id, approved, paper, close_time, timeframe, decision_payload")
+        .eq("user_id", userId)
+        .eq("market_id", marketId)
+        .eq("timeframe", timeframe)
+        .gte("close_time", closeLow)
+        .lte("close_time", closeHigh);
+
+      if (decErr) throw new Error(decErr.message);
+
+      const decisions = ((decList ?? []) as DecisionRow[]).filter((d) => closeTimesMatch(d.close_time, closeTimeIso));
+      const dec = decisions[0];
+      if (!dec) continue;
+      if (!dec.approved) continue;
+
+      const proposed = parseProposedBuy(dec.decision_payload);
+      if (!proposed) continue;
+
+      const { data: existingOrder, error: ordSelErr } = await admin
+        .schema("trading")
+        .from("orders")
+        .select("id")
+        .eq("decision_id", dec.id)
+        .maybeSingle();
+      if (ordSelErr) throw new Error(ordSelErr.message);
+      if (existingOrder) continue;
+
+      const paper = dec.paper;
+      const notionalEur = proposed.notionalEur;
+
+      if (paper) {
+        const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+        if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
+
+        const qty = baseQuantityFromNotionalEur(notionalEur, px.price);
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+
+        const feeEur = Math.round(notionalEur * 0.0025 * 1e8) / 1e8;
+
+        const { data: inserted, error: insOrdErr } = await admin
+          .schema("trading")
+          .from("orders")
+          .insert({
+            user_id: userId,
+            decision_id: dec.id,
+            market_id: marketId,
+            side: "buy",
+            quantity: qty,
+            notional_eur: notionalEur,
+            status: "filled",
+            paper: true,
+            external_id: null,
+          })
+          .select("id")
+          .single();
+        if (insOrdErr) throw new Error(`${marketSymbol}: order insert: ${insOrdErr.message}`);
+        const orderId = inserted?.id as string;
+
+        const { error: fillErr } = await admin.schema("trading").from("fills").insert({
+          user_id: userId,
+          order_id: orderId,
+          price: px.price,
+          quantity: qty,
+          fee: feeEur,
+        });
+        if (fillErr) throw new Error(`${marketSymbol}: fill insert: ${fillErr.message}`);
+
+        await upsertPositionAfterBuy(admin, {
+          userId,
+          marketId,
+          paper: true,
+          addQty: qty,
+          price: px.price,
+        });
+        ordersInserted += 1;
+        continue;
+      }
+
+      /* Live */
+      try {
+        const live = await placeBitvavoMarketBuyQuote({
+          market: marketSymbol,
+          amountQuoteEur: notionalEur,
+          clientOrderId: dec.id,
+        });
+        const dbStatus = bitvavoStatusToDbOrderStatus(live.status);
+        const { data: insLive, error: insLiveErr } = await admin
+          .schema("trading")
+          .from("orders")
+          .insert({
+            user_id: userId,
+            decision_id: dec.id,
+            market_id: marketId,
+            side: "buy",
+            quantity: 0,
+            notional_eur: notionalEur,
+            status: dbStatus,
+            paper: false,
+            external_id: live.orderId,
+          })
+          .select("id")
+          .single();
+        if (insLiveErr) throw new Error(`${marketSymbol}: live order insert: ${insLiveErr.message}`);
+        const localOrderId = insLive?.id as string;
+
+        const fills = live.raw.fills;
+        if (dbStatus === "filled") {
+          let fillPrice = Number.NaN;
+          let fillQty = Number.NaN;
+          let fillFee = 0;
+          if (Array.isArray(fills) && fills.length > 0) {
+            const f0 = fills[0] as Record<string, unknown>;
+            fillPrice = Number(f0.price);
+            fillQty = Number(f0.amount);
+            fillFee = Number(f0.fee ?? 0);
+          } else {
+            fillQty = Number(live.raw.filledAmount ?? Number.NaN);
+            fillPrice =
+              Number.isFinite(fillQty) && fillQty > 0
+                ? notionalEur / fillQty
+                : Number(live.raw.price ?? Number.NaN);
+          }
+          if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
+            await admin.schema("trading").from("fills").insert({
+              user_id: userId,
+              order_id: localOrderId,
+              price: fillPrice,
+              quantity: fillQty,
+              fee: Number.isFinite(fillFee) ? fillFee : 0,
+            });
+            await upsertPositionAfterBuy(admin, {
+              userId,
+              marketId,
+              paper: false,
+              addQty: fillQty,
+              price: fillPrice,
+            });
+            await admin
+              .schema("trading")
+              .from("orders")
+              .update({ quantity: fillQty, updated_at: new Date().toISOString() })
+              .eq("id", localOrderId);
+          }
+        }
+        ordersInserted += 1;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const { error: rejErr } = await admin.schema("trading").from("orders").insert({
+          user_id: userId,
+          decision_id: dec.id,
+          market_id: marketId,
+          side: "buy",
+          quantity: 0,
+          notional_eur: notionalEur,
+          status: "rejected",
+          paper: false,
+          external_id: null,
+        });
+        if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
+          throw new Error(`${marketSymbol}: live reject insert: ${rejErr.message}`);
+        }
+        console.error(`executor live order failed ${marketSymbol}:`, msg);
+      }
+    }
+  }
+
+  const nextOffset = marketOffset + rows.length;
+  const nextMarketOffset = nextOffset < effectiveTotal ? nextOffset : null;
+
+  const base = workerPublicBaseUrl();
+  const token = process.env.QSTASH_TOKEN;
+  if (nextMarketOffset != null && allowQStashSelfQueue && base && token) {
+    const client = new Client({ token });
+    await client.publishJSON({
+      url: `${base}/api/workers/executor-catalog-close`,
+      body: {
+        closeTimeIso,
+        timeframe,
+        quote,
+        marketOffset: nextMarketOffset,
+        marketBatchSize: marketBatchSizeVal,
+        candleSyncRunId: body.candleSyncRunId ?? undefined,
+      },
+      retries: 3,
+    });
+  }
+
+  return {
+    ok: true,
+    marketsProcessed: rows.length,
+    ordersInserted,
+    nextMarketOffset,
+    totalMarkets: effectiveTotal,
+  };
+}
+
+export async function runExecutorCatalogCloseDrain(body: ExecutorCatalogCloseBody): Promise<RunExecutorCatalogCloseResult> {
+  let offset = body.marketOffset ?? 0;
+  let totalOrders = 0;
+  let totalMarkets = 0;
+  let last: RunExecutorCatalogCloseResult | null = null;
+  const maxIters = Number(process.env.SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS ?? 400);
+  const cap = Math.min(Math.max(Math.floor(maxIters), 1), 2000);
+
+  let marketsSum = 0;
+  for (let i = 0; i < cap; i++) {
+    last = await runExecutorCatalogClose({ ...body, marketOffset: offset }, { allowQStashSelfQueue: false });
+    totalMarkets = last.totalMarkets;
+    totalOrders += last.ordersInserted;
+    marketsSum += last.marketsProcessed;
+    if (last.nextMarketOffset == null) break;
+    offset = last.nextMarketOffset;
+  }
+
+  return {
+    ok: true,
+    marketsProcessed: marketsSum,
+    ordersInserted: totalOrders,
+    nextMarketOffset: last?.nextMarketOffset ?? null,
+    totalMarkets,
+  };
+}

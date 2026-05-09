@@ -11,7 +11,7 @@ Audience: human developers and **Cursor / automation agents** editing this codeb
 1. **Ingest** writes closed OHLCV to `catalog.candles` (catalog storage timeframe: `5m` — see `CATALOG_STORAGE_TIMEFRAME` in the web app).
 2. **Signal agents** (this document) read that data and append **advice** to `trading.signals` (`intent`, `confidence`, `reasons`, …). They **never** place orders.
 3. **Trade Mediator** reads signals + portfolio/risk and upserts `trade_decisions` (see [mediator-developer.md](./mediator-developer.md)).
-4. **Executor** executes approved decisions.
+4. **Executor** executes approved decisions into `orders` / `fills` ([executor-developer.md](./executor-developer.md)).
 
 Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer**: stable slug `trading.signal_agents.agent_id` (e.g. `ma-cross-5m-v1`) plus row PK `trading.signal_agents.id` used as **`trading.signals.signal_agent_id`** (FK for UI and integrity).
 

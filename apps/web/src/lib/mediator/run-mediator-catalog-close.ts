@@ -8,7 +8,9 @@ import type { RiskStateSnapshot } from "@repo/risk";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { enqueueExecutorCatalogCloseAfterMediator } from "@/lib/executor/enqueue-executor-catalog-close";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
+import { fetchUserUsesPaperBook } from "@/lib/trading/user-execution-paper";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type MediatorCatalogCloseBody = {
@@ -207,6 +209,8 @@ export async function runMediatorCatalogClose(
     const marketSymbol = m.market_symbol as string;
 
     for (const userId of userIds) {
+      const { decisionPaperColumn } = await fetchUserUsesPaperBook(admin, userId);
+
       const { data: riskUser, error: riskUserErr } = await admin
         .schema("trading")
         .from("risk_state")
@@ -223,7 +227,7 @@ export async function runMediatorCatalogClose(
         .select("quantity")
         .eq("user_id", userId)
         .eq("market_id", marketId)
-        .eq("paper", true)
+        .eq("paper", decisionPaperColumn)
         .maybeSingle();
 
       if (posErr) throw new Error(posErr.message);
@@ -268,7 +272,7 @@ export async function runMediatorCatalogClose(
         market_id: marketId,
         close_time: canonicalClose,
         timeframe,
-        paper: true,
+        paper: decisionPaperColumn,
         signal_id: primarySignalId,
         approved: decision.approved,
         reason_codes: decision.reasonCodes,
@@ -280,6 +284,7 @@ export async function runMediatorCatalogClose(
           signalsIn,
           proposedOrder: decision.proposedOrder ?? null,
           market_symbol: marketSymbol,
+          executionModeSnapshot: decisionPaperColumn ? "paper" : "live",
           ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
         },
       };
@@ -311,6 +316,24 @@ export async function runMediatorCatalogClose(
       },
       retries: 3,
     });
+  }
+
+  if (
+    nextMarketOffset == null &&
+    rows.length > 0 &&
+    decisionsUpserted > 0 &&
+    process.env.EXECUTOR_AFTER_MEDIATOR_DISABLE !== "1" &&
+    userIds.length > 0
+  ) {
+    try {
+      await enqueueExecutorCatalogCloseAfterMediator({
+        closeTimeIso,
+        timeframe,
+        candleSyncRunId: body.candleSyncRunId ?? null,
+      });
+    } catch (e) {
+      console.error("enqueueExecutorCatalogCloseAfterMediator failed:", e);
+    }
   }
 
   return {

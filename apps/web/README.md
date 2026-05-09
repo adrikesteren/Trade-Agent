@@ -79,3 +79,26 @@ curl -sS -X POST "http://localhost:3000/api/workers/mediator-catalog-close" ^
   -H "Content-Type: application/json" ^
   -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
 ```
+
+## Trade executor (env)
+
+After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsUpserted > 0`), the app enqueues `POST /api/workers/executor-catalog-close`, which turns **approved** `trading.trade_decisions` into `trading.orders` (+ `fills` / `positions`). Paper vs live follows the `paper` flag on each decision (snapshot from the user’s `trading.user_execution_preferences` at mediator time). See [docs/executor-developer.md](../../docs/executor-developer.md).
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users whose decisions are executed (trusted env only). |
+| `EXECUTOR_AFTER_MEDIATOR_DISABLE` | Optional | Set to `1` to skip enqueueing the executor after the mediator pass. |
+| `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` | Required for **live** orders | Server-side Bitvavo signing (never commit; not stored in Postgres). |
+| `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
+| `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
+
+**Execution mode (UI):** logged-in users set **Paper / Live** under Dashboard → Trading → **Execution mode** (`/dashboard/settings/execution`), stored in `trading.user_execution_preferences`.
+
+Manual worker call (dev):
+
+```bash
+curl -sS -X POST "http://localhost:3000/api/workers/executor-catalog-close" ^
+  -H "Authorization: Bearer %CRON_SECRET%" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
+```

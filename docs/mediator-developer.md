@@ -2,7 +2,7 @@
 
 Dit document beschrijft **wat de Trade Mediator in deze repo doet**, welke **grenzen** gelden, **hoe** de worker wordt aangestuurd, en waar de **pure beslislogica** staat. Het vult de productbeschrijving in [how-we-use-agents.md](./how-we-use-agents.md) aan met concrete implementatie en bediening.
 
-**Let op:** “Mediator” is hier **geen** Cursor IDE-assistent en **geen** los LLM-product. Het is een **vast servercomponent**: code die na signalen één **beslissing per gebruiker/markt/gesloten bar** vastlegt in `trading.trade_decisions`. De executor (stap 4) plaats nog geen orders vanuit dit document.
+**Let op:** “Mediator” is hier **geen** Cursor IDE-assistent en **geen** los LLM-product. Het is een **vast servercomponent**: code die na signalen één **beslissing per gebruiker/markt/gesloten bar** vastlegt in `trading.trade_decisions`. Orderplaatsing gebeurt in de **executor** (stap 4), niet in de mediator.
 
 Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze codebase aanpassen.
 
@@ -12,17 +12,17 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 
 1. **Ingest** schrijft gesloten OHLCV naar `catalog.candles` (opslag-timeframe `5m` — zie `CATALOG_STORAGE_TIMEFRAME` in de webapp).
 2. **Signal agents** schrijven advies naar `trading.signals` (`intent`, `confidence`, `reasons`, …). Zij plaatsen **geen** orders.
-3. **Trade Mediator** (dit document) leest signalen + **paper**-positie + `trading.risk_state` en **upsert** één rij in `trading.trade_decisions` per `(user_id, market_id, timeframe, close_time)`.
-4. **Executor** (toekomst) leest goedgekeurde beslissingen en plaatst orders (paper/live).
+3. **Trade Mediator** (dit document) leest signalen + positie op het **juiste boek** (`trading.positions.paper` gelijk aan de gebruikersmodus) + `trading.risk_state` en **upsert** één rij in `trading.trade_decisions` per `(user_id, market_id, timeframe, close_time)` (kolom `paper` is een snapshot van die modus).
+4. **Executor** leest goedgekeurde beslissingen en schrijft `orders` / `fills` ([executor-developer.md](./executor-developer.md)).
 
 ---
 
 ## Taken die de Mediator **wel** moet doen
 
 - **Signalen lezen** voor de doel-bar: alle rijen in `trading.signals` voor dezelfde `market_id`, `timeframe` en `close_time` (tolerantie ±2s ten opzichte van `closeTimeIso` uit de worker), met join naar `trading.signal_agents` voor het `agent_id`-slug in logs/payload.
-- **Positie meenemen (v1: paper):** `trading.positions` voor `(user_id, market_id, paper = true)` — `quantity > 0` betekent “in positie”.
+- **Positie meenemen:** `trading.positions` voor `(user_id, market_id, paper)` waarbij `paper` overeenkomt met `trading.user_execution_preferences` (`paper` boek vs `live` boek) — `quantity > 0` betekent “in positie”.
 - **Risk state meenemen:** `trading.risk_state` voor `user_id`; `exposure_by_market` wordt voor de risk-check op **symbool** gemapt (o.a. huidige `market_id` → `market_symbol` voor `ProposedOrder.symbol` in `@repo/risk`).
-- **Eén geaggregeerde intent** per bar volgens prioriteit (sterkste wint): `**EXIT` > `REDUCE` > `ADD` > `ENTER` > `HOLD`** — zie ook [asset-selection-workflow.md](./asset-selection-workflow.md) (Mediator-beslisvolgorde).
+- **Eén geaggregeerde intent** per bar volgens prioriteit (sterkste wint): **EXIT** > **REDUCE** > **ADD** > **ENTER** > **HOLD** — zie ook [asset-selection-workflow.md](./asset-selection-workflow.md) (Mediator-beslisvolgorde).
 - **Risk rails toepassen** voor nieuwe **koop**-exposure (`ENTER`, en `ADD` alleen als `allowAdd` aan staat): via `evaluateNewEntry` in `[packages/risk](../packages/risk/src/evaluate.ts)`.
 - **Beslissing vastleggen:** `approved`, `reason_codes`, `risk_snapshot`, `decision_payload` (o.a. `resolvedIntent`, `signalIds`, `signalsIn`, `proposedOrder` bij approve), optioneel `signal_id` naar de eerste bron-signal.
 - **Idempotentie:** upsert op unieke sleutel `(user_id, market_id, timeframe, close_time)` (migratie `20260528120000_trade_decisions_bar_scope.sql`).
@@ -34,7 +34,7 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 - **Geen orders** — geen Bitvavo-calls, geen inserts in `trading.orders` / `trading.fills` vanuit mediator-code.
 - **Geen signalen schrijven** — geen wijzigingen aan `trading.signals` vanuit de mediator-worker.
 - **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit server-trusted env (`SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`). Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
-- `**EXIT` / `REDUCE` met positie (v1):** worden **geweigerd** met redencodes `exit_not_implemented` / `reduce_not_implemented` tot de executor exits ondersteunt. Zonder positie: `no_position`.
+- **EXIT** / **REDUCE** met positie (v1): worden **geweigerd** met redencodes `exit_not_implemented` / `reduce_not_implemented` tot de executor exits ondersteunt. Zonder positie: `no_position`.
 
 ---
 
@@ -66,6 +66,7 @@ Kort overzicht van uitkomsten (niet exhaustief):
 
 - Na de **laatste batch** van `POST /api/workers/signals-catalog-close` voor een gegeven `closeTimeIso`, **als** in die laatste batch minstens één signal-upsert is gelukt (`signalsUpserted > 0`), start de app automatisch de mediator-run (tenzij `MEDIATOR_AFTER_SIGNALS_DISABLE=1`).
 - Zonder `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` worden geen beslissingen geschreven (zelfde users als signalen).
+- Na de **laatste batch** van `mediator-catalog-close` met `decisionsUpserted > 0` start de **executor** (`POST /api/workers/executor-catalog-close`), tenzij `EXECUTOR_AFTER_MEDIATOR_DISABLE=1`. Zie [executor-developer.md](./executor-developer.md).
 
 Zelfde **batch + QStash self-chain** als signalen: `[apps/web/src/lib/mediator/run-mediator-catalog-close.ts](../apps/web/src/lib/mediator/run-mediator-catalog-close.ts)`. Zonder QStash + `APP_BASE_URL` draait een **inline drain** in hetzelfde proces (localhost-vriendelijk; let op timeouts bij grote universums).
 

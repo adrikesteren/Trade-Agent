@@ -161,9 +161,9 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 ## Event flow (samenvatting)
 
 1. `CANDLE_CLOSED` → signal agents draaien → `signals` in DB.
-2. Mediator leest signalen + positie + risk → `trade_decision`.
-3. Bij approved → executor → `orders` / `fills` (paper of live).
-4. Reconciliatie en monitoring op de achtergrond.
+2. Mediator leest signalen + positie + risk → `trade_decision` (met `paper`-snapshot uit gebruikersvoorkeur).
+3. Bij approved → **executor**-worker → `orders` / `fills` / `positions` (paper-simulatie of live Bitvavo; zie [executor-developer.md](./executor-developer.md)).
+4. Reconciliatie en monitoring op de achtergrond (verder uit te breiden).
 
 ---
 
@@ -235,6 +235,7 @@ Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder mod
 - `trading-platform-project-brief.md` — totale projectcontext en stack (Next.js, Expo, Supabase, Upstash).
 - `[signal-agents-developer.md](./signal-agents-developer.md)` — taken, grenzen, triggers en DB-contract voor **Signal agents** (implementatie + AI-agent-instructies).
 - `[mediator-developer.md](./mediator-developer.md)` — taken, grenzen, triggers en gebruik van de **Trade Mediator** (beslissingen in `trade_decisions`).
+- `[executor-developer.md](./executor-developer.md)` — **Trade Executor**: orders/fills, paper/live, Bitvavo private API.
 
 ---
 
