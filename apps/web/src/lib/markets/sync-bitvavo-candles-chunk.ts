@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter, type Candle } from "@repo/exchange";
+import { bitvavoListCandlesEndMs } from "@/lib/markets/bitvavo-list-candles-end-ms";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
 
 export type CandleSyncMode = "full" | "incremental" | "window";
@@ -199,6 +200,12 @@ export async function syncBitvavoCandlesChunk(
   const endTimeParamIncremental =
     incremental && Number.isFinite(endMsIncremental) ? String(Math.trunc(endMsIncremental)) : undefined;
 
+  /** Full sync: Bitvavo `end` must be last **closed** bar so we never anchor on an in-progress candle. */
+  const endTimeParamFull =
+    !windowMode && !incremental
+      ? String(Math.trunc(bitvavoListCandlesEndMs(Date.now(), opts.timeframe)))
+      : undefined;
+
   const windowEndCloseMs = windowMode ? Date.parse(String(opts.windowEndClose)) : NaN;
   const windowStartOpenMs = windowMode ? Date.parse(String(opts.windowStartOpen)) : NaN;
 
@@ -224,7 +231,11 @@ export async function syncBitvavoCandlesChunk(
         symbol: marketSymbol,
         timeframe: opts.timeframe,
         limit: effectiveBars,
-        ...(endTimeParamIncremental ? { endTime: endTimeParamIncremental } : {}),
+        ...(endTimeParamIncremental
+          ? { endTime: endTimeParamIncremental }
+          : endTimeParamFull
+            ? { endTime: endTimeParamFull }
+            : {}),
       });
     }
 

@@ -64,6 +64,8 @@ export const SYNC_JOB_SIGNALS_CATALOG_CLOSE = "signals_catalog_close" as const;
 export const SYNC_JOB_MEDIATOR_CATALOG_CLOSE = "mediator_catalog_close" as const;
 /** `automation.sync_runs.job_key` — executor pass for one catalog bar close. */
 export const SYNC_JOB_EXECUTOR_CATALOG_CLOSE = "executor_catalog_close" as const;
+/** `automation.sync_runs.job_key` — single-asset ingest + scoped catalog-close (parallel runs per metadata assetCode + exchangeCode). */
+export const SYMBOL_CLOSE_PIPELINE_JOB_KEY = "symbol_close_pipeline" as const;
 export type BitvavoSyncTriggerSource = "manual" | "automated";
 export type BitvavoSyncJobStatus = "running" | "completed" | "failed" | "skipped";
 
@@ -74,7 +76,10 @@ export type BeginBitvavoSyncRunResult =
   | { outcome: "started"; runId: string }
   | { outcome: "skipped"; runId: string };
 
-/** Latest still-running row for a job (e.g. HTTP chunk continuation missing syncRunId). */
+/**
+ * Latest still-running row for a job (e.g. HTTP chunk continuation missing syncRunId).
+ * Not reliable for `SYMBOL_CLOSE_PIPELINE_JOB_KEY` when multiple scopes can be running; pass an explicit `runId` instead.
+ */
 export async function resolveLatestRunningBitvavoRunId(
   admin: SupabaseClient,
   jobKey: string,

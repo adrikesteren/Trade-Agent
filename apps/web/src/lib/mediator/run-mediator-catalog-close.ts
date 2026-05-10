@@ -28,6 +28,10 @@ export type MediatorCatalogCloseBody = {
   signalsSyncRunId?: string | null;
   /** `automation.sync_runs.id` for this mediator_catalog_close job (set by the sync-run orchestrator). */
   mediatorPipelineSyncRunId?: string | null;
+  /** When set, process only this `catalog.markets.id` (single batch; Bitvavo catalog-close only). */
+  onlyMarketId?: string | null;
+  /** When true, do not enqueue full-catalog executor HTTP job after the last batch. */
+  disableDownstreamEnqueue?: boolean;
 };
 
 export type RunMediatorCatalogCloseResult = {
@@ -106,6 +110,8 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   const marketOffset = Math.max(body.marketOffset ?? 0, 0);
   const marketBatchSizeVal = Math.min(Math.max(body.marketBatchSize ?? marketBatchSize(), 1), 120);
   const closeTimeIso = body.closeTimeIso;
+  const onlyMarketId = body.onlyMarketId != null && String(body.onlyMarketId).trim() !== "" ? String(body.onlyMarketId).trim() : null;
+  const disableDownstreamEnqueue = body.disableDownstreamEnqueue === true;
 
   const userIds = parseSignalUserIdsFromEnv();
   if (!userIds.length) {
@@ -123,42 +129,80 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   if (exErr || !ex) throw new Error("Bitvavo exchange not found");
   const exchangeId = ex.id as string;
 
-  let countQuery = admin
-    .schema("catalog")
-    .from("markets")
-    .select("id", { count: "exact", head: true })
-    .eq("exchange_id", exchangeId);
-  if (quote != null && String(quote).trim() !== "") {
-    countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
-  }
-  const { count: totalMarkets, error: countErr } = await countQuery;
-  if (countErr) throw new Error(countErr.message);
-  const total = totalMarkets ?? 0;
-  const maxTotal = maxTotalMarkets();
-  const effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
+  let effectiveTotal: number;
+  let rows: { id: string; market_symbol: string }[];
 
-  if (marketOffset >= effectiveTotal || effectiveTotal === 0) {
-    return {
-      ok: true,
-      marketsProcessed: 0,
-      decisionsUpserted: 0,
-      nextMarketOffset: null,
-      totalMarkets: effectiveTotal,
-      skippedReason: marketOffset >= effectiveTotal ? "market_offset_past_end" : undefined,
-    };
-  }
+  if (onlyMarketId) {
+    const { data: mrow, error: oneErr } = await admin
+      .schema("catalog")
+      .from("markets")
+      .select("id, market_symbol, exchange_id")
+      .eq("id", onlyMarketId)
+      .maybeSingle();
+    if (oneErr) throw new Error(oneErr.message);
+    if (!mrow) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        decisionsUpserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: 0,
+        skippedReason: "only_market_not_found",
+      };
+    }
+    if (String(mrow.exchange_id) !== exchangeId) {
+      throw new Error("mediator_catalog_close: onlyMarketId must be a Bitvavo catalog market");
+    }
+    effectiveTotal = 1;
+    rows = [{ id: mrow.id as string, market_symbol: String(mrow.market_symbol) }];
+    if (marketOffset > 0) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        decisionsUpserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: 1,
+        skippedReason: "market_offset_past_end",
+      };
+    }
+  } else {
+    let countQuery = admin
+      .schema("catalog")
+      .from("markets")
+      .select("id", { count: "exact", head: true })
+      .eq("exchange_id", exchangeId);
+    if (quote != null && String(quote).trim() !== "") {
+      countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
+    }
+    const { count: totalMarkets, error: countErr } = await countQuery;
+    if (countErr) throw new Error(countErr.message);
+    const total = totalMarkets ?? 0;
+    const maxTotal = maxTotalMarkets();
+    effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
-  const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
-  const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
-    p_exchange_id: exchangeId,
-    p_quote: quoteArg,
-    p_offset: marketOffset,
-    p_limit: marketBatchSizeVal,
-  });
-  if (listErr) throw new Error(listErr.message);
-  const rowsRaw = (markets ?? []) as { id: string; market_symbol: string }[];
-  const remainingBudget = Math.max(effectiveTotal - marketOffset, 0);
-  const rows = remainingBudget < rowsRaw.length ? rowsRaw.slice(0, remainingBudget) : rowsRaw;
+    if (marketOffset >= effectiveTotal || effectiveTotal === 0) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        decisionsUpserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: effectiveTotal,
+        skippedReason: marketOffset >= effectiveTotal ? "market_offset_past_end" : undefined,
+      };
+    }
+
+    const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+    const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
+      p_exchange_id: exchangeId,
+      p_quote: quoteArg,
+      p_offset: marketOffset,
+      p_limit: marketBatchSizeVal,
+    });
+    if (listErr) throw new Error(listErr.message);
+    const rowsRaw = (markets ?? []) as { id: string; market_symbol: string }[];
+    const remainingBudget = Math.max(effectiveTotal - marketOffset, 0);
+    rows = remainingBudget < rowsRaw.length ? rowsRaw.slice(0, remainingBudget) : rowsRaw;
+  }
 
   if (rows.length === 0) {
     return {
@@ -297,13 +341,14 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     }
   }
 
-  const nextOffset = marketOffset + rows.length;
+  const nextOffset = onlyMarketId ? 1 : marketOffset + rows.length;
   const nextMarketOffset = nextOffset < effectiveTotal ? nextOffset : null;
 
   if (
     nextMarketOffset == null &&
     rows.length > 0 &&
     decisionsUpserted > 0 &&
+    !disableDownstreamEnqueue &&
     process.env.EXECUTOR_AFTER_MEDIATOR_DISABLE !== "1" &&
     userIds.length > 0
   ) {

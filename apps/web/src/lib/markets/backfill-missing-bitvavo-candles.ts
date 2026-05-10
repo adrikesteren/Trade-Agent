@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter } from "@repo/exchange";
+import { bitvavoListCandlesEndMs } from "@/lib/markets/bitvavo-list-candles-end-ms";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 
@@ -69,6 +70,7 @@ export async function backfillMissingBitvavoCandles(
       symbol: marketSymbol,
       timeframe,
       limit: barsPerMarket,
+      endTime: String(Math.trunc(bitvavoListCandlesEndMs(Date.now(), timeframe))),
     });
 
     const distinctPairs = new Map<string, { open_time: string; close_time: string }>();

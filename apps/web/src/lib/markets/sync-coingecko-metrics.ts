@@ -91,6 +91,48 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
 }
 
 /**
+ * Build `coingecko_coin_id` → `asset.id` only for the given catalog asset ids (crypto rows).
+ * Used by symbol-close-pipeline and other scoped CoinGecko refreshes.
+ */
+export async function buildCoingeckoIdMapForAssetIds(
+  supabase: SupabaseClient,
+  assetIds: string[],
+): Promise<{
+  idByCoingecko: Map<string, string>;
+  stillMissingCoingeckoId: number;
+}> {
+  const unique = [...new Set(assetIds.map((id) => String(id).trim()).filter(Boolean))];
+  if (unique.length === 0) {
+    return { idByCoingecko: new Map(), stillMissingCoingeckoId: 0 };
+  }
+
+  const { data: assets, error: selErr } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("id, coingecko_coin_id")
+    .eq("kind", "crypto")
+    .in("id", unique);
+
+  if (selErr) {
+    throw new Error(selErr.message);
+  }
+
+  const idByCoingecko = new Map<string, string>();
+  let stillMissingCoingeckoId = 0;
+
+  for (const a of (assets ?? []) as AssetRow[]) {
+    const cid = typeof a.coingecko_coin_id === "string" ? a.coingecko_coin_id.trim() : "";
+    if (cid) {
+      idByCoingecko.set(cid, a.id);
+    } else {
+      stillMissingCoingeckoId += 1;
+    }
+  }
+
+  return { idByCoingecko, stillMissingCoingeckoId };
+}
+
+/**
  * Phase 2 (CoinGecko /coins/markets): fetch markets and PATCH catalog `assets` (live columns, no history table).
  */
 export async function syncCoingeckoAssetMetricsMarketsPhase(

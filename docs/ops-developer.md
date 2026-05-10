@@ -29,8 +29,19 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 | `POST /api/workers/signals-catalog-close` | Signals for one catalog bar (`signals_catalog_close` sync run) |
 | `POST /api/workers/mediator-catalog-close` | Mediator (`mediator_catalog_close`) |
 | `POST /api/workers/executor-catalog-close` | Executor (`executor_catalog_close`) |
+| `GET` or `POST` `/api/workers/symbol-close-pipeline` | Single-asset pipeline: CoinGecko + Bitvavo candles + scoped signal/mediator/executor (`sync_runs` `symbol_close_pipeline`) |
 | `POST /api/workers/risk-daily-reset` | Reset `trading.risk_state.daily_pnl_eur` (intended once per UTC day) |
 | `POST /api/workers/bitvavo-reconcile` | Live order status sync vs Bitvavo |
+
+---
+
+### `GET` / `POST /api/workers/symbol-close-pipeline`
+
+- **Query (required):** `assetCode`, `exchangeCode` — matched **case-insensitively** against `catalog.assets.code` and `catalog.exchanges.code`.
+- **Query (optional):** `quote` — defaults to **EUR**; with asset + exchange resolves exactly one `catalog.markets` row.
+- **POST body (optional JSON):** `skipCoingecko`, `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` — booleans, default `false`.
+- **Flow:** resolve market → `sync_runs` row `symbol_close_pipeline` (scoped uniqueness allows **parallel** runs for different `assetCode`+`exchangeCode` pairs) → CoinGecko `/coins/markets` for that asset only → Bitvavo catalog candles for that market (retention as bulk sync) → in-process signal → mediator → executor for **only** that `market_id` (no full-catalog HTTP enqueue).
+- **Non-Bitvavo exchanges:** CoinGecko may still run; candles and catalog-close trading steps are skipped with clear step errors until multi-exchange support exists.
 
 ---
 
@@ -77,4 +88,4 @@ Optional `SLACK_TRADE_FILLS_WEBHOOK_URL`: Slack Incoming Webhook; `POST` JSON `{
 
 ---
 
-*Last updated: Ops step 5 — workers via CRON_SECRET, Redis lock on reconcile, optional webhook alerts.*
+*Last updated: Ops step 5 — workers via CRON_SECRET, symbol-close-pipeline, Redis lock on reconcile, optional webhook alerts.*
