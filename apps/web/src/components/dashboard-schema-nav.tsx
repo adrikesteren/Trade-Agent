@@ -65,6 +65,15 @@ export function DashboardSchemaNav() {
       </DropdownMenu>
 
       <DropdownMenu>
+        <DropdownMenuTrigger className={menuTriggerPlainClass}>Upstash</DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/upstash/schedules">Schedules</Link>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
         <DropdownMenuTrigger className={menuTriggerPlainClass}>Automation</DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuItem asChild>

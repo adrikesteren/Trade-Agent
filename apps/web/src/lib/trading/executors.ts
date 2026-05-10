@@ -128,15 +128,29 @@ export async function fetchMarketAssetIds(
   return map;
 }
 
+export type EnsureUserExecutorExistsOptions = {
+  /**
+   * When the caller already ran a list query that returned no rows for this user,
+   * skip the extra COUNT round trip and go straight to insert + risk_state.
+   */
+  verifiedEmptyExecutorList?: boolean;
+};
+
 /** Dashboard: ensure at least one row exists (RLS insert as authenticated user). */
-export async function ensureUserExecutorExists(supabase: SupabaseClient, userId: string): Promise<void> {
-  const { count, error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
-  if (error) throw new Error(error.message);
-  if ((count ?? 0) > 0) return;
+export async function ensureUserExecutorExists(
+  supabase: SupabaseClient,
+  userId: string,
+  options?: EnsureUserExecutorExistsOptions,
+): Promise<void> {
+  if (!options?.verifiedEmptyExecutorList) {
+    const { count, error } = await supabase
+      .schema("trading")
+      .from("executors")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    if ((count ?? 0) > 0) return;
+  }
 
   const { data: created, error: insErr } = await supabase
     .schema("trading")

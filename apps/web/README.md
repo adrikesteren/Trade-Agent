@@ -41,8 +41,8 @@ After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows,
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `SIGNAL_DEFAULT_USER_ID` | Yes (unless `SIGNAL_USER_IDS`) | Single `auth.users` UUID to attach `trading.signals` rows to (trusted server env only). |
-| `SIGNAL_USER_IDS` | Optional | Comma-separated UUIDs; when set, overrides `SIGNAL_DEFAULT_USER_ID` and writes one signal per user per market/agent/bar. |
+| `SIGNAL_DEFAULT_USER_ID` | Yes (recommended) | Your `auth.users` UUID for `trading.signals` (trusted server env; typical single-user setup). |
+| `SIGNAL_USER_IDS` | Optional | Comma-separated UUIDs; used **only** when `SIGNAL_DEFAULT_USER_ID` is unset (legacy multi-user). |
 | `SIGNALS_AFTER_CANDLE_DISABLE` | Optional | Set to `1` to skip enqueueing signal runs after candle sync. |
 | `SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE` | Optional | Markets processed per worker invocation (default `40`). |
 | `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS` | Optional | Cap total markets across the whole run (default: all EUR Bitvavo markets). |

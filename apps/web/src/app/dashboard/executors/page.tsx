@@ -1,7 +1,7 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import { getDashboardSession } from "@/lib/supabase/dashboard-session";
 import { ensureUserExecutorExists } from "@/lib/trading/executors";
-import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
   Card,
@@ -24,21 +24,24 @@ type ExecutorListRow = {
 };
 
 export default async function ExecutorsListPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getDashboardSession();
   if (!user) redirect("/login");
 
-  await ensureUserExecutorExists(supabase, user.id);
+  const listQuery = () =>
+    supabase
+      .schema("trading")
+      .from("executors")
+      .select("id, name, enabled, execution_mode, asset_filter_mode")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
-  const { data: rows, error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id, name, enabled, execution_mode, asset_filter_mode, updated_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: true })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  let { data: rows, error } = await listQuery();
+
+  if (!error && !(rows?.length ?? 0)) {
+    await ensureUserExecutorExists(supabase, user.id, { verifiedEmptyExecutorList: true });
+    ({ data: rows, error } = await listQuery());
+  }
 
   const list = (rows ?? []) as ExecutorListRow[];
 

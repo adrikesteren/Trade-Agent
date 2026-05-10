@@ -4,8 +4,8 @@
  * Usage (from `apps/web`):
  *   pnpm qstash:clear-pending
  *
- * Loads env from **repo root** `.env` first (`../../../.env` from this file), then `apps/web/.env`, so tokens
- * in the monorepo root match `next dev` / deployment layouts.
+ * Loads env like `next.config.ts`: repo root `.env`, `.env.local`, then `apps/web/.env`, `.env.local`, each with
+ * `override: true` so file values beat stray OS/shell variables. Matches `next dev` / deployment layouts.
  *
  * Optional: also remove QStash **schedules** (recurring jobs in the Upstash project):
  *   CLEAR_QSTASH_SCHEDULES=1 pnpm qstash:clear-pending
@@ -23,9 +23,19 @@ import { Client } from "@upstash/qstash";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../../../.env");
+const rootEnvLocal = resolve(__dirname, "../../../.env.local");
 const webEnv = resolve(__dirname, "../.env");
-if (existsSync(rootEnv)) dotenv.config({ path: rootEnv });
-if (existsSync(webEnv)) dotenv.config({ path: webEnv });
+const webEnvLocal = resolve(__dirname, "../.env.local");
+
+const envChain = [
+  { path: rootEnv },
+  { path: rootEnvLocal },
+  { path: webEnv },
+  { path: webEnvLocal },
+];
+for (const { path } of envChain) {
+  if (existsSync(path)) dotenv.config({ path, override: true });
+}
 
 const token = process.env.QSTASH_TOKEN;
 if (!token?.trim()) {

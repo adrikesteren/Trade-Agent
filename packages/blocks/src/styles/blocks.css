@@ -439,10 +439,16 @@
   word-break: break-all;
 }
 
+/* Record page header: visually separate from Lightning list views (no bordered “list shell”). */
 .bk-page-header_detail {
-  padding-bottom: 1.25rem;
   margin-bottom: 1.5rem;
-  border-bottom: 1px solid var(--bk-color-border);
+  padding: 1rem 1.25rem 1.25rem;
+  border-radius: var(--bk-radius-md);
+  border: 1px solid var(--bk-color-border);
+  border-left-width: 4px;
+  border-left-color: var(--bk-color-brand);
+  background: var(--bk-color-surface-alt);
+  box-shadow: none;
 }
 
 .bk-page-header_title_detail {

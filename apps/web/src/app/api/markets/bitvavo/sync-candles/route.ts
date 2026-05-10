@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { barsForRetention, CANDLE_RETENTION_HOURS } from "@/lib/markets/candle-retention";
+import {
+  barsForRetention,
+  CANDLE_RETENTION_HOURS,
+  CANDLE_TIMESTAMP_TTL_HOURS,
+  CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
+} from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import {
   fetchCandleSyncWindowMeta,
@@ -267,9 +272,14 @@ export async function POST(request: Request) {
       planningNotes: {
         approxBytesPerRowAssumed: approxBytesPerRow,
         approxMbThisChunk: Math.round(approxMbStored * 1000) / 1000,
-        retentionHours: CANDLE_RETENTION_HOURS,
+        retentionHoursForBarCap: CANDLE_RETENTION_HOURS,
+        initialEmptySyncHistoryHours: CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
+        candleTimestampTtlHours: CANDLE_TIMESTAMP_TTL_HOURS,
         retentionMaxBars: result.retentionMaxBars,
-        hint: `Bars are capped to the retention window (${CANDLE_RETENTION_HOURS}h); expired catalog.candle_timestamps are deleted after each chunk (candles cascade).`,
+        hint:
+          `Non-window / incremental bar counts use CANDLE_RETENTION_HOURS (${CANDLE_RETENTION_HOURS}h). ` +
+          `First EUR prepare when candle_timestamps is empty uses ${CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS}h (~1440 x 5m bars). ` +
+          `After each chunk, timestamps older than ${CANDLE_TIMESTAMP_TTL_HOURS}h (~365d) are deleted (candles cascade).`,
       },
     });
   } catch (e) {

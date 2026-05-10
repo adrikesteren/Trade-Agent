@@ -43,8 +43,9 @@ const ENV_FILES = [
   { path: webEnvLocal, label: "apps/web .env.local" },
 ];
 
+// Same as `next.config.ts`: override so monorepo `.env*` wins over stray OS/shell vars (e.g. old SIGNAL_*).
 for (const { path } of ENV_FILES) {
-  if (existsSync(path)) dotenv.config({ path });
+  if (existsSync(path)) dotenv.config({ path, override: true });
 }
 
 function printEnvDiagnostics() {

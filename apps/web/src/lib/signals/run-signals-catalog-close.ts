@@ -12,7 +12,7 @@ import { enqueueMediatorCatalogCloseAfterSignals } from "@/lib/mediator/enqueue-
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval";
-import { parseSignalUserIdsFromEnv } from "./signal-user-ids";
+import { filterSignalUserIdsToExistingAuthUsers, parseSignalUserIdsFromEnv } from "./signal-user-ids";
 
 export type SignalsCatalogCloseBody = {
   closeTimeIso: string;
@@ -102,8 +102,8 @@ export async function runSignalsCatalogClose(
   const marketBatchSize = Math.min(Math.max(body.marketBatchSize ?? signalMarketBatchSize(), 1), 120);
   const closeTimeIso = body.closeTimeIso;
 
-  const userIds = parseSignalUserIdsFromEnv();
-  if (!userIds.length) {
+  const configuredUserIds = parseSignalUserIdsFromEnv();
+  if (!configuredUserIds.length) {
     return {
       ok: true,
       marketsProcessed: 0,
@@ -187,56 +187,65 @@ export async function runSignalsCatalogClose(
     return tf.includes(timeframe);
   });
 
+  const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, configuredUserIds);
+  if (!signalUserIds.length && configuredUserIds.length > 0) {
+    console.warn(
+      "[signals-catalog-close] SIGNAL_DEFAULT_USER_ID / SIGNAL_USER_IDS: none of the configured UUIDs exist in this project's auth.users (local vs prod .env?). Skipping signal upserts for this batch; QStash continuation still advances.",
+    );
+  }
+
   const barLimit = barsForRetention(timeframe);
   let signalsUpserted = 0;
 
-  for (const m of rows) {
-    const marketId = m.id as string;
-    const raw = await fetchCandlesForMarket(admin, { marketId, timeframe, barLimit });
-    const sorted = mapCandleRows(raw);
-    const barsAsc: MaCrossBar[] = sorted.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
-    const targetRow = sorted.find((r) => closeTimesMatch(r.closeTimeIso, closeTimeIso));
-    const candleId = targetRow?.id ?? null;
-    const closeTimeForRow = targetRow?.closeTimeIso ?? closeTimeIso;
+  if (signalUserIds.length > 0) {
+    for (const m of rows) {
+      const marketId = m.id as string;
+      const raw = await fetchCandlesForMarket(admin, { marketId, timeframe, barLimit });
+      const sorted = mapCandleRows(raw);
+      const barsAsc: MaCrossBar[] = sorted.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
+      const targetRow = sorted.find((r) => closeTimesMatch(r.closeTimeIso, closeTimeIso));
+      const candleId = targetRow?.id ?? null;
+      const closeTimeForRow = targetRow?.closeTimeIso ?? closeTimeIso;
 
-    for (const agent of activeAgents) {
-      if (agent.agent_id !== "ma-cross-5m-v1") continue;
+      for (const agent of activeAgents) {
+        if (agent.agent_id !== "ma-cross-5m-v1") continue;
 
-      const cfg = (agent.config ?? {}) as { fastPeriod?: number; slowPeriod?: number };
-      const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
-      const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
+        const cfg = (agent.config ?? {}) as { fastPeriod?: number; slowPeriod?: number };
+        const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
+        const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
 
-      const ev = evaluateMaCrossAtClose({
-        barsAsc,
-        targetCloseTimeIso: closeTimeIso,
-        fastPeriod,
-        slowPeriod,
-      });
-
-      for (const userId of userIds) {
-        const row = {
-          user_id: userId,
-          signal_agent_id: agent.id,
-          market_id: marketId,
-          candle_id: candleId,
-          timeframe,
-          close_time: closeTimeForRow,
-          intent: ev.intent,
-          confidence: ev.confidence,
-          reasons: ev.reasons,
-          metadata: {
-            ...ev.metadata,
-            market_symbol: m.market_symbol,
-            agent_id: agent.agent_id,
-            ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
-          },
-        };
-
-        const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-          onConflict: "user_id,signal_agent_id,market_id,timeframe,close_time",
+        const ev = evaluateMaCrossAtClose({
+          barsAsc,
+          targetCloseTimeIso: closeTimeIso,
+          fastPeriod,
+          slowPeriod,
         });
-        if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
-        signalsUpserted += 1;
+
+        for (const userId of signalUserIds) {
+          const row = {
+            user_id: userId,
+            signal_agent_id: agent.id,
+            market_id: marketId,
+            candle_id: candleId,
+            timeframe,
+            close_time: closeTimeForRow,
+            intent: ev.intent,
+            confidence: ev.confidence,
+            reasons: ev.reasons,
+            metadata: {
+              ...ev.metadata,
+              market_symbol: m.market_symbol,
+              agent_id: agent.agent_id,
+              ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
+            },
+          };
+
+          const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
+            onConflict: "user_id,signal_agent_id,market_id,timeframe,close_time",
+          });
+          if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
+          signalsUpserted += 1;
+        }
       }
     }
   }
@@ -248,18 +257,24 @@ export async function runSignalsCatalogClose(
   const token = process.env.QSTASH_TOKEN;
   if (nextMarketOffset != null && allowQStashSelfQueue && base && token) {
     const client = new Client({ token });
-    await client.publishJSON({
-      url: `${base}/api/workers/signals-catalog-close`,
-      body: {
-        closeTimeIso,
-        timeframe,
-        quote,
-        marketOffset: nextMarketOffset,
-        marketBatchSize,
-        candleSyncRunId: body.candleSyncRunId ?? undefined,
-      },
-      retries: 3,
-    });
+    try {
+      await client.publishJSON({
+        url: `${base}/api/workers/signals-catalog-close`,
+        body: {
+          closeTimeIso,
+          timeframe,
+          quote,
+          marketOffset: nextMarketOffset,
+          marketBatchSize,
+          candleSyncRunId: body.candleSyncRunId ?? undefined,
+        },
+        retries: 3,
+      });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      console.error("[signals-catalog-close] QStash continuation publish failed:", detail);
+      throw new Error(`signals-catalog-close: QStash continuation publish failed: ${detail}`);
+    }
   }
 
   if (
@@ -267,7 +282,7 @@ export async function runSignalsCatalogClose(
     rows.length > 0 &&
     signalsUpserted > 0 &&
     process.env.MEDIATOR_AFTER_SIGNALS_DISABLE !== "1" &&
-    userIds.length > 0
+    signalUserIds.length > 0
   ) {
     try {
       await enqueueMediatorCatalogCloseAfterSignals({
@@ -286,6 +301,9 @@ export async function runSignalsCatalogClose(
     signalsUpserted,
     nextMarketOffset,
     totalMarkets: effectiveTotal,
+    ...(configuredUserIds.length > 0 && signalUserIds.length === 0
+      ? { skippedReason: "signal_user_ids_not_in_auth" as const }
+      : {}),
   };
 }
 

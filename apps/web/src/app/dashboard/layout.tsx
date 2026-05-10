@@ -1,6 +1,6 @@
 import { DashboardSchemaNav } from "@/components/dashboard-schema-nav";
 import { SignOutButton } from "@/components/sign-out-button";
-import { createClient } from "@/lib/supabase/server";
+import { getDashboardSession } from "@/lib/supabase/dashboard-session";
 import { AppHeader, AppMain, AppShell } from "@repo/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -10,10 +10,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getDashboardSession();
 
   if (!user) {
     redirect("/login");

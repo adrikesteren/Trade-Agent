@@ -35,7 +35,7 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 
 - **Geen orders** — geen Bitvavo-calls, geen inserts in `trading.orders` / `trading.fills` vanuit mediator-code.
 - **Geen signalen schrijven** — geen wijzigingen aan `trading.signals` vanuit de mediator-worker.
-- **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit server-trusted env (`SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`). Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
+- **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit server-trusted env (`SIGNAL_DEFAULT_USER_ID` eerst; `SIGNAL_USER_IDS` alleen als default leeg is). Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
 - **EXIT** / **REDUCE** met positie (v1): worden **geweigerd** met redencodes `exit_not_implemented` / `reduce_not_implemented` tot de executor exits ondersteunt. Zonder positie: `no_position`.
 
 ---

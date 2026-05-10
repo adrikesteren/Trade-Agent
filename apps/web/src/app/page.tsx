@@ -26,9 +26,14 @@ export default async function Home() {
               <Link href="/dashboard">Open dashboard</Link>
             </Button>
           ) : (
-            <Button variant="brand" asChild>
-              <Link href="/login">Sign in</Link>
-            </Button>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="brand" asChild>
+                <Link href="/login">Sign in</Link>
+              </Button>
+              <Button variant="neutral" asChild>
+                <Link href="/register">Create account</Link>
+              </Button>
+            </div>
           )}
         </div>
       </Stack>

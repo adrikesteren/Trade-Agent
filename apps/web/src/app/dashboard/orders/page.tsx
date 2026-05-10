@@ -132,8 +132,8 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
         rowCount={list.length}
         sortLine={
           executorIdFilter
-            ? `Filtered by executor · sorted by Created · max 200 rows`
-            : "Sorted by Created · max 200 rows"
+            ? `Filtered by executor · sorted by created (newest first) · max ${DASHBOARD_LIST_VIEW_LIMIT} rows`
+            : `Sorted by created (newest first) · max ${DASHBOARD_LIST_VIEW_LIMIT} rows`
         }
         actions={
           <>
@@ -156,6 +156,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
             <Table className="text-xs">
               <thead>
                 <tr>
+                  <Th>Order</Th>
                   <Th>Market</Th>
                   <Th>Executor</Th>
                   <Th>Side</Th>
@@ -175,6 +176,11 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
                   const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
                   return (
                     <tr key={row.id}>
+                      <Td>
+                        <Link href={`/dashboard/orders/${row.id}`} className="bk-link font-mono" title={row.id}>
+                          {row.id.slice(0, 8)}…
+                        </Link>
+                      </Td>
                       <Td>
                         <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
                           {label}
@@ -208,7 +214,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
                 })}
                 {!list.length ? (
                   <tr>
-                    <Td colSpan={10} muted className="py-8 text-center">
+                    <Td colSpan={11} muted className="py-8 text-center">
                       No orders yet. When the executor runs on approved trade decisions, rows appear here. See{" "}
                       <Link href="/dashboard/trade-decisions" className="bk-link">
                         Trade decisions

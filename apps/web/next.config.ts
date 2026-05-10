@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = path.resolve(webRoot, "..", "..");
 
-dotenv.config({ path: path.join(monorepoRoot, ".env") });
+// `override: true` so repo `.env` wins over stray OS/user env (e.g. old SIGNAL_DEFAULT_USER_ID in Windows).
+dotenv.config({ path: path.join(monorepoRoot, ".env"), override: true });
 dotenv.config({ path: path.join(monorepoRoot, ".env.local"), override: true });
 dotenv.config({ path: path.join(webRoot, ".env.local"), override: true });
 

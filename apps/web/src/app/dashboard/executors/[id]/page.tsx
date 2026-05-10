@@ -2,11 +2,14 @@ import type { ExecutionModeValue, ExecutorAssetFilterMode } from "@/app/dashboar
 import { ExecutorBalancePanel } from "@/app/dashboard/executors/[id]/executor-balance-panel";
 import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/dashboard/executors/[id]/executor-related-load";
 import { ExecutorForm, type AssetOption, type ExecutorFormInitial } from "@/app/dashboard/executors/executor-form";
-import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
-import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
-  TRADE_DECISIONS_FETCH_POOL,
+  DASHBOARD_LIST_VIEW_LIMIT,
+  EXECUTOR_LEDGER_FULL_FETCH_CAP,
+  RECORD_RELATED_LIST_PREVIEW_ROWS,
+} from "@/lib/dashboard/list-view-limit";
+import {
+  EXECUTOR_DETAIL_TRADE_DECISION_POOL,
   buildTradeDecisionListViewRows,
 } from "@/lib/dashboard/trade-decision-list";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
@@ -16,9 +19,13 @@ import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   Alert,
+  Breadcrumbs,
   Card,
   CardBody,
   DetailPageLayout,
+  ListViewObjectIcon,
+  Output,
+  PageHeader,
   RecordRelatedList,
   listViewOutlineActionClass,
 } from "@repo/blocks";
@@ -91,6 +98,15 @@ type RiskStateRow = {
   max_drawdown_eur: string | number | null;
   kill_switch: boolean;
   consecutive_losses: number;
+  updated_at: string;
+};
+
+type PositionRow = {
+  id: string;
+  market_id: string;
+  quantity: string | number | null;
+  avg_price: string | number | null;
+  paper: boolean;
   updated_at: string;
 };
 
@@ -173,6 +189,8 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const prefs = await getUserLocalePreferences();
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtQty = (v: string | number | null | undefined) =>
+    formatDecimal(v, prefs, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
 
   const { data: ex, error: exErr } = await supabase
@@ -188,7 +206,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   if (exErr) return <Alert tone="error">{exErr.message}</Alert>;
   if (!ex) notFound();
 
-  const assetOptions = await fetchAssetOptions(supabase);
   const filterIds = (ex.filter_asset_ids as string[] | null) ?? [];
 
   const extraRaw = ex.mediator_rails_extra as unknown;
@@ -212,100 +229,178 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     mediator_rails_extra_json,
   };
 
-  const pnl = await loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id });
+  const ledgerFetchLimit = ledgerFull ? EXECUTOR_LEDGER_FULL_FETCH_CAP : RECORD_RELATED_LIST_PREVIEW_ROWS;
+  const ledgerUiPreviewLimit = ledgerFull ? EXECUTOR_LEDGER_FULL_FETCH_CAP : RECORD_RELATED_LIST_PREVIEW_ROWS;
 
-  const { data: rsRow, error: rsErr } = await supabase
-    .schema("trading")
-    .from("risk_state")
-    .select("equity_eur, updated_at")
-    .eq("executor_id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [
+    assetOptions,
+    pnl,
+    rsSingle,
+    ledgerPack,
+    ordPack,
+    tdPack,
+    rsListPack,
+    posPack,
+    signalPack,
+  ] = await Promise.all([
+    fetchAssetOptions(supabase),
+    loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
+    supabase
+      .schema("trading")
+      .from("risk_state")
+      .select("equity_eur, updated_at")
+      .eq("executor_id", id)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .schema("trading")
+      .from("executor_balance_ledger")
+      .select("id, kind, amount_eur, balance_after_eur, note, created_at", { count: "exact" })
+      .eq("executor_id", id)
+      .order("created_at", { ascending: false })
+      .limit(ledgerFetchLimit),
+    supabase
+      .schema("trading")
+      .from("orders")
+      .select("id, market_id, side, notional_eur, status, created_at", { count: "exact" })
+      .eq("executor_id", id)
+      .order("created_at", { ascending: false })
+      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    supabase
+      .schema("trading")
+      .from("trade_decisions")
+      .select(
+        "id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
+        { count: "exact" },
+      )
+      .eq("executor_id", id)
+      .order("close_time", { ascending: false })
+      .limit(EXECUTOR_DETAIL_TRADE_DECISION_POOL),
+    supabase
+      .schema("trading")
+      .from("risk_state")
+      .select(
+        "id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
+        { count: "exact" },
+      )
+      .eq("executor_id", id)
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    supabase
+      .schema("trading")
+      .from("positions")
+      .select("id, market_id, quantity, avg_price, paper, updated_at", { count: "exact" })
+      .eq("executor_id", id)
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    fetchSignalsLinkedViaDecisions(supabase, id),
+  ]);
 
-  const ledgerLimit = ledgerFull ? 500 : DASHBOARD_LIST_VIEW_LIMIT;
-  const { data: ledgerRows, count: ledgerCount, error: lgErr } = await supabase
-    .schema("trading")
-    .from("executor_balance_ledger")
-    .select("id, kind, amount_eur, balance_after_eur, note, created_at", { count: "exact" })
-    .eq("executor_id", id)
-    .order("created_at", { ascending: true })
-    .limit(ledgerLimit);
+  const rsRow = rsSingle.data;
+  const rsErr = rsSingle.error;
 
+  const { data: ledgerRows, count: ledgerCount, error: lgErr } = ledgerPack;
   const ledger = (ledgerRows ?? []) as LedgerRow[];
   const ledgerTotal = typeof ledgerCount === "number" ? ledgerCount : ledger.length;
 
-  const { data: ordRows, count: orderCount, error: ordErr } = await supabase
-    .schema("trading")
-    .from("orders")
-    .select("id, market_id, side, notional_eur, status, created_at", { count: "exact" })
-    .eq("executor_id", id)
-    .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
-
+  const { data: ordRows, count: orderCount, error: ordErr } = ordPack;
   const orders = (ordRows ?? []) as OrderRow[];
   const orderTotal = typeof orderCount === "number" ? orderCount : orders.length;
 
-  const { data: tdRows, count: tdCount, error: tdErr } = await supabase
-    .schema("trading")
-    .from("trade_decisions")
-    .select(
-      "id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
-      { count: "exact" },
-    )
-    .eq("executor_id", id)
-    .order("close_time", { ascending: false })
-    .limit(TRADE_DECISIONS_FETCH_POOL);
-
+  const { data: tdRows, count: tdCount, error: tdErr } = tdPack;
   const tradeDecisionsSorted = buildTradeDecisionListViewRows((tdRows ?? []) as TradeDecisionRow[], 10);
   const tradeDecisionTotal = typeof tdCount === "number" ? tdCount : tradeDecisionsSorted.length;
 
-  const { data: rsListRows, count: rsCount, error: rsListErr } = await supabase
-    .schema("trading")
-    .from("risk_state")
-    .select(
-      "id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
-      { count: "exact" },
-    )
-    .eq("executor_id", id)
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
-
+  const { data: rsListRows, count: rsCount, error: rsListErr } = rsListPack;
   const riskStates = (rsListRows ?? []) as RiskStateRow[];
   const riskStateTotal = typeof rsCount === "number" ? rsCount : riskStates.length;
 
-  const { rows: signalRows, error: sigErrMsg } = await fetchSignalsLinkedViaDecisions(supabase, id);
+  const { data: posRows, count: posCount, error: posErr } = posPack;
+  const positions = (posRows ?? []) as PositionRow[];
+  const positionTotal = typeof posCount === "number" ? posCount : positions.length;
+
+  const { rows: signalRows, error: sigErrMsg } = signalPack;
 
   const marketIdsForLabels = [
     ...orders.map((o) => o.market_id),
     ...tradeDecisionsSorted.map((d) => d.market_id),
+    ...positions.map((p) => p.market_id),
     ...signalRows.map((s) => s.market_id),
   ];
   const symMap = await marketSymbolMap(supabase, marketIdsForLabels);
 
   const ledgerViewAll = ledgerFull ? undefined : `/dashboard/executors/${id}?ledger=all`;
-  const ledgerPreview = ledgerFull ? 500 : DASHBOARD_LIST_VIEW_LIMIT;
 
   return (
     <DetailPageLayout
       className="bk-container bk-container_lg"
       header={
         <div className="bk-stack bk-stack_gap-md">
-          <DashboardListViewHeader
-            eyebrow="Trading"
+          <PageHeader
+            variant="detail"
+            icon={<ListViewObjectIcon letter="E" />}
+            breadcrumb={
+              <Breadcrumbs items={[{ label: "Executors", href: "/dashboard/executors" }, { label: String(ex.name) }]} />
+            }
+            back={{ href: "/dashboard/executors", label: "← All executors" }}
+            eyebrow="Executor"
             title={String(ex.name)}
-            iconLetter="E"
-            rowCount={orderTotal}
-            sortLine="Executor portfolio"
+            subtitle="Balance, orders, and related activity for this portfolio."
+            highlights={
+              <>
+                <Output label="Enabled" type="boolean" value={ex.enabled} />
+                <Output label="Execution mode" type="text" value={String(ex.execution_mode ?? "—")} />
+                <Output label="Orders (preview)" type="number" value={orderTotal} />
+              </>
+            }
+            meta={id}
             actions={
               <Link href="/dashboard/executors" className={listViewOutlineActionClass}>
                 All executors
               </Link>
             }
           />
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Balance (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
+                <p className="bk-text-muted mt-2 text-xs">
+                  Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
+                </p>
+                <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtEur(pnl.openCostBasisEur)}</p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
+                <p className="mt-1 font-mono text-lg">
+                  {pnl.unrealizedEur == null ? "—" : fmtEur(pnl.unrealizedEur)}
+                </p>
+                <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
+              </CardBody>
+            </Card>
+          </div>
           {ledgerFull ? (
             <Alert tone="info">
-              Showing full balance ledger (newest cap 500 rows).{" "}
+              Showing expanded balance ledger (newest first, cap {EXECUTOR_LEDGER_FULL_FETCH_CAP} rows).
+              {ledgerTotal > ledger.length
+                ? ` ${ledgerTotal - ledger.length} older row(s) exist in the database but are not loaded here.`
+                : null}{" "}
               <Link href={`/dashboard/executors/${id}`} className="bk-link">
                 Back to preview
               </Link>
@@ -317,6 +412,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
           {rsListErr ? <Alert tone="error">{rsListErr.message}</Alert> : null}
           {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
           {tdErr ? <Alert tone="error">{tdErr.message}</Alert> : null}
+          {posErr ? <Alert tone="error">{posErr.message}</Alert> : null}
           {sigErrMsg ? <Alert tone="error">{sigErrMsg}</Alert> : null}
         </div>
       }
@@ -324,47 +420,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
         <RecordDetailTabs
           details={
             <div className="bk-stack bk-stack_gap-md">
-              <div className="grid gap-3 md:grid-cols-4">
-                <Card>
-                  <CardBody>
-                    <p className="bk-text-muted text-xs">Balance (EUR)</p>
-                    <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
-                    <p className="bk-text-muted mt-2 text-xs">
-                      Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
-                    </p>
-                    <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
-                    <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
-                    <p className="mt-1 font-mono text-lg">{fmtEur(pnl.openCostBasisEur)}</p>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
-                    <p className="mt-1 font-mono text-lg">
-                      {pnl.unrealizedEur == null ? "—" : fmtEur(pnl.unrealizedEur)}
-                    </p>
-                    <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
-                  </CardBody>
-                </Card>
-              </div>
-
-              <Card>
-                <CardBody className="bk-stack bk-stack_gap-md">
-                  <p className="bk-text-muted text-sm">Balance & transfers</p>
-                  <ExecutorBalancePanel executorId={id} />
-                </CardBody>
-              </Card>
-
               <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
             </div>
           }
@@ -374,15 +429,18 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 <RecordRelatedList
                   title="Executor balance ledger"
                   description={
-                    ledgerTotal > ledger.length
-                      ? `Sorted oldest first · preview ${ledger.length} of ${ledgerTotal}.`
-                      : "Sorted oldest first."
+                    ledgerFull && ledgerTotal > ledger.length
+                      ? `Sorted by created date (newest first) · loaded ${ledger.length} of ${ledgerTotal} (in-page cap ${EXECUTOR_LEDGER_FULL_FETCH_CAP}).`
+                      : ledgerTotal > ledger.length
+                        ? `Sorted by created date (newest first) · preview ${ledgerUiPreviewLimit} of ${ledgerTotal}.`
+                        : "Sorted by created date (newest first)."
                   }
                   items={ledger}
                   getKey={(r) => r.id}
                   totalCount={ledgerTotal}
-                  previewLimit={ledgerPreview}
+                  previewLimit={ledgerUiPreviewLimit}
                   viewAllHref={ledgerViewAll}
+                  alwaysShowViewAll={!ledgerFull && Boolean(ledgerViewAll)}
                   emptyMessage="No ledger entries yet. Use Add balance to fund this executor."
                   renderRow={(row) => (
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
@@ -495,9 +553,15 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
                     return (
                       <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link font-mono">
-                          {sym}
-                        </Link>
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Link href={`/dashboard/orders/${o.id}`} className="bk-link font-mono" title={o.id}>
+                            {o.id.slice(0, 8)}…
+                          </Link>
+                          <span className="bk-text-muted">·</span>
+                          <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link font-mono">
+                            {sym}
+                          </Link>
+                        </span>
                         <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
                           <span className="font-mono">{o.side}</span> · {fmtEur(o.notional_eur)} ·{" "}
                           <span className={orderStatusClass(o.status)}>{o.status}</span> ·{" "}
@@ -507,10 +571,44 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     );
                   }}
                 />
+
+                <RecordRelatedList
+                  title="Positions"
+                  description="Sorted by updated date (newest first)."
+                  items={positions}
+                  getKey={(p) => p.id}
+                  totalCount={positionTotal}
+                  viewAllHref={`/dashboard/positions?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No open positions for this executor yet."
+                  renderRow={(p) => {
+                    const sym = symMap.get(p.market_id) ?? p.market_id.slice(0, 8) + "…";
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${p.market_id}`} className="bk-link font-mono">
+                          {sym}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          qty {fmtQty(p.quantity)} · avg{" "}
+                          {p.avg_price != null && String(p.avg_price).trim() !== "" ? fmtQty(p.avg_price) : "—"} ·{" "}
+                          {p.paper ? "paper" : "live"} ·{" "}
+                          <span className="whitespace-nowrap font-mono">{fmtDt(p.updated_at)}</span>
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
               </CardBody>
             </Card>
           }
         />
+      }
+      sidebar={
+        <Card>
+          <CardBody className="bk-stack bk-stack_gap-md">
+            <p className="bk-text-muted text-sm">Balance & transfers</p>
+            <ExecutorBalancePanel executorId={id} />
+          </CardBody>
+        </Card>
       }
     />
   );

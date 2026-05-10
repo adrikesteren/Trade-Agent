@@ -47,6 +47,7 @@ export async function POST(request: Request) {
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : "signals run failed";
+    console.error("[signals-catalog-close] POST failed:", message, e instanceof Error ? e.stack : e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

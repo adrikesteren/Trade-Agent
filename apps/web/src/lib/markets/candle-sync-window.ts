@@ -1,7 +1,10 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CANDLE_RETENTION_HOURS } from "@/lib/markets/candle-retention";
+import {
+  CANDLE_RETENTION_HOURS,
+  CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
+} from "@/lib/markets/candle-retention";
 import { patchSyncRunMetadata } from "@/lib/markets/record-bitvavo-sync-status";
 import { timeframeDurationMs } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 
@@ -30,7 +33,9 @@ export type CandleSyncWindowCompute =
 
 /**
  * Computes the candle timestamp window: end = last closed bucket close from "now";
- * start = last stored close as next open, or retention floor (ceil to grid) when empty.
+ * start = last stored close as next open, or an initial-history floor when the table is empty
+ * (see `CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS`), else `retentionHours` when rows exist but
+ * the latest close is missing.
  */
 export async function computeCandleSyncWindow(
   admin: SupabaseClient,
@@ -51,7 +56,7 @@ export async function computeCandleSyncWindow(
   let startOpenMs: number;
 
   if ((count ?? 0) === 0) {
-    const cutoffMs = nowMs - retentionHours * 60 * 60 * 1000;
+    const cutoffMs = nowMs - CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS * 60 * 60 * 1000;
     startOpenMs = ceilBarOpenMs(cutoffMs, stepMs);
   } else {
     const { data: lastRow, error: lastErr } = await admin
@@ -65,7 +70,7 @@ export async function computeCandleSyncWindow(
     if (lastErr) throw new Error(`candle_timestamps: ${lastErr.message}`);
     const lastCloseIso = lastRow?.close_time as string | undefined;
     if (!lastCloseIso) {
-      const cutoffMs = nowMs - retentionHours * 60 * 60 * 1000;
+      const cutoffMs = nowMs - CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS * 60 * 60 * 1000;
       startOpenMs = ceilBarOpenMs(cutoffMs, stepMs);
     } else {
       const lastCloseMs = Date.parse(lastCloseIso);

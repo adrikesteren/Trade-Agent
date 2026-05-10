@@ -65,6 +65,7 @@ Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timefra
 - The candle worker still chooses how to fetch Bitvavo data internally; the signal step does **not** branch on those modes — it always targets the newest closed bar on the shared timestamp grid.
 - **Opt-out**: set `SIGNALS_AFTER_CANDLE_DISABLE=1`.
 - **No-op** if neither `SIGNAL_DEFAULT_USER_ID` nor `SIGNAL_USER_IDS` is set — the worker returns `skippedReason: no_signal_user_ids`.
+- **Precedence**: `SIGNAL_DEFAULT_USER_ID` wins when set (single-user). `SIGNAL_USER_IDS` is only parsed when `SIGNAL_DEFAULT_USER_ID` is unset (comma-separated legacy list).
 
 ---
 

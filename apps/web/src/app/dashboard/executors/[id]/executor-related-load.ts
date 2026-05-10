@@ -29,7 +29,7 @@ export async function fetchSignalsLinkedViaDecisions(
     .eq("executor_id", executorId)
     .not("signal_id", "is", null)
     .order("close_time", { ascending: false })
-    .limit(800);
+    .limit(200);
 
   if (dErr) return { rows: [], error: dErr.message };
 

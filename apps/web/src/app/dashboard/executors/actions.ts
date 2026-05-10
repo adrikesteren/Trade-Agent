@@ -153,6 +153,8 @@ export async function addExecutorBalance(executorId: string, formData: FormData)
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId });
+
   const amount = parseBalanceAmount(formData, "amount_eur");
   const note = String(formData.get("note") ?? "").trim() || null;
 
@@ -174,6 +176,8 @@ export async function removeExecutorBalance(executorId: string, formData: FormDa
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId });
 
   const amount = parseBalanceAmount(formData, "amount_eur");
   const note = String(formData.get("note") ?? "").trim() || null;

@@ -21,6 +21,8 @@ export type RecordRelatedListProps<T> = {
   /** When more rows exist than the preview, this URL is used for the outline action (e.g. full list view). */
   viewAllHref?: string;
   viewAllLabel?: string;
+  /** When true (with `viewAllHref`), show View all even if total ≤ previewLimit (e.g. link to expanded in-page view). */
+  alwaysShowViewAll?: boolean;
   className?: string;
 };
 
@@ -38,12 +40,13 @@ export function RecordRelatedList<T>({
   emptyMessage = "No related records.",
   viewAllHref,
   viewAllLabel = "View all",
+  alwaysShowViewAll = false,
   className,
 }: RecordRelatedListProps<T>) {
   const total = totalCount ?? items.length;
   const visible = items.slice(0, previewLimit);
   const hasMore = total > previewLimit;
-  const showViewAll = Boolean(viewAllHref && hasMore);
+  const showViewAll = Boolean(viewAllHref && (hasMore || alwaysShowViewAll));
 
   return (
     <section className={cx("bk-record-detail-section bk-record-related-list", className)}>

@@ -146,7 +146,7 @@ export async function syncBitvavoCandlesChunk(
   let effectiveBars: number;
   let totalWindowBars: number | undefined;
   if (windowMode) {
-    totalWindowBars = Math.min(opts.windowBarCount!, maxBars);
+    totalWindowBars = opts.windowBarCount!;
     effectiveBars = totalWindowBars;
   } else if (incremental) {
     effectiveBars = 1;
@@ -353,7 +353,7 @@ export async function syncBitvavoCandlesChunk(
     totalMarkets: total,
     timeframe: opts.timeframe,
     barsPerMarket: effectiveBars,
-    retentionMaxBars: maxBars,
+    retentionMaxBars: windowMode ? (totalWindowBars ?? maxBars) : maxBars,
     syncMode: resultMode,
   };
 }

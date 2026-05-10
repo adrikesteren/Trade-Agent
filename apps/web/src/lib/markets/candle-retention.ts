@@ -1,7 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** How far back we keep closed candles (wall clock, UTC). */
+/** How far back we keep closed candles (wall clock, UTC) for bar counts / non-empty sync floors. */
 export const CANDLE_RETENTION_HOURS = 72; // 3 days — lighter on DB/disk for dev
+
+/**
+ * When `catalog.candle_timestamps` is empty (or latest row has no close), the EUR sweep seeds
+ * this much history on first prepare — 5d at 5m = 1440 bars (Bitvavo max per request).
+ */
+export const CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS = 5 * 24;
+
+/** Delete `catalog.candle_timestamps` rows whose bar has fully ended before this age (wall clock). */
+export const CANDLE_TIMESTAMP_TTL_HOURS = 365 * 24;
 
 /** Bitvavo allows at most 1440 candles per REST call. */
 const BITVAVO_MAX_LIMIT = 1440;
@@ -29,14 +38,14 @@ export function barsForRetention(timeframe: string, retentionHours = CANDLE_RETE
 }
 
 /**
- * Deletes `catalog.candle_timestamps` whose bar has fully ended before the retention cutoff.
+ * Deletes `catalog.candle_timestamps` whose `close_time` is older than `maxAgeHours` (UTC wall clock).
  * Related `catalog.candles` rows are removed via ON DELETE CASCADE.
  */
 export async function deleteExpiredCandleTimestamps(
   supabase: SupabaseClient,
-  retentionHours = CANDLE_RETENTION_HOURS,
+  maxAgeHours = CANDLE_TIMESTAMP_TTL_HOURS,
 ): Promise<void> {
-  const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000).toISOString();
 
   const { error } = await supabase
     .schema("catalog")

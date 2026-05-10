@@ -27,14 +27,25 @@ async function fetchExecutorNamesById(
   return map;
 }
 
-export default async function PositionsPage() {
+type PositionsPageProps = {
+  searchParams?: Promise<{ executorId?: string | string[] }>;
+};
+
+export default async function PositionsPage({ searchParams }: PositionsPageProps) {
+  const sp = (await searchParams) ?? {};
+  const executorIdFilter = typeof sp.executorId === "string" && sp.executorId.trim() ? sp.executorId.trim() : null;
+
   const supabase = await createClient();
-  const { data: rows, error } = await supabase
+  let q = supabase
     .schema("trading")
     .from("positions")
     .select("id, user_id, executor_id, market_id, quantity, avg_price, paper, updated_at")
     .order("updated_at", { ascending: false })
     .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  if (executorIdFilter) {
+    q = q.eq("executor_id", executorIdFilter);
+  }
+  const { data: rows, error } = await q;
 
   const list = rows ?? [];
   const executorIds = [...new Set((list as { executor_id?: string }[]).map((r) => r.executor_id).filter(Boolean))] as string[];
@@ -47,7 +58,11 @@ export default async function PositionsPage() {
         title="Positions"
         iconLetter="P"
         rowCount={list.length}
-        sortLine="Sorted by Updated date"
+        sortLine={
+          executorIdFilter
+            ? "Filtered by executor · sorted by updated date (newest first)"
+            : "Sorted by updated date (newest first)"
+        }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
       <Card>
