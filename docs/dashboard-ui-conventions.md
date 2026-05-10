@@ -45,7 +45,7 @@ Wrap the whole screen in **`DetailPageLayout`** from `@repo/blocks`. It composes
 | `content` | Main column: cards, charts, tables, alerts that belong below the header. |
 | `sidebar` | Optional. From **48rem** viewport width, the row under the header is always **60%** main / **40%** sidebar (`3fr` / `2fr`). Below that width, main and sidebar **stack** (main first). If `sidebar` is omitted or `null`, the right column is still reserved on wide screens as a dashed placeholder; on narrow screens it is hidden so you do not get a blank block under the content. |
 
-Pass layout width utilities on `DetailPageLayout` itself (e.g. `className="bk-container px-1"` and optional `style={{ maxWidth: "48rem" }}` or `bk-container_lg` for wide charts).
+Pass horizontal padding on `DetailPageLayout` itself (e.g. `className="bk-container px-1"`). `bk-container` is full width of the main pane; add `bk-container_lg` only if you rely on that class name for consistency (it no longer caps width).
 
 ### Use these building blocks (inside the slots)
 
@@ -56,6 +56,7 @@ Pass layout width utilities on `DetailPageLayout` itself (e.g. `className="bk-co
 | Sections | `RecordDetailSection` | Uppercase section title (SF-style band). |
 | Field grid | `RecordDetailGrid` + `Output` | Two columns from `sm` up; use `span="full"` for long values (IDs, JSON). |
 | FK / related record | `Output` with `lookup={{ href, name }}` or `record={{ pathPrefix, id, name }}` | `pathPrefix` is the app path without trailing slash, e.g. `/dashboard/assets`. |
+| Related list (child records) | `RecordRelatedList` | Pass `items`, `getKey`, `renderRow`, optional `totalCount` from `count: "exact"`, `previewLimit` (default 10), and `viewAllHref` for the full list. Renders a section header with outline **View all** when `totalCount > previewLimit`. |
 
 `RecordDetailLayout` remains exported for edge cases; **new detail routes should use `DetailPageLayout`** so header / 60–40 behavior stays consistent.
 

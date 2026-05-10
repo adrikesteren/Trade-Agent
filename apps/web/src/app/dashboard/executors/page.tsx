@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { ensureUserExecutorExists } from "@/lib/trading/executors";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -36,7 +37,8 @@ export default async function ExecutorsListPage() {
     .from("executors")
     .select("id, name, enabled, execution_mode, asset_filter_mode, updated_at")
     .eq("user_id", user.id)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = (rows ?? []) as ExecutorListRow[];
 

@@ -1,3 +1,4 @@
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -23,11 +24,15 @@ export default async function ExchangesIndexPage() {
     .from("exchanges")
     .select("id, code, name")
     .order("code", { ascending: true })
-    .limit(500);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = rows ?? [];
   const n = list.length;
-  const summaryBits = [`${n} exchange${n === 1 ? "" : "s"}`, "Sorted by Code", "Max 500 rows"];
+  const summaryBits = [
+    `${n} exchange${n === 1 ? "" : "s"}`,
+    "Sorted by Code",
+    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
+  ];
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">

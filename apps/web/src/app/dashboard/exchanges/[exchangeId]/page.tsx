@@ -1,4 +1,5 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -41,7 +42,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
     .select("id, market_symbol, quote_code, status", { count: "exact" })
     .eq("exchange_id", exchangeId)
     .order("market_symbol", { ascending: true })
-    .limit(10);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = markets ?? [];
   const marketTotal = typeof count === "number" ? count : list.length;

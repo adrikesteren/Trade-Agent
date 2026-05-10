@@ -6,6 +6,7 @@ import {
   type AssetLiveCoingeckoDb,
 } from "@/components/asset-coingecko-metrics-block";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -61,7 +62,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
     )
     .eq("asset_id", assetId)
     .order("market_symbol", { ascending: true })
-    .limit(10);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const isCrypto = asset.kind === "crypto";
   const meta =

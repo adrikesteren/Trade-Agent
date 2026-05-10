@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody, ListViewObjectIcon } from "@repo/blocks";
 
@@ -9,7 +10,7 @@ export default async function SignalRunsPage() {
     .from("signal_runs")
     .select("id, signal_job_id, agent_id, signal_id, status, error, started_at, finished_at")
     .order("started_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = rows ?? [];
 

@@ -4,6 +4,7 @@ import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sy
 import { formatDatetime } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
 import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { type BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
 import { createClient } from "@/lib/supabase/client";
@@ -22,8 +23,6 @@ export type SyncRunRow = {
   metadata: Record<string, unknown> | null;
 };
 
-const MAX_RUNS = 200;
-const RECENT_LIMIT = 40;
 
 const TRACKED_JOB_KEYS = new Set<string>(SYNC_RUN_DASHBOARD_JOB_KEYS);
 
@@ -128,7 +127,7 @@ function mergeRunIntoList(prev: SyncRunRow[], row: SyncRunRow): SyncRunRow[] {
   const without = prev.filter((r) => r.id !== merged.id);
   const next = [merged, ...without];
   next.sort(sortByCreatedDesc);
-  return next.slice(0, MAX_RUNS);
+  return next.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
 }
 
 export function SyncRunsLiveClient({
@@ -165,7 +164,7 @@ export function SyncRunsLiveClient({
     }));
   }, [runs, overviewTemplate]);
 
-  const recentRuns = useMemo(() => runs.slice(0, RECENT_LIMIT), [runs]);
+  const recentRuns = useMemo(() => runs.slice(0, DASHBOARD_LIST_VIEW_LIMIT), [runs]);
 
   const applyPayload = useCallback((rec: Record<string, unknown>) => {
     const row = rowFromPayload(rec);

@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -19,7 +20,7 @@ export default async function SignalAgentsPage() {
     .from("signal_agents")
     .select("id, agent_id, enabled, version, description, created_at, updated_at")
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = rows ?? [];
 

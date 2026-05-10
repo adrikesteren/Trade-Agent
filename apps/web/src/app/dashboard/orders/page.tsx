@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -110,7 +111,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
       "id, decision_id, executor_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at",
     )
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
   if (executorIdFilter) {
     q = q.eq("executor_id", executorIdFilter);
   }

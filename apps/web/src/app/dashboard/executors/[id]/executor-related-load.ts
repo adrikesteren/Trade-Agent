@@ -1,3 +1,4 @@
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { compareSignalsByCloseTimeThenIntent } from "./executor-related-sort";
 
@@ -62,7 +63,7 @@ export async function fetchSignalsLinkedViaDecisions(
 
   const ordered = signalIdsOrdered.map((id) => byId.get(id)).filter((x): x is ExecutorSignalRow => Boolean(x));
   ordered.sort(compareSignalsByCloseTimeThenIntent);
-  return { rows: ordered };
+  return { rows: ordered.slice(0, DASHBOARD_LIST_VIEW_LIMIT) };
 }
 
 function agentSlugFromSignalRow(row: ExecutorSignalRow): string | null {

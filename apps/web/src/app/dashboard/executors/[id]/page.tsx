@@ -1,10 +1,14 @@
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "@/app/dashboard/executors/actions";
 import { ExecutorBalancePanel } from "@/app/dashboard/executors/[id]/executor-balance-panel";
 import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/dashboard/executors/[id]/executor-related-load";
-import { compareTradeDecisionsByCloseThenApproved } from "@/app/dashboard/executors/[id]/executor-related-sort";
 import { ExecutorForm, type AssetOption, type ExecutorFormInitial } from "@/app/dashboard/executors/executor-form";
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  TRADE_DECISIONS_FETCH_POOL,
+  buildTradeDecisionListViewRows,
+} from "@/lib/dashboard/trade-decision-list";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { loadExecutorPnlSnapshot } from "@/lib/trading/executor-pnl";
@@ -218,7 +222,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const ledgerLimit = ledgerFull ? 500 : 10;
+  const ledgerLimit = ledgerFull ? 500 : DASHBOARD_LIST_VIEW_LIMIT;
   const { data: ledgerRows, count: ledgerCount, error: lgErr } = await supabase
     .schema("trading")
     .from("executor_balance_ledger")
@@ -236,7 +240,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .select("id, market_id, side, notional_eur, status, created_at", { count: "exact" })
     .eq("executor_id", id)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const orders = (ordRows ?? []) as OrderRow[];
   const orderTotal = typeof orderCount === "number" ? orderCount : orders.length;
@@ -249,9 +253,10 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       { count: "exact" },
     )
     .eq("executor_id", id)
-    .limit(200);
+    .order("close_time", { ascending: false })
+    .limit(TRADE_DECISIONS_FETCH_POOL);
 
-  const tradeDecisionsSorted = [...((tdRows ?? []) as TradeDecisionRow[])].sort(compareTradeDecisionsByCloseThenApproved);
+  const tradeDecisionsSorted = buildTradeDecisionListViewRows((tdRows ?? []) as TradeDecisionRow[], 10);
   const tradeDecisionTotal = typeof tdCount === "number" ? tdCount : tradeDecisionsSorted.length;
 
   const { data: rsListRows, count: rsCount, error: rsListErr } = await supabase
@@ -264,7 +269,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .eq("executor_id", id)
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false })
-    .limit(10);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const riskStates = (rsListRows ?? []) as RiskStateRow[];
   const riskStateTotal = typeof rsCount === "number" ? rsCount : riskStates.length;
@@ -279,7 +284,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const symMap = await marketSymbolMap(supabase, marketIdsForLabels);
 
   const ledgerViewAll = ledgerFull ? undefined : `/dashboard/executors/${id}?ledger=all`;
-  const ledgerPreview = ledgerFull ? 500 : 10;
+  const ledgerPreview = ledgerFull ? 500 : DASHBOARD_LIST_VIEW_LIMIT;
 
   return (
     <DetailPageLayout
@@ -443,7 +448,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
 
                 <RecordRelatedList
                   title="Trade decisions"
-                  description="Bar close time desc · approved first when close time ties."
+                  description="Approved first · bar close desc · one row per market · preview 10."
                   items={tradeDecisionsSorted}
                   getKey={(r) => r.id}
                   totalCount={tradeDecisionTotal}

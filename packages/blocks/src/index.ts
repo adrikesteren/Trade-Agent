@@ -36,11 +36,20 @@ export { ListViewTitlePickerPlaceholder } from "./components/list-view-title-pic
 export { ListViewSearch, type ListViewSearchProps } from "./components/list-view-search";
 export { ListViewToolbar, type ListViewToolbarProps } from "./components/list-view-toolbar";
 export { listViewOutlineActionClass } from "./list-view-classes";
-export { Output, type OutputLookup, type OutputProps, type OutputRecordLink, type OutputType } from "./components/output";
+export {
+  Output,
+  type OutputLookup,
+  type OutputProps,
+  type OutputPropsDatetime,
+  type OutputPropsOther,
+  type OutputRecordLink,
+  type OutputType,
+} from "./components/output";
 export { PageHeader, type PageHeaderProps, type PageHeaderVariant } from "./components/page-header";
 export { RecordDetailCard, RecordDetailLayout, type RecordDetailCardProps, type RecordDetailLayoutProps } from "./components/record-detail-layout";
 export { RecordDetailGrid, type RecordDetailGridProps } from "./components/record-detail-grid";
 export { RecordDetailSection, type RecordDetailSectionProps } from "./components/record-detail-section";
+export { RecordRelatedList, type RecordRelatedListProps } from "./components/record-related-list";
 export { Select, type SelectProps } from "./components/select";
 export { Spinner, type SpinnerProps } from "./components/spinner";
 export { Stack, type StackProps } from "./components/stack";

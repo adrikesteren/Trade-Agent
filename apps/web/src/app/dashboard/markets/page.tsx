@@ -1,3 +1,4 @@
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -46,7 +47,7 @@ export default async function MarketsIndexPage() {
         `,
         )
         .eq("exchange_id", exchange.id)
-        .limit(500)
+        .limit(2000)
     : { data: null, error: null };
 
   const rows = (listings ?? []) as MarketListingRow[];
@@ -66,12 +67,13 @@ export default async function MarketsIndexPage() {
     return (a.market_symbol ?? "").localeCompare(b.market_symbol ?? "", undefined, { sensitivity: "base" });
   });
 
-  const n = sortedListings.length;
+  const displayListings = sortedListings.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
+  const n = displayListings.length;
   const summaryBits = [
-    `${n} listing${n === 1 ? "" : "s"}`,
+    `${n} listing${n === 1 ? "" : "s"} shown`,
     "Sorted by Market Cap",
     `${exchange?.name ?? "Bitvavo"} · EUR`,
-    "Max 500 rows",
+    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
   ];
 
   return (
@@ -132,7 +134,7 @@ export default async function MarketsIndexPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedListings.map((row) => {
+                {displayListings.map((row) => {
                   const rawA = row.assets as unknown;
                   const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
                     id?: string;
@@ -169,7 +171,7 @@ export default async function MarketsIndexPage() {
                     </tr>
                   );
                 })}
-                {!sortedListings.length ? (
+                {!displayListings.length ? (
                   <tr>
                     <Td colSpan={4} muted className="py-8 text-center">
                       No listings yet. Open{" "}

@@ -996,19 +996,23 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Full-width content shell: no max-width or auto margins (dashboard stretches edge-to-edge). */
 .bk-container {
+  box-sizing: border-box;
   width: 100%;
-  max-width: 64rem;
-  margin-left: auto;
-  margin-right: auto;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
 }
 
+/* Opt-in narrow column (e.g. login); combine with Tailwind `mx-auto` to center. */
 .bk-container_sm {
   max-width: 28rem;
 }
 
+/* Previously a wider cap; kept as a no-op hook for existing class names. */
 .bk-container_lg {
-  max-width: 80rem;
+  max-width: none;
 }
 
 /* ——— Table ——— */
@@ -1416,6 +1420,25 @@
   margin-top: 1.25rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--bk-color-border);
+}
+
+/* Related list (record page): title + optional View all */
+.bk-record-related-list_header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.bk-record-related-list_titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.bk-record-related-list_row {
+  min-width: 0;
 }
 
 .bk-page-header_row_detail {

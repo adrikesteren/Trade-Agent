@@ -22,9 +22,8 @@ export type OutputRecordLink = {
   name: string;
 };
 
-export type OutputProps = {
+type OutputBaseProps = {
   label: string;
-  type?: OutputType;
   /** Raw display for non-lookup types (also used when `type` is `lookup` but no `lookup`/`record` yet). */
   value?: React.ReactNode;
   /** FK: absolute path + label for the related record. */
@@ -38,6 +37,19 @@ export type OutputProps = {
   className?: string;
 };
 
+export type OutputPropsDatetime = OutputBaseProps & {
+  type: "datetime";
+  /** App-injected formatter (user locale / timezone); required so `datetime` never uses browser-default locale silently. */
+  formatDatetime: (v: string | number | Date) => string;
+};
+
+export type OutputPropsOther = OutputBaseProps & {
+  type?: Exclude<OutputType, "datetime">;
+  formatDatetime?: undefined;
+};
+
+export type OutputProps = OutputPropsDatetime | OutputPropsOther;
+
 function normalizeRecordHref(pathPrefix: string, id: string): string {
   const base = pathPrefix.replace(/\/+$/, "");
   return `${base}/${id}`;
@@ -48,12 +60,6 @@ function isEmptyValue(v: unknown): boolean {
   if (typeof v === "boolean") return false;
   if (typeof v === "string" && v.trim() === "") return true;
   return false;
-}
-
-function formatDatetime(iso: string | number | Date): string {
-  const d = typeof iso === "string" || typeof iso === "number" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** Plain string for `<pre><code>` (JSON metadata, ids, symbols). */
@@ -70,16 +76,10 @@ function LookupGlyph({ kind }: { kind: "record" | "user" }) {
   return kind === "user" ? <User className={cls} size={14} strokeWidth={2} aria-hidden /> : <Building2 className={cls} size={14} strokeWidth={2} aria-hidden />;
 }
 
-export function Output({
-  label,
-  type = "text",
-  value,
-  lookup,
-  record,
-  lookupIcon = "record",
-  span,
-  className,
-}: OutputProps) {
+export function Output(props: OutputProps) {
+  const { label, value, lookup, record, lookupIcon = "record", span, className } = props;
+  const type: OutputType = props.type ?? "text";
+
   const resolvedLookup: OutputLookup | null = (() => {
     if (lookup?.href && lookup.name) return lookup;
     if (record?.id && record.name && record.pathPrefix) {
@@ -105,7 +105,11 @@ export function Output({
     else if (value === false || value === "false" || value === 0) body = "No";
     else body = isEmptyValue(value) ? "—" : String(value);
   } else if (effectiveType === "datetime") {
-    body = isEmptyValue(value) ? "—" : formatDatetime(value as string | number | Date);
+    const fmt = props.type === "datetime" ? props.formatDatetime : null;
+    if (!fmt) {
+      throw new Error("Output: type datetime requires formatDatetime prop");
+    }
+    body = isEmptyValue(value) ? "—" : fmt(value as string | number | Date);
   } else if (effectiveType === "number") {
     body = isEmptyValue(value) ? "—" : typeof value === "number" ? String(value) : String(value);
   } else if (effectiveType === "empty") {

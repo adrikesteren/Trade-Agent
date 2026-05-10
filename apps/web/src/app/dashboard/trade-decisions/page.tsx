@@ -1,4 +1,9 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  TRADE_DECISIONS_FETCH_POOL,
+  buildTradeDecisionListViewRows,
+} from "@/lib/dashboard/trade-decision-list";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -134,18 +139,22 @@ export default async function TradeDecisionsPage({ searchParams }: TradeDecision
     .select(
       "id, executor_id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
     )
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .order("close_time", { ascending: false })
+    .limit(TRADE_DECISIONS_FETCH_POOL);
   if (executorIdFilter) {
     q = q.eq("executor_id", executorIdFilter);
   }
   const { data: rows, error } = await q;
 
-  const list = (rows ?? []) as DecisionRow[];
+  const raw = (rows ?? []) as DecisionRow[];
+  const list = buildTradeDecisionListViewRows(raw, DASHBOARD_LIST_VIEW_LIMIT);
+
   const marketIds = [...new Set(list.map((r) => r.market_id))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
+
+  const sortLineCore = `Approved first · bar close desc · one row per market · max ${DASHBOARD_LIST_VIEW_LIMIT} shown`;
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -154,11 +163,7 @@ export default async function TradeDecisionsPage({ searchParams }: TradeDecision
         title="Trading Decisions"
         iconLetter="D"
         rowCount={list.length}
-        sortLine={
-          executorIdFilter
-            ? `Filtered by executor · sorted by Created · max 200 rows`
-            : "Sorted by Created · max 200 rows"
-        }
+        sortLine={executorIdFilter ? `Filtered by executor · ${sortLineCore}` : sortLineCore}
         actions={
           <>
             <Link href="/dashboard/signals" className={listViewOutlineActionClass}>

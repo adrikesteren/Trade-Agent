@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Card, CardBody } from "@repo/blocks";
@@ -33,7 +34,7 @@ export default async function PositionsPage() {
     .from("positions")
     .select("id, user_id, executor_id, market_id, quantity, avg_price, paper, updated_at")
     .order("updated_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = rows ?? [];
   const executorIds = [...new Set((list as { executor_id?: string }[]).map((r) => r.executor_id).filter(Boolean))] as string[];

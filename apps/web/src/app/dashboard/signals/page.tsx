@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -172,20 +173,26 @@ export default async function SignalsPage() {
     .from("signals")
     .select(
       "id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, created_at, metadata, signal_agents ( agent_id )",
-    );
+    )
+    .order("close_time", { ascending: false })
+    .limit(2500);
 
   const raw = (rows ?? []) as SignalRow[];
   const marketIds = [...new Set(raw.map((r) => r.market_id))];
   const catalogByMarketId = await fetchCatalogExtrasByMarketId(supabase, marketIds);
 
   const sorted = [...raw].sort((a, b) => compareSignals(a, b, catalogByMarketId));
-  const list = topSignalPerMarket(sorted);
+  const ranked = topSignalPerMarket(sorted);
+  const list = ranked.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
 
   const sortLineParts = [
-    `${list.length} market${list.length === 1 ? "" : "s"}`,
-    raw.length > list.length ? `${raw.length} signals in DB` : null,
+    `${list.length} market${list.length === 1 ? "" : "s"} shown`,
+    raw.length > list.length || ranked.length > list.length
+      ? `${ranked.length} ranked${raw.length !== ranked.length ? ` · ${raw.length} signals loaded` : ""}`
+      : null,
     "one row per market (top rank)",
     "ENTER → EXIT → other · mcap desc · tie: newest",
+    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
   ].filter((s): s is string => Boolean(s));
 
   return (
@@ -196,7 +203,6 @@ export default async function SignalsPage() {
         iconLetter="S"
         rowCount={list.length}
         sortLine={sortLineParts.join(" · ")}
-        uncapped
         actions={
           <>
             <Link href="/dashboard/signal-agents" className={listViewOutlineActionClass}>

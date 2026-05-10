@@ -3,6 +3,7 @@ import {
   type SyncRunRow,
   type SyncRunsOverviewTemplate,
 } from "@/components/sync-runs-live-client";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
@@ -77,7 +78,7 @@ export default async function SyncRunsPage() {
     .select("id, job_key, status, trigger_source, created_at, ended_at, reason, metadata")
     .in("job_key", [...SYNC_RUN_DASHBOARD_JOB_KEYS])
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const runsSafe = (runsError ? [] : (runRows ?? [])) as SyncRunRow[];
   const n = runsSafe.length;
@@ -85,7 +86,7 @@ export default async function SyncRunsPage() {
     `${n} run${n === 1 ? "" : "s"}`,
     "Sorted by Created date",
     "Dashboard jobs only",
-    "Max 200 rows",
+    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
   ];
 
   return (

@@ -1,4 +1,5 @@
-import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import { formatUsdMetric } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -34,22 +35,17 @@ export default async function AssetsIndexPage() {
     .schema("catalog")
     .from("assets")
     .select("id, code, kind, name, coingecko_market_cap_usd, coingecko_total_volume_usd")
-    .limit(2000);
+    .order("coingecko_market_cap_usd", { ascending: false, nullsFirst: false })
+    .order("code", { ascending: true })
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
-  const assets = (rows ?? []) as AssetRow[];
-
-  const sortedRows = [...assets].sort((a, b) => {
-    const na = numericOrNegInf(a.coingecko_market_cap_usd);
-    const nb = numericOrNegInf(b.coingecko_market_cap_usd);
-    if (nb !== na) return nb - na;
-    return (a.code ?? "").localeCompare(b.code ?? "", undefined, { sensitivity: "base" });
-  });
+  const sortedRows = (rows ?? []) as AssetRow[];
 
   const n = sortedRows.length;
   const summaryBits = [
     `${n} asset${n === 1 ? "" : "s"}`,
     "Sorted by Market Cap",
-    "Max 2000 rows",
+    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
   ];
 
   return (

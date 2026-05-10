@@ -1,4 +1,5 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@repo/blocks";
 
@@ -9,7 +10,7 @@ export default async function FillsPage() {
     .from("fills")
     .select("id, user_id, order_id, price, quantity, fee, created_at")
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(DASHBOARD_LIST_VIEW_LIMIT);
 
   const list = rows ?? [];
 
