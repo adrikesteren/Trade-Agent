@@ -1,7 +1,5 @@
 import "server-only";
 
-import { Client } from "@upstash/qstash";
-
 import { evaluateTradeDecision, type SignalIntent } from "@repo/trading";
 import type { RiskStateSnapshot } from "@repo/risk";
 
@@ -19,7 +17,6 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/trading/executors";
-import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type MediatorCatalogCloseBody = {
   closeTimeIso: string;
@@ -28,6 +25,9 @@ export type MediatorCatalogCloseBody = {
   marketOffset?: number;
   marketBatchSize?: number;
   candleSyncRunId?: string | null;
+  signalsSyncRunId?: string | null;
+  /** `automation.sync_runs.id` for this mediator_catalog_close job (set by the sync-run orchestrator). */
+  mediatorPipelineSyncRunId?: string | null;
 };
 
 export type RunMediatorCatalogCloseResult = {
@@ -99,11 +99,7 @@ function agentSlugFromRow(row: SignalRow): string {
   return one?.agent_id ?? "unknown";
 }
 
-export async function runMediatorCatalogClose(
-  body: MediatorCatalogCloseBody,
-  opts?: { allowQStashSelfQueue?: boolean },
-): Promise<RunMediatorCatalogCloseResult> {
-  const allowQStashSelfQueue = opts?.allowQStashSelfQueue !== false;
+export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): Promise<RunMediatorCatalogCloseResult> {
   const admin = createServiceRoleClient();
   const timeframe = body.timeframe ?? CATALOG_STORAGE_TIMEFRAME;
   const quote = body.quote === undefined ? "EUR" : body.quote;
@@ -287,6 +283,8 @@ export async function runMediatorCatalogClose(
             executorId: ex.id,
             executorName: ex.name,
             ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
+            ...(body.signalsSyncRunId ? { signalsSyncRunId: body.signalsSyncRunId } : {}),
+            ...(body.mediatorPipelineSyncRunId ? { mediatorSyncRunId: body.mediatorPipelineSyncRunId } : {}),
           },
         };
 
@@ -302,24 +300,6 @@ export async function runMediatorCatalogClose(
   const nextOffset = marketOffset + rows.length;
   const nextMarketOffset = nextOffset < effectiveTotal ? nextOffset : null;
 
-  const base = workerPublicBaseUrl();
-  const token = process.env.QSTASH_TOKEN;
-  if (nextMarketOffset != null && allowQStashSelfQueue && base && token) {
-    const client = new Client({ token });
-    await client.publishJSON({
-      url: `${base}/api/workers/mediator-catalog-close`,
-      body: {
-        closeTimeIso,
-        timeframe,
-        quote,
-        marketOffset: nextMarketOffset,
-        marketBatchSize: marketBatchSizeVal,
-        candleSyncRunId: body.candleSyncRunId ?? undefined,
-      },
-      retries: 3,
-    });
-  }
-
   if (
     nextMarketOffset == null &&
     rows.length > 0 &&
@@ -332,6 +312,8 @@ export async function runMediatorCatalogClose(
         closeTimeIso,
         timeframe,
         candleSyncRunId: body.candleSyncRunId ?? null,
+        signalsSyncRunId: body.signalsSyncRunId ?? null,
+        mediatorSyncRunId: body.mediatorPipelineSyncRunId ?? null,
       });
     } catch (e) {
       console.error("enqueueExecutorCatalogCloseAfterMediator failed:", e);
@@ -347,7 +329,7 @@ export async function runMediatorCatalogClose(
   };
 }
 
-/** Inline drain when QStash is not configured (localhost). */
+/** Process all market batches in-process for one catalog bar close. */
 export async function runMediatorCatalogCloseDrain(body: MediatorCatalogCloseBody): Promise<RunMediatorCatalogCloseResult> {
   let offset = body.marketOffset ?? 0;
   let totalDecisions = 0;
@@ -358,7 +340,7 @@ export async function runMediatorCatalogCloseDrain(body: MediatorCatalogCloseBod
 
   let marketsSum = 0;
   for (let i = 0; i < cap; i++) {
-    last = await runMediatorCatalogClose({ ...body, marketOffset: offset }, { allowQStashSelfQueue: false });
+    last = await runMediatorCatalogClose({ ...body, marketOffset: offset });
     totalMarkets = last.totalMarkets;
     totalDecisions += last.decisionsUpserted;
     marketsSum += last.marketsProcessed;

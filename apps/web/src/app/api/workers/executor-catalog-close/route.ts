@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { runExecutorCatalogClose, type ExecutorCatalogCloseBody } from "@/lib/executor/run-executor-catalog-close";
+import { executeExecutorCatalogCloseWithSyncRun } from "@/lib/executor/run-executor-catalog-close-with-sync-run";
+import type { ExecutorCatalogCloseBody } from "@/lib/executor/run-executor-catalog-close";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): ExecutorCatalogCloseBody | null {
@@ -17,6 +18,10 @@ function parseBody(raw: string): ExecutorCatalogCloseBody | null {
       marketBatchSize: typeof o.marketBatchSize === "number" ? o.marketBatchSize : undefined,
       candleSyncRunId:
         typeof o.candleSyncRunId === "string" || o.candleSyncRunId === null ? (o.candleSyncRunId as string | null) : undefined,
+      signalsSyncRunId:
+        typeof o.signalsSyncRunId === "string" || o.signalsSyncRunId === null ? (o.signalsSyncRunId as string | null) : undefined,
+      mediatorSyncRunId:
+        typeof o.mediatorSyncRunId === "string" || o.mediatorSyncRunId === null ? (o.mediatorSyncRunId as string | null) : undefined,
     };
   } catch {
     return null;
@@ -24,16 +29,15 @@ function parseBody(raw: string): ExecutorCatalogCloseBody | null {
 }
 
 /**
- * POST: QStash signed callback or `Authorization: Bearer CRON_SECRET` (manual).
- * Executes approved `trade_decisions` into `orders` / `fills` (paper sim or live Bitvavo).
+ * POST: Bearer CRON_SECRET. Full executor pass (`automation.sync_runs` job `executor_catalog_close`).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash signing keys + APP_BASE_URL, or ALLOW_INSECURE_QSTASH=1 for local."
-        : "Invalid or missing QStash signature or Bearer CRON_SECRET.";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing Authorization: Bearer CRON_SECRET.";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
@@ -43,8 +47,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runExecutorCatalogClose(parsed);
-    return NextResponse.json(result);
+    const out = await executeExecutorCatalogCloseWithSyncRun(parsed, "manual");
+    if (out.kind === "skipped_overlap") {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        syncRunId: out.runId,
+        hint: "Another executor_catalog_close run is already in progress.",
+      });
+    }
+    return NextResponse.json({ ...out.result, syncRunId: out.runId });
   } catch (e) {
     const message = e instanceof Error ? e.message : "executor run failed";
     return NextResponse.json({ error: message }, { status: 500 });

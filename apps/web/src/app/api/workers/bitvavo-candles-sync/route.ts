@@ -1,4 +1,3 @@
-import { Client } from "@upstash/qstash";
 import { NextResponse } from "next/server";
 import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
@@ -8,7 +7,6 @@ import { sendOpsAlert } from "@/lib/ops/send-ops-alert";
 import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/markets/run-eur-candle-sweep";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
-import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 function parseSweepBody(raw: string): EurCandleSweepBody {
   if (!raw.trim()) return {};
@@ -20,50 +18,53 @@ function parseSweepBody(raw: string): EurCandleSweepBody {
 }
 
 /**
- * GET: optional external scheduler with Bearer CRON_SECRET. Enqueues a QStash POST to this path
- * when APP_BASE_URL + QSTASH_TOKEN are set (multi-chunk chain). Not used for localhost-only dev.
+ * GET: Bearer CRON_SECRET — runs the same EUR candle sweep as POST with an empty JSON body.
  */
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  if (!secret || auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  const base = workerPublicBaseUrl();
-  const token = process.env.QSTASH_TOKEN;
-  if (!base || !token) {
+  const rawBody = "";
+  if (!(await verifyScheduledWorker(request, rawBody))) {
     return NextResponse.json(
-      {
-        error: "missing_config",
-        hint: "Set APP_BASE_URL (or NEXT_PUBLIC_APP_URL) and QSTASH_TOKEN so the cron can enqueue a signed POST to run the EUR candle sweep.",
-      },
-      { status: 501 },
+      { error: "unauthorized", hint: "Use Authorization: Bearer CRON_SECRET." },
+      { status: 401 },
     );
   }
-
-  const client = new Client({ token });
-  await client.publishJSON({
-    url: `${base}/api/workers/bitvavo-candles-sync`,
-    body: {},
-    retries: 3,
-  });
-
-  return NextResponse.json({ ok: true, queued: true });
+  try {
+    const result = await runEurCandleSweep({});
+    return NextResponse.json(result);
+  } catch (e) {
+    try {
+      const admin = createServiceRoleClient();
+      await recordBitvavoSyncFailed(admin, {
+        runId: null,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        source: "automated",
+        reason: e instanceof Error ? e.message : "sync failed",
+      });
+    } catch {
+      /* non-fatal */
+    }
+    const message = e instanceof Error ? e.message : "sync failed";
+    await sendOpsAlert({
+      source: "bitvavo-candles-sync",
+      level: "error",
+      title: "Bitvavo EUR candle sweep failed",
+      detail: message,
+      at: new Date().toISOString(),
+    });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 /**
- * POST: QStash (signed) or manual trigger with Bearer CRON_SECRET. Runs up to N candle chunks,
- * then queues the next chunk via QStash until the full EUR sweep completes; then updates
- * `sync_runs` for `bitvavo_candles_eur`.
+ * POST: Bearer CRON_SECRET. Runs the EUR catalog candle sweep inline (full continuation in one process).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "QStash callbacks need QSTASH_CURRENT_SIGNING_KEY + QSTASH_NEXT_SIGNING_KEY in this app’s env, or set ALLOW_INSECURE_QSTASH=1 for local-only. Manual POSTs need Authorization: Bearer CRON_SECRET. If you use APP_BASE_URL for QStash, it must match the URL QStash calls (see qstashSigningUrl)."
-        : "Invalid or missing QStash signature or Bearer CRON_SECRET.";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing Authorization: Bearer CRON_SECRET.";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 

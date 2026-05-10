@@ -32,8 +32,9 @@ export function SignalsToPositionArticle() {
             <code className="bk-code">5m</code>), met <code className="bk-code">close_time</code> per bar.
           </li>
           <li>
-            Workers draaien rond <strong>candle close</strong> (gepland via QStash naar je publieke dev-URL
-            op localhost, of handmatige “Sync now” / worker-calls — zie README onder webapp).
+            Workers draaien rond <strong>candle close</strong> (externe scheduler met{" "}
+            <code className="bk-code">CRON_SECRET</code>, of handmatige “Sync now” / worker-calls — zie README onder
+            webapp).
           </li>
         </ul>
       </section>
@@ -173,7 +174,7 @@ export function SignalsToPositionArticle() {
         <p className="bk-text-muted">
           Na de <strong>laatste batch</strong> van <code className="bk-code">mediator-catalog-close</code>{" "}
           voor een bar — als er in die run daadwerkelijk beslissingen zijn ge-upsert — wordt de executor-run
-          ingepland (QStash naar je publieke base URL) of inline gedraind als er geen QStash is. Zet{" "}
+          gestart in hetzelfde Node-proces (inline drain). Zet{" "}
           <code className="bk-code">EXECUTOR_AFTER_MEDIATOR_DISABLE=1</code> om die automatische keten uit te
           zetten; je kunt de executor-worker dan handmatig aanroepen (zie{" "}
           <code className="bk-code">apps/web/README.md</code>).

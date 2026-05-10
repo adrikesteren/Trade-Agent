@@ -17,7 +17,7 @@ export default async function Home() {
           </h1>
           <p className="bk-lead">
             Paper-first trading automation: signal agents propose, the mediator enforces risk, workers execute. Stack:
-            Next.js, Supabase, Upstash Redis & QStash, Bitvavo (EUR).
+            Next.js, Supabase, Upstash Redis, Bitvavo (EUR).
           </p>
         </div>
         <div className="flex flex-wrap gap-3">

@@ -89,7 +89,7 @@ Geen strategie, geen risk-beslissing — alleen **betrouwbare uitvoering**.
 
 ---
 
-### 5. Ops / scheduler (QStash, jobs, Redis)
+### 5. Ops / scheduler (workers, jobs, Redis)
 
 **Taak:** Betrouwbaarheid op de achtergrond.
 
@@ -97,7 +97,7 @@ Geen strategie, geen risk-beslissing — alleen **betrouwbare uitvoering**.
 - **Redis:** locks, idempotency (“deze candle al verwerkt”), rate limits.
 - Alerts bij fouten of kill switch.
 
-**Implementatie in deze repo:** zie [ops-developer.md](./ops-developer.md) (managed QStash-schedules, `risk-daily-reset`, `bitvavo-reconcile`, Redis-lock op reconcile, optionele `OPS_ALERT_WEBHOOK_URL`).
+**Implementatie in deze repo:** zie [ops-developer.md](./ops-developer.md) (worker routes met `CRON_SECRET`, `risk-daily-reset`, `bitvavo-reconcile`, Redis-lock op reconcile, optionele `OPS_ALERT_WEBHOOK_URL`).
 
 ---
 
@@ -174,7 +174,7 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 - **Betekenis:** het moment dat een **nieuwe gesloten OHLCV-rij** voor een markt in de catalogus staat — technisch een `**INSERT` of `UPDATE`** op `catalog.candles` (interval gelijk aan `CATALOG_STORAGE_TIMEFRAME` in `[apps/web/src/lib/markets/chart-types.ts](../apps/web/src/lib/markets/chart-types.ts)`).
 - **Geen aparte message-bus voor de dashboard-grafiek:** Realtime volgt de database. Migratie `20250512120000_enable_realtime_candles.sql` voegt `candles` toe aan de publicatie `supabase_realtime`. RLS blijft gelden (`candles_select_all` voor `authenticated`).
 - **Market detail:** `[MarketCandleChart](../apps/web/src/components/market-candle-chart.tsx)` opent een Supabase-kanaal met filter `market_id=eq.{uuid}` en vernieuwt na een korte debounce de data via `GET /api/markets/candles` (zodat aggregatie naar hogere timeframes op de server blijft).
-- **Server-side signal pipeline:** kan later **extra** een QStash-job publiceren na een candle-write; dat is **niet** nodig voor de live chart.
+- **Server-side signal pipeline:** draait na candle-write als onderdeel van dezelfde serverflow of via je eigen scheduler; niet nodig voor de live chart zelf.
 - **Asset detail (v1):** er is **geen** chart op de asset-pagina, alleen links naar markten. Als daar later een chart komt: overweeg meerdere Realtime-subscriptions (één per `markets.id` voor dit `asset_id`) of één kanaal zonder filter met client-side filter op die id-set.
 
 ---
@@ -186,7 +186,7 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 
 | Context                  | Wat het is                                                                                                                                                  | Subscription?                                                                                                                                                                                                                                  |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Dit trading-platform** | Een **softwarecomponent** (job, worker, functie) die een **gestructureerd signaal** produceert en naar de DB schrijft. Geen los product dat je “abonneert”. | **Nee** voor rule-based agents: dat is gewoon jouw code die draait (cron, QStash, API-route). **Wel** kosten als je een **extern LLM** aanroept (OpenAI, Anthropic, …): dan betaal je via die API, niet via een speciale “agent-subscription”. |
+| **Dit trading-platform** | Een **softwarecomponent** (job, worker, functie) die een **gestructureerd signaal** produceert en naar de DB schrijft. Geen los product dat je “abonneert”. | **Nee** voor rule-based agents: dat is gewoon jouw code die draait (cron, worker-HTTP-route). **Wel** kosten als je een **extern LLM** aanroept (OpenAI, Anthropic, …): dan betaal je via die API, niet via een speciale “agent-subscription”. |
 | **Cursor IDE** (editor)  | De **AI-assistent** waarmee je code schrijft (chat, Agent mode).                                                                                            | **Ja**: dat loopt via je **Cursor-plan** (en eventueel eigen API-keys voor bepaalde modellen). Dit staat **los** van je trading-platform.                                                                                                      |
 
 
@@ -238,7 +238,7 @@ Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder mod
 - `[signal-agents-developer.md](./signal-agents-developer.md)` — taken, grenzen, triggers en DB-contract voor **Signal agents** (implementatie + AI-agent-instructies).
 - `[mediator-developer.md](./mediator-developer.md)` — taken, grenzen, triggers en gebruik van de **Trade Mediator** (beslissingen in `trade_decisions`).
 - `[executor-developer.md](./executor-developer.md)` — **Trade Executor**: orders/fills, paper/live, Bitvavo private API.
-- `[ops-developer.md](./ops-developer.md)` — **Ops / scheduler (stap 5 in de rollenlijst)**: QStash-jobs, Redis, reconcile, risk-daily-reset, alerts.
+- `[ops-developer.md](./ops-developer.md)` — **Ops / scheduler (stap 5 in de rollenlijst)**: worker jobs, Redis, reconcile, risk-daily-reset, alerts.
 
 ---
 

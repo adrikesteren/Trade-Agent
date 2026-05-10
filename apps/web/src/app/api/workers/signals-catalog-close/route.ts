@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { runSignalsCatalogClose, type SignalsCatalogCloseBody } from "@/lib/signals/run-signals-catalog-close";
+import { executeSignalsCatalogCloseWithSyncRun } from "@/lib/signals/run-signals-catalog-close-with-sync-run";
+import type { SignalsCatalogCloseBody } from "@/lib/signals/run-signals-catalog-close";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): SignalsCatalogCloseBody | null {
@@ -24,16 +25,15 @@ function parseBody(raw: string): SignalsCatalogCloseBody | null {
 }
 
 /**
- * POST: QStash signed callback or `Authorization: Bearer CRON_SECRET` (manual).
- * Computes rule-based signals for one batch of Bitvavo EUR markets at a catalog candle `close_time`.
+ * POST: Bearer CRON_SECRET. Full signals pass for one catalog bar (`automation.sync_runs` job `signals_catalog_close`).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash signing keys + APP_BASE_URL, or ALLOW_INSECURE_QSTASH=1 for local."
-        : "Invalid or missing QStash signature or Bearer CRON_SECRET.";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing Authorization: Bearer CRON_SECRET.";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
@@ -43,8 +43,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runSignalsCatalogClose(parsed);
-    return NextResponse.json(result);
+    const out = await executeSignalsCatalogCloseWithSyncRun(parsed, "manual");
+    if (out.kind === "skipped_overlap") {
+      return NextResponse.json({ ok: true, skipped: true, syncRunId: out.runId, hint: "Another signals_catalog_close run is already in progress." });
+    }
+    return NextResponse.json({ ...out.result, syncRunId: out.runId });
   } catch (e) {
     const message = e instanceof Error ? e.message : "signals run failed";
     console.error("[signals-catalog-close] POST failed:", message, e instanceof Error ? e.stack : e);

@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "coingecko_coin_id_manual_only",
-        hint: "POST with ?source=manual from Sync runs, or use GET/POST /api/workers/coingecko-coin-id-sync with CRON_SECRET / QStash.",
+        hint: "POST with ?source=manual from Sync runs, or use GET/POST /api/workers/coingecko-coin-id-sync with CRON_SECRET.",
       },
       { status: 400 },
     );

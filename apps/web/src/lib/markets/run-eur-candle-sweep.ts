@@ -1,4 +1,3 @@
-import { Client } from "@upstash/qstash";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { barsForRetention } from "@/lib/markets/candle-retention";
@@ -26,7 +25,6 @@ import {
 } from "@/lib/markets/sync-bitvavo-candles-chunk";
 import { enqueueSignalsCatalogCloseAfterIncremental } from "@/lib/signals/enqueue-signals-catalog-close";
 import { resolveLatestCatalogCandleCloseIso } from "@/lib/signals/resolve-latest-catalog-close-for-signals";
-import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 export type EurCandleSweepBody = {
   marketOffset?: number;
@@ -37,9 +35,9 @@ export type EurCandleSweepBody = {
   delayMsBetweenMarkets?: number;
   /** Who triggered this sweep (stored on `sync_runs`). */
   triggerSource?: BitvavoSyncTriggerSource;
-  /** Same logical run across QStash chunks (from first `beginBitvavoSyncRun`). */
+  /** Same logical run across chunked HTTP calls (from first `beginBitvavoSyncRun`). */
   syncRunId?: string | null;
-  /** Carried across QStash continuations together with window or incremental fields. */
+  /** Carried across continuations together with window or incremental fields. */
   syncMode?: CandleSyncMode;
   candleTimestampId?: string | null;
   targetCloseTimeIso?: string | null;
@@ -88,17 +86,6 @@ function maxChunksPerRun(): number {
   return Math.min(Math.max(Math.floor(n), 1), 40);
 }
 
-/**
- * When true, remaining markets are processed in the same HTTP request (longer, no QStash self-POST chain).
- * `BITVAVO_CANDLES_SYNC_INLINE_CHAIN=1` wins even if QStash is configured — useful in dev to avoid noisy
- * repeated POST /api/workers/bitvavo-candles-sync while still having QSTASH_* set for other features.
- */
-function shouldInlineRemainder(canQueueFollowUp: boolean): boolean {
-  if (process.env.BITVAVO_CANDLES_SYNC_INLINE_CHAIN === "1") return true;
-  if (canQueueFollowUp) return false;
-  return process.env.NODE_ENV === "development";
-}
-
 function inlineSweepMaxChunks(): number {
   const n = Number(process.env.BITVAVO_CANDLES_SYNC_INLINE_MAX_CHUNKS ?? 250);
   if (!Number.isFinite(n)) return 250;
@@ -129,7 +116,7 @@ async function resolveChunkTiming(
 
   const isCatalogTf = args.timeframe === CATALOG_STORAGE_TIMEFRAME;
 
-  // Legacy QStash continuations: single-bar incremental payload wins over run metadata.
+  // Legacy HTTP continuations: single-bar incremental payload wins over run metadata.
   if (
     body.syncMode === "incremental" &&
     body.candleTimestampId &&
@@ -182,7 +169,7 @@ async function resolveChunkTiming(
   }
 
   // Fresh EUR sweep at offset 0 (non-window catalog path): DB state wins. Do not trust a stale
-  // `body.syncMode === "incremental"` from an old QStash payload before this runs.
+  // `body.syncMode === "incremental"` from an old continuation payload before this runs.
   if (args.isEurQuote && isCatalogTf && args.marketOffset === 0) {
     const prep = await prepareEurCandleTimestampWindow(admin, args.timeframe);
     if (prep.mode === "blocked_future_close") {
@@ -443,11 +430,8 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   }
 
   let incomplete = lastResult != null && lastResult.nextMarketOffset != null;
-  const base = workerPublicBaseUrl();
-  const token = process.env.QSTASH_TOKEN;
-  const canQueueFollowUp = Boolean(base && token);
 
-  if (incomplete && shouldInlineRemainder(canQueueFollowUp)) {
+  if (incomplete) {
     const deadline = Date.now() + inlineSweepDeadlineMs();
     const maxInline = inlineSweepMaxChunks();
     let inlineChunks = 0;
@@ -514,7 +498,7 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     }
   }
 
-  if (incomplete && isEurQuote && syncRunId && canQueueFollowUp) {
+  if (incomplete && isEurQuote && syncRunId) {
     try {
       await patchSyncRunMetadata(admin, {
         runId: syncRunId,
@@ -535,56 +519,18 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     }
   }
 
-  if (incomplete && canQueueFollowUp) {
-    const client = new Client({ token });
-    const nextBody: EurCandleSweepBody = {
-      marketOffset,
-      timeframe,
-      quote,
-      barsPerMarket,
-      marketBatchSize,
-      delayMsBetweenMarkets,
-      triggerSource,
-      syncRunId: syncRunId ?? undefined,
-      syncMode: chunkTiming.syncMode,
-      ...(chunkTiming.syncMode === "incremental"
-        ? {
-            candleTimestampId: chunkTiming.candleTimestampId,
-            targetCloseTimeIso: chunkTiming.targetCloseTimeIso,
-          }
-        : {}),
-      ...(chunkTiming.syncMode === "window"
-        ? {
-            windowStartOpen: chunkTiming.windowStartOpen,
-            windowEndClose: chunkTiming.windowEndClose,
-            windowBarCount: chunkTiming.windowBarCount,
-          }
-        : {}),
-    };
-    await client.publishJSON({
-      url: `${base}/api/workers/bitvavo-candles-sync`,
-      body: nextBody,
-      retries: 3,
-    });
-  }
-
-  const warning =
-    incomplete && !canQueueFollowUp && !shouldInlineRemainder(canQueueFollowUp)
-      ? "Sweep not finished: set APP_BASE_URL and QSTASH_TOKEN, or BITVAVO_CANDLES_SYNC_INLINE_CHAIN=1 for a long single request."
-      : incomplete && !canQueueFollowUp && shouldInlineRemainder(canQueueFollowUp)
-        ? "Sweep stopped: inline time/chunk limit reached; run again or use QStash + APP_BASE_URL."
-        : undefined;
+  const warning = incomplete
+    ? "EUR candle sweep incomplete: inline chunk or time limit reached; run again or raise BITVAVO_CANDLES_SYNC_INLINE_MAX_CHUNKS / BITVAVO_CANDLES_SYNC_INLINE_MAX_MS."
+    : undefined;
 
   // Without this, `automation.sync_runs` stays `running` forever (partial unique blocks new starts).
-  if (incomplete && isEurQuote && syncRunId && !canQueueFollowUp) {
+  if (incomplete && isEurQuote && syncRunId) {
     try {
       await recordBitvavoSyncFailed(admin, {
         runId: syncRunId,
         jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
         source: triggerSource,
-        reason:
-          warning ??
-          "EUR candle sweep incomplete and no QStash follow-up was available to continue.",
+        reason: warning ?? "EUR candle sweep incomplete after inline continuation limits.",
         metadata: {
           chunksProcessed,
           candleRowsUpserted,

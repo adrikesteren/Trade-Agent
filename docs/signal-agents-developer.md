@@ -71,14 +71,14 @@ Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timefra
 
 ## Worker: `POST /api/workers/signals-catalog-close`
 
-- **Auth**: same as other workers — QStash signature **or** `Authorization: Bearer ${CRON_SECRET}` (see `verifyScheduledWorker`).
+- **Auth**: `Authorization: Bearer ${CRON_SECRET}` (see `verifyScheduledWorker`).
 - **Body** (JSON): `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`.
-- **Behaviour**: loads enabled rows from `trading.signal_agents`, processes a **batch** of Bitvavo EUR markets (RPC `bitvavo_markets_for_candle_sync_slice`), upserts signals. When `QSTASH_TOKEN` + public base URL exist, **self-chains** to the next `marketOffset` (same pattern as `bitvavo-candles-sync`).
-- **Localhost without QStash**: `enqueueSignalsCatalogCloseAfterIncremental` runs `runSignalsCatalogCloseDrain`, which loops batches **in-process** with `allowQStashSelfQueue: false` to avoid double-queueing.
+- **Behaviour**: records `automation.sync_runs` with job key `signals_catalog_close`, then loads enabled rows from `trading.signal_agents` and runs `runSignalsCatalogCloseDrain` — all Bitvavo EUR markets in **in-process** batches (RPC `bitvavo_markets_for_candle_sync_slice`), upserts signals. After candles, `enqueueSignalsCatalogCloseAfterIncremental` calls the same orchestration.
 
 Implementation entry points:
 
 - [`apps/web/src/lib/signals/run-signals-catalog-close.ts`](../apps/web/src/lib/signals/run-signals-catalog-close.ts)
+- [`apps/web/src/lib/signals/run-signals-catalog-close-with-sync-run.ts`](../apps/web/src/lib/signals/run-signals-catalog-close-with-sync-run.ts)
 - [`apps/web/src/lib/signals/enqueue-signals-catalog-close.ts`](../apps/web/src/lib/signals/enqueue-signals-catalog-close.ts)
 - [`apps/web/src/app/api/workers/signals-catalog-close/route.ts`](../apps/web/src/app/api/workers/signals-catalog-close/route.ts)
 
@@ -99,7 +99,7 @@ To add another `agent_id`, implement an evaluator, register the row in `signal_a
 See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table. Minimum to get rows after incremental candle sync:
 
 1. `SIGNAL_DEFAULT_USER_ID=<your auth.users uuid>`
-2. `CRON_SECRET` / QStash keys as for other workers if you invoke manually or via QStash.
+2. `CRON_SECRET` if you invoke the worker manually or from a scheduler.
 
 ---
 
@@ -107,7 +107,7 @@ See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table.
 
 - **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm EUR `5m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-5m-v1`.
 - **Upsert errors on unique**: ensure migrations through `20260527100000_signals_signal_agent_uuid_fk.sql` are applied; `onConflict` must match `(user_id, signal_agent_id, market_id, timeframe, close_time)`.
-- **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or rely on QStash self-chaining with a public `APP_BASE_URL`.
+- **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or raise `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` / related env caps.
 
 ---
 

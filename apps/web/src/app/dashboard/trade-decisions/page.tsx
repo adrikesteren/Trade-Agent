@@ -179,7 +179,7 @@ export default async function TradeDecisionsPage({ searchParams }: TradeDecision
       <Alert tone="info">
         <strong>CRON_SECRET</strong> is een gedeeld geheim in je server-<code className="bk-code">.env</code>: workers
         zoals candle sync, signals en mediator accepteren alleen requests met een geldige{" "}
-        <code className="bk-code">Authorization: Bearer …</code> (jouw geheim) <em>of</em> een geldige QStash-handtekening.
+        <code className="bk-code">Authorization: Bearer …</code> (jouw <code className="bk-code">CRON_SECRET</code>).
         Zo kan niet iedereen op het internet achtergrondjobs starten.
       </Alert>
       <Card>

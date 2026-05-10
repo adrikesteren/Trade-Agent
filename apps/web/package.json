@@ -7,13 +7,7 @@
     "build": "next build",
     "start": "node --max-http-header-size=98304 ./node_modules/next/dist/bin/next start",
     "test": "vitest run",
-    "lint": "eslint",
-    "qstash:clear-pending": "node scripts/clear-qstash-pending.mjs",
-    "qstash:schedules": "node scripts/qstash-schedules.mjs upsert",
-    "qstash:schedules:list": "node scripts/qstash-schedules.mjs list",
-    "qstash:schedules:delete": "node scripts/qstash-schedules.mjs delete",
-    "qstash:schedules:pause": "node scripts/qstash-schedules.mjs pause",
-    "qstash:schedules:resume": "node scripts/qstash-schedules.mjs resume"
+    "lint": "eslint"
   },
   "dependencies": {
     "@repo/blocks": "workspace:*",
@@ -23,7 +17,6 @@
     "@repo/trading": "workspace:*",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.8",
-    "@upstash/qstash": "^2.7.23",
     "dotenv": "^16.5.0",
     "lightweight-charts": "^5.2.0",
     "next": "16.2.6",

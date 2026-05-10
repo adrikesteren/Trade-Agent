@@ -13,7 +13,7 @@ import {
   syncCoingeckoAssetMetricsResolvePhase,
 } from "@/lib/markets/sync-coingecko-metrics";
 
-/** Optional: reuse an existing `sync_runs` row (e.g. legacy QStash payloads still sending `syncRunId`). */
+/** Optional: reuse an existing `sync_runs` row when callers pass `syncRunId`. */
 export type CoingeckoMetricsSyncBody = {
   syncRunId?: string | null;
 };

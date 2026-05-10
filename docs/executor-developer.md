@@ -12,7 +12,7 @@ Audience: human developers and automation agents editing this repo.
 2. Signal agents → `trading.signals`  
 3. Trade Mediator → `trading.trade_decisions` (one row per **enabled executor** per market/bar; mode-agnostic — paper vs live is only `trading.executors.execution_mode` at order time)  
 4. **Executor** (this document) → `trading.orders` (+ `fills`, `positions`) keyed by `executor_id`  
-5. **Ops / scheduler** — QStash schedules, optional Redis, live **reconcile** vs Bitvavo, daily risk reset, optional alerts. See [ops-developer.md](./ops-developer.md). (In [how-we-use-agents.md](./how-we-use-agents.md) FAQ table, “stap 5” means executor; the **Rollen** list uses step 5 for Ops — both docs now cross-link.)
+5. **Ops / scheduler** — external cron hitting worker routes with `CRON_SECRET`, optional Redis, live **reconcile** vs Bitvavo, daily risk reset, optional alerts. See [ops-developer.md](./ops-developer.md). (In [how-we-use-agents.md](./how-we-use-agents.md) FAQ table, “stap 5” means executor; the **Rollen** list uses step 5 for Ops — both docs now cross-link.)
 
 The executor **does not** re-run risk logic; it only executes what the mediator already approved (`approved = true` and a `proposedOrder` in `decision_payload`).
 
@@ -37,9 +37,9 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 ## Worker: `POST /api/workers/executor-catalog-close`
 
-- **Auth:** same as other workers — QStash signature or `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`).  
+- **Auth:** `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`).  
 - **Body:** same shape as mediator/signal workers (`closeTimeIso`, `timeframe`, `quote`, `marketOffset`, …).  
-- **Trigger:** after the **last** `mediator-catalog-close` batch for a bar when `decisionsUpserted > 0`, unless `EXECUTOR_AFTER_MEDIATOR_DISABLE=1`. Without QStash, `enqueueExecutorCatalogCloseAfterMediator` runs an **inline drain**.
+- **Trigger:** after the **last** `mediator-catalog-close` batch for a bar when `decisionsUpserted > 0`, unless `EXECUTOR_AFTER_MEDIATOR_DISABLE=1`. `enqueueExecutorCatalogCloseAfterMediator` runs an **inline drain** with an `executor_catalog_close` `sync_runs` row.
 
 **Behaviour (v1):**
 

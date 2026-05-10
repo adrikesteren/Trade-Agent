@@ -7,7 +7,7 @@ export type RunRiskDailyResetResult = {
   rowsUpdated: number;
 };
 
-/** Reset `daily_pnl_eur` for all users (intended once per UTC day via QStash). Kill switch and other fields unchanged. */
+/** Reset `daily_pnl_eur` for all users (intended once per UTC day via scheduled worker). Kill switch and other fields unchanged. */
 export async function runRiskDailyReset(): Promise<RunRiskDailyResetResult> {
   const admin = createServiceRoleClient();
   const { count, error: cErr } = await admin

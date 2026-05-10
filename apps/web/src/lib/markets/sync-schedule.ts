@@ -9,7 +9,7 @@ function parseIntervalMs(envVal: string | undefined, fallback: number): number {
   return n;
 }
 
-/** Default 1h — aligns with QStash schedule `trade-agent-bitvavo-markets-eur` (override via env). */
+/** Default 1h for UI hints (override via env). */
 export function getMarketsSyncIntervalMs(): number {
   return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_MARKETS_SYNC_INTERVAL_MS, 3_600_000);
 }

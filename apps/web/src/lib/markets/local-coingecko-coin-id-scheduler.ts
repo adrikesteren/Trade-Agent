@@ -3,7 +3,7 @@ import "server-only";
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 
 /**
- * **Not imported by default** — use QStash schedules. Re-import from `layout`/`instrumentation` and set
+ * **Not imported by default** — use an external scheduler or re-import from `instrumentation` and set
  * `ENABLE_LOCAL_COINGECKO_COIN_ID_SYNC=1` to enable.
  *
  * Dev-only: every hour on the local wall-clock grid (aligned), fill `assets.coingecko_coin_id` when empty.

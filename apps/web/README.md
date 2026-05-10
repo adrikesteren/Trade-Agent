@@ -35,13 +35,13 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Hosting
 
-This monorepo is developed **localhost-first** (see repo root `.cursor/rules`). Run production however you prefer (Docker, PM2, your own server); worker routes use `CRON_SECRET` / QStash like any other Next host.
+This monorepo is developed **localhost-first** (see repo root `.cursor/rules`). Run production however you prefer (Docker, PM2, your own server); worker routes use `Authorization: Bearer ${CRON_SECRET}` on `GET`/`POST /api/workers/*`.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
 ## Signal agents (env)
 
-After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows, the app can enqueue `POST /api/workers/signals-catalog-close` so rule-based agents write rows to `trading.signals` (FK `signal_agent_id` → `trading.signal_agents`). See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
+After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows, the app runs the signals pipeline (including `POST /api/workers/signals-catalog-close` logic inline) so rule-based agents write rows to `trading.signals` (FK `signal_agent_id` → `trading.signal_agents`). See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -50,9 +50,9 @@ After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows,
 | `SIGNALS_AFTER_CANDLE_DISABLE` | Optional | Set to `1` to skip enqueueing signal runs after candle sync. |
 | `SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE` | Optional | Markets processed per worker invocation (default `40`). |
 | `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS` | Optional | Cap total markets across the whole run (default: all EUR Bitvavo markets). |
-| `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` | Optional | Max batches when QStash is **not** configured (dev drain loop, default `400`). |
+| `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` | Optional | Max market batches per in-process drain for signals/mediator/executor (default `400`). |
 
-When `APP_BASE_URL` (or `NEXT_PUBLIC_APP_URL`) **and** `QSTASH_TOKEN` are set, follow-up batches self-chain like the Bitvavo candle worker. Otherwise the enqueue step runs an **inline drain** loop in the same process (localhost-friendly; watch timeouts on large universes).
+After candles, signals → mediator → executor run **inline** in the same Node process (each stage records `automation.sync_runs`). Raise `SIGNALS_CATALOG_CLOSE_*` / `BITVAVO_CANDLES_SYNC_INLINE_*` if you hit timeouts on a large universe.
 
 Manual worker call (dev):
 
@@ -107,21 +107,18 @@ curl -sS -X POST "http://localhost:3000/api/workers/executor-catalog-close" ^
   -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
 ```
 
-## Ops / scheduler (QStash, Redis, alerts)
+## Ops / scheduler (Redis, alerts)
 
-Background jobs for **daily risk reset** and **live order reconciliation**, plus optional **Upstash Redis** and a **failure webhook**. See [docs/ops-developer.md](../../docs/ops-developer.md).
+Background jobs for **daily risk reset** and **live order reconciliation**, plus optional **Upstash Redis** and a **failure webhook**. Schedule them with any cron hitting the worker URLs (Bearer `CRON_SECRET`). See [docs/ops-developer.md](../../docs/ops-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
+| `CRON_SECRET` | Recommended | Bearer secret for `GET`/`POST /api/workers/*`. |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional | Distributed lock for `bitvavo-reconcile` (`@repo/redis`). If unset, reconcile still runs without a lock. |
 | `OPS_ALERT_WEBHOOK_URL` | Optional | `POST` JSON on hard failures (e.g. candle/markets sync throws, risk reset throws, reconcile throws). |
 | `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts a `text` message when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
 | `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
 | `BITVAVO_RECONCILE_LOCK_TTL_MS` | Optional | Redis lock TTL for reconcile (default 9 minutes). |
-| `QSTASH_CRON_RISK_DAILY_RESET` | Optional | UTC cron for `risk-daily-reset` (script default `0 0 * * *`). |
-| `QSTASH_CRON_BITVAVO_RECONCILE` | Optional | UTC cron for reconcile (defaults to `QSTASH_DEFAULT_CRON` / five-minute cron). |
-
-Managed schedules (including the two above): from `apps/web` run `pnpm qstash:schedules` (requires `QSTASH_TOKEN` and public **https** `APP_BASE_URL` / `NEXT_PUBLIC_APP_URL`).
 
 Manual worker calls (dev):
 

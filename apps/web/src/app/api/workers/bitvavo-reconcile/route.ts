@@ -5,7 +5,7 @@ import { runBitvavoReconcile } from "@/lib/ops/run-bitvavo-reconcile";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 /**
- * POST: QStash signed callback or `Authorization: Bearer CRON_SECRET`.
+ * POST: `Authorization: Bearer CRON_SECRET`.
  * Syncs non-terminal live Bitvavo orders with the exchange (Redis lock when configured).
  */
 export async function POST(request: Request) {
@@ -13,8 +13,8 @@ export async function POST(request: Request) {
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash signing keys + APP_BASE_URL, or ALLOW_INSECURE_QSTASH=1 for local."
-        : "Invalid or missing QStash signature or Bearer CRON_SECRET.";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing Authorization: Bearer CRON_SECRET.";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 

@@ -1,12 +1,10 @@
 import "server-only";
 
-import { Client } from "@upstash/qstash";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 import { enqueueMediatorCatalogCloseAfterSignals } from "@/lib/mediator/enqueue-mediator-catalog-close";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
@@ -21,6 +19,8 @@ export type SignalsCatalogCloseBody = {
   marketOffset?: number;
   marketBatchSize?: number;
   candleSyncRunId?: string | null;
+  /** `automation.sync_runs.id` for this signals_catalog_close job (set by the sync-run orchestrator). */
+  signalsSyncRunId?: string | null;
 };
 
 export type RunSignalsCatalogCloseResult = {
@@ -90,11 +90,7 @@ async function fetchCandlesForMarket(
   return (data ?? []) as CandleRow[];
 }
 
-export async function runSignalsCatalogClose(
-  body: SignalsCatalogCloseBody,
-  opts?: { allowQStashSelfQueue?: boolean },
-): Promise<RunSignalsCatalogCloseResult> {
-  const allowQStashSelfQueue = opts?.allowQStashSelfQueue !== false;
+export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Promise<RunSignalsCatalogCloseResult> {
   const admin = createServiceRoleClient();
   const timeframe = body.timeframe ?? CATALOG_STORAGE_TIMEFRAME;
   const quote = body.quote === undefined ? "EUR" : body.quote;
@@ -190,7 +186,7 @@ export async function runSignalsCatalogClose(
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, configuredUserIds);
   if (!signalUserIds.length && configuredUserIds.length > 0) {
     console.warn(
-      "[signals-catalog-close] SIGNAL_DEFAULT_USER_ID / SIGNAL_USER_IDS: none of the configured UUIDs exist in this project's auth.users (local vs prod .env?). Skipping signal upserts for this batch; QStash continuation still advances.",
+      "[signals-catalog-close] SIGNAL_DEFAULT_USER_ID / SIGNAL_USER_IDS: none of the configured UUIDs exist in this project's auth.users (local vs prod .env?). Skipping signal upserts for this batch; remaining market batches still advance.",
     );
   }
 
@@ -237,6 +233,7 @@ export async function runSignalsCatalogClose(
               market_symbol: m.market_symbol,
               agent_id: agent.agent_id,
               ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
+              ...(body.signalsSyncRunId ? { signalsSyncRunId: body.signalsSyncRunId } : {}),
             },
           };
 
@@ -253,30 +250,6 @@ export async function runSignalsCatalogClose(
   const nextOffset = marketOffset + rows.length;
   const nextMarketOffset = nextOffset < effectiveTotal ? nextOffset : null;
 
-  const base = workerPublicBaseUrl();
-  const token = process.env.QSTASH_TOKEN;
-  if (nextMarketOffset != null && allowQStashSelfQueue && base && token) {
-    const client = new Client({ token });
-    try {
-      await client.publishJSON({
-        url: `${base}/api/workers/signals-catalog-close`,
-        body: {
-          closeTimeIso,
-          timeframe,
-          quote,
-          marketOffset: nextMarketOffset,
-          marketBatchSize,
-          candleSyncRunId: body.candleSyncRunId ?? undefined,
-        },
-        retries: 3,
-      });
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e);
-      console.error("[signals-catalog-close] QStash continuation publish failed:", detail);
-      throw new Error(`signals-catalog-close: QStash continuation publish failed: ${detail}`);
-    }
-  }
-
   if (
     nextMarketOffset == null &&
     rows.length > 0 &&
@@ -289,6 +262,7 @@ export async function runSignalsCatalogClose(
         closeTimeIso,
         timeframe,
         candleSyncRunId: body.candleSyncRunId ?? null,
+        signalsSyncRunId: body.signalsSyncRunId ?? null,
       });
     } catch (e) {
       console.error("enqueueMediatorCatalogCloseAfterSignals failed:", e);
@@ -307,9 +281,7 @@ export async function runSignalsCatalogClose(
   };
 }
 
-/**
- * When QStash is not configured, process remaining market batches in-process (dev / local).
- */
+/** Process all market batches in-process for one catalog bar close. */
 export async function runSignalsCatalogCloseDrain(body: SignalsCatalogCloseBody): Promise<RunSignalsCatalogCloseResult> {
   let offset = body.marketOffset ?? 0;
   let totalSignals = 0;
@@ -320,7 +292,7 @@ export async function runSignalsCatalogCloseDrain(body: SignalsCatalogCloseBody)
 
   let marketsSum = 0;
   for (let i = 0; i < cap; i++) {
-    last = await runSignalsCatalogClose({ ...body, marketOffset: offset }, { allowQStashSelfQueue: false });
+    last = await runSignalsCatalogClose({ ...body, marketOffset: offset });
     totalMarkets = last.totalMarkets;
     totalSignals += last.signalsUpserted;
     marketsSum += last.marketsProcessed;

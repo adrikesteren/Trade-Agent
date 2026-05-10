@@ -1,6 +1,5 @@
 import "server-only";
 
-import { Client } from "@upstash/qstash";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
@@ -26,7 +25,6 @@ import {
   tradeBuyDebitEur,
 } from "@/lib/trading/executor-wallet";
 import { sendTradeFillSlack } from "@/lib/ops/send-trade-fill-slack";
-import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
 
@@ -37,6 +35,10 @@ export type ExecutorCatalogCloseBody = {
   marketOffset?: number;
   marketBatchSize?: number;
   candleSyncRunId?: string | null;
+  signalsSyncRunId?: string | null;
+  mediatorSyncRunId?: string | null;
+  /** `automation.sync_runs.id` for this executor_catalog_close job (set by the sync-run orchestrator). */
+  executorPipelineSyncRunId?: string | null;
 };
 
 export type RunExecutorCatalogCloseResult = {
@@ -179,11 +181,7 @@ async function upsertPositionAfterBuy(
   if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
 }
 
-export async function runExecutorCatalogClose(
-  body: ExecutorCatalogCloseBody,
-  opts?: { allowQStashSelfQueue?: boolean },
-): Promise<RunExecutorCatalogCloseResult> {
-  const allowQStashSelfQueue = opts?.allowQStashSelfQueue !== false;
+export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): Promise<RunExecutorCatalogCloseResult> {
   const admin = createServiceRoleClient();
   const timeframe = body.timeframe ?? CATALOG_STORAGE_TIMEFRAME;
   const quote = body.quote === undefined ? "EUR" : body.quote;
@@ -551,24 +549,6 @@ export async function runExecutorCatalogClose(
   const nextOffset = marketOffset + rows.length;
   const nextMarketOffset = nextOffset < effectiveTotal ? nextOffset : null;
 
-  const base = workerPublicBaseUrl();
-  const token = process.env.QSTASH_TOKEN;
-  if (nextMarketOffset != null && allowQStashSelfQueue && base && token) {
-    const client = new Client({ token });
-    await client.publishJSON({
-      url: `${base}/api/workers/executor-catalog-close`,
-      body: {
-        closeTimeIso,
-        timeframe,
-        quote,
-        marketOffset: nextMarketOffset,
-        marketBatchSize: marketBatchSizeVal,
-        candleSyncRunId: body.candleSyncRunId ?? undefined,
-      },
-      retries: 3,
-    });
-  }
-
   return {
     ok: true,
     marketsProcessed: rows.length,
@@ -588,7 +568,7 @@ export async function runExecutorCatalogCloseDrain(body: ExecutorCatalogCloseBod
 
   let marketsSum = 0;
   for (let i = 0; i < cap; i++) {
-    last = await runExecutorCatalogClose({ ...body, marketOffset: offset }, { allowQStashSelfQueue: false });
+    last = await runExecutorCatalogClose({ ...body, marketOffset: offset });
     totalMarkets = last.totalMarkets;
     totalOrders += last.ordersInserted;
     marketsSum += last.marketsProcessed;

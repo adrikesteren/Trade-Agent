@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { runMediatorCatalogClose, type MediatorCatalogCloseBody } from "@/lib/mediator/run-mediator-catalog-close";
+import { executeMediatorCatalogCloseWithSyncRun } from "@/lib/mediator/run-mediator-catalog-close-with-sync-run";
+import type { MediatorCatalogCloseBody } from "@/lib/mediator/run-mediator-catalog-close";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): MediatorCatalogCloseBody | null {
@@ -17,6 +18,8 @@ function parseBody(raw: string): MediatorCatalogCloseBody | null {
       marketBatchSize: typeof o.marketBatchSize === "number" ? o.marketBatchSize : undefined,
       candleSyncRunId:
         typeof o.candleSyncRunId === "string" || o.candleSyncRunId === null ? (o.candleSyncRunId as string | null) : undefined,
+      signalsSyncRunId:
+        typeof o.signalsSyncRunId === "string" || o.signalsSyncRunId === null ? (o.signalsSyncRunId as string | null) : undefined,
     };
   } catch {
     return null;
@@ -24,16 +27,15 @@ function parseBody(raw: string): MediatorCatalogCloseBody | null {
 }
 
 /**
- * POST: QStash signed callback or `Authorization: Bearer CRON_SECRET` (manual).
- * Aggregates `trading.signals` + position + risk → upsert `trading.trade_decisions` per user/market/bar.
+ * POST: Bearer CRON_SECRET. Full mediator pass (`automation.sync_runs` job `mediator_catalog_close`).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash signing keys + APP_BASE_URL, or ALLOW_INSECURE_QSTASH=1 for local."
-        : "Invalid or missing QStash signature or Bearer CRON_SECRET.";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing Authorization: Bearer CRON_SECRET.";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
@@ -43,8 +45,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runMediatorCatalogClose(parsed);
-    return NextResponse.json(result);
+    const out = await executeMediatorCatalogCloseWithSyncRun(parsed, "manual");
+    if (out.kind === "skipped_overlap") {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        syncRunId: out.runId,
+        hint: "Another mediator_catalog_close run is already in progress.",
+      });
+    }
+    return NextResponse.json({ ...out.result, syncRunId: out.runId });
   } catch (e) {
     const message = e instanceof Error ? e.message : "mediator run failed";
     return NextResponse.json({ error: message }, { status: 500 });

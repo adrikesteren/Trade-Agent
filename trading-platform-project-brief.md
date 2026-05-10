@@ -31,7 +31,7 @@ Build a **trading automation platform** (starting with **paper trading**) where 
 3. **Event model (candle-close first)**
   - Prefer decisions on **closed candles** (indicators stable), not every tick.
   - Internal event: `CANDLE_CLOSED(exchange, symbol, timeframe, closeTime)`.
-  - Implementation can be **websocket** (detect `isClosed`) + **polling fallback** + **QStash** schedules for heartbeat/reconciliation.
+  - Implementation can be **websocket** (detect `isClosed`) + **polling fallback** + scheduled **worker HTTP** calls for heartbeat/reconciliation.
 4. **Background execution**
   - Trading loop runs in **headless workers** (containers/VPS/cron + queue), **not** dependent on a browser tab.
   - Next.js is for **dashboard, config, audit UI**; workers do ingestion, signals, mediation, execution.
@@ -50,7 +50,7 @@ Build a **trading automation platform** (starting with **paper trading**) where 
 | Mobile (optional phase)     | **Expo**           | Companion app: alerts, approvals, read-only portfolio                                       |
 | Database / auth / realtime  | **Supabase**       | Postgres schema, RLS where appropriate, auth if needed, optional realtime for UI            |
 | Cache / rate limits / locks | **Upstash Redis**  | Idempotency keys, distributed locks, short-lived state, rate limit counters                 |
-| Jobs / schedules / webhooks | **Upstash QStash** | Durable scheduling, retries, worker triggers (candle jobs, reconciliation, nightly rollups) |
+| Jobs / schedules / webhooks | **HTTP workers + host cron** | Same-process or OS-scheduled `GET`/`POST /api/workers/*` with `CRON_SECRET` (candle jobs, reconciliation, nightly rollups) |
 
 
 ---
@@ -76,9 +76,9 @@ Conceptual entities (names can vary):
 2. **Signal worker(s)** — compute indicators / LLM-assisted research optional later; write `signals`.
 3. **Mediator worker** — read latest signals + risk; write `trade_decisions`.
 4. **Executor worker** — place paper or live orders via Bitvavo adapter; update `orders`/`fills`.
-5. **Reconciliation job** — periodic sync with exchange truth (QStash + Redis lock).
+5. **Reconciliation job** — periodic sync with exchange truth (scheduled worker + Redis lock).
 
-Use **Redis** for: locks (`mediator:symbol:timeframe`), dedupe keys, rate limits. Use **QStash** for: scheduled ticks, retries, webhook delivery to workers.
+Use **Redis** for: locks (`mediator:symbol:timeframe`), dedupe keys, rate limits. Use **your scheduler** for: periodic worker ticks; workers run inline in Next unless you wrap them externally.
 
 ---
 

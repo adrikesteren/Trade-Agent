@@ -24,11 +24,11 @@ The web app uses the **anon key** with the user session. **Row Level Security (R
 
 ## Workers and API routes (`SUPABASE_SERVICE_ROLE_KEY`)
 
-Background jobs (QStash → `/api/workers/*`) use `createServiceRoleClient()` with the **service role** key. That client **bypasses RLS**.
+Background jobs (`/api/workers/*`, Bearer `CRON_SECRET`) use `createServiceRoleClient()` with the **service role** key. That client **bypasses RLS**.
 
 **Rule:** every worker handler must:
 
-1. Authenticate the **caller** (e.g. verify QStash signature on the request).
+1. Authenticate the **caller** (e.g. `Authorization: Bearer CRON_SECRET` on the request).
 2. Treat `userId` / `connectorId` in the job payload as trusted **only after** that caller check.
 3. Scope every query and mutation with those IDs (never take `user_id` from unsigned client input).
 

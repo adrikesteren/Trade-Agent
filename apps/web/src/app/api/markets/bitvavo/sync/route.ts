@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "markets_sync_manual_only",
-        hint: "Open Sync runs → Sync now, or POST with ?source=manual. Automated runs use QStash /api/workers/bitvavo-markets-sync.",
+        hint: "Open Sync runs → Sync now, or POST with ?source=manual. Automated runs use GET/POST /api/workers/bitvavo-markets-sync with CRON_SECRET.",
       },
       { status: 400 },
     );

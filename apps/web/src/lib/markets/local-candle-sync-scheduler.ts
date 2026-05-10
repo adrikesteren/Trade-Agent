@@ -3,7 +3,7 @@ import "server-only";
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 
 /**
- * **Not imported by default** — production and local dev use QStash schedules (`pnpm qstash:schedules`).
+ * **Not imported by default** — use an external scheduler calling the worker routes with `CRON_SECRET`.
  * To use this again, import this module from `app/layout.tsx` or `instrumentation.ts` and set
  * `ENABLE_LOCAL_CANDLE_AUTO_SYNC=1` (development only).
  *

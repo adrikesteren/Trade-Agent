@@ -58,6 +58,12 @@ export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
 export const COINGECKO_SYNC_JOB_METRICS = "coingecko_assets_usd_live";
 /** Fills `assets.coingecko_coin_id` from `metadata.coingecko_id` or CoinGecko /search when empty (e.g. every 5 min). */
 export const COINGECKO_SYNC_JOB_COIN_ID = "coingecko_asset_coin_id";
+/** `automation.sync_runs.job_key` — catalog-close signal evaluation pass. */
+export const SYNC_JOB_SIGNALS_CATALOG_CLOSE = "signals_catalog_close" as const;
+/** `automation.sync_runs.job_key` — mediator pass for one catalog bar close. */
+export const SYNC_JOB_MEDIATOR_CATALOG_CLOSE = "mediator_catalog_close" as const;
+/** `automation.sync_runs.job_key` — executor pass for one catalog bar close. */
+export const SYNC_JOB_EXECUTOR_CATALOG_CLOSE = "executor_catalog_close" as const;
 export type BitvavoSyncTriggerSource = "manual" | "automated";
 export type BitvavoSyncJobStatus = "running" | "completed" | "failed" | "skipped";
 
@@ -68,7 +74,7 @@ export type BeginBitvavoSyncRunResult =
   | { outcome: "started"; runId: string }
   | { outcome: "skipped"; runId: string };
 
-/** Latest still-running row for a job (e.g. QStash continuation missing syncRunId). */
+/** Latest still-running row for a job (e.g. HTTP chunk continuation missing syncRunId). */
 export async function resolveLatestRunningBitvavoRunId(
   admin: SupabaseClient,
   jobKey: string,
@@ -121,7 +127,7 @@ type StaleRunRow = {
 
 /**
  * If a `running` row exceeds the configured wall time since `created_at` (default 10 minutes), mark it `failed`.
- * - With `runId`: only that row (for QStash continuations).
+ * - With `runId`: only that row (for explicit run id).
  * - Without `runId`: the single `running` row for `job_key` if stale (before starting a new run).
  *
  * Returns the run id that was timed out, or null.

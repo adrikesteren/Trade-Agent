@@ -70,14 +70,14 @@ Kort overzicht van uitkomsten (niet exhaustief):
 - Zonder `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` worden geen beslissingen geschreven (zelfde users als signalen).
 - Na de **laatste batch** van `mediator-catalog-close` met `decisionsUpserted > 0` start de **executor** (`POST /api/workers/executor-catalog-close`), tenzij `EXECUTOR_AFTER_MEDIATOR_DISABLE=1`. Zie [executor-developer.md](./executor-developer.md).
 
-Zelfde **batch + QStash self-chain** als signalen: `[apps/web/src/lib/mediator/run-mediator-catalog-close.ts](../apps/web/src/lib/mediator/run-mediator-catalog-close.ts)`. Zonder QStash + `APP_BASE_URL` draait een **inline drain** in hetzelfde proces (localhost-vriendelijk; let op timeouts bij grote universums).
+Zelfde **batch + inline drain** als signalen: `[apps/web/src/lib/mediator/run-mediator-catalog-close.ts](../apps/web/src/lib/mediator/run-mediator-catalog-close.ts)` verwerkt alle markten in hetzelfde proces (let op timeouts bij grote universums; zie `SIGNALS_CATALOG_CLOSE_*` env).
 
 ---
 
 ## Worker: `POST /api/workers/mediator-catalog-close`
 
-- **Auth:** QStash-handtekening **of** `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`), zie andere workers.
-- **Body (JSON):** `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`
+- **Auth:** `Authorization: Bearer ${CRON_SECRET}` (`verifyScheduledWorker`).
+- **Body (JSON):** `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string, "signalsSyncRunId"?: string }` (sync-run ids zijn optioneel; de worker start desnoods een nieuwe `mediator_catalog_close` run).
 - **Gedrag:** voor elke markt in de batch, elke geconfigureerde `user_id`, en elke **enabled executor** van die gebruiker (asset-filter toegepast): signalen ophalen → `risk_state` voor die executor → positie op dat executor-boek → rails/notional van die executor-rij → `evaluateTradeDecision` → upsert `trading.trade_decisions`.
 
 Implementatie-entrypoints:

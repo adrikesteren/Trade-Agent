@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 /**
  * Full EUR candle sweep (same engine as POST /api/workers/bitvavo-candles-sync): multi-chunk in one
- * request when possible, then QStash chain if configured. Requires logged-in user.
+ * request when possible (full sweep runs inline in the worker). Requires logged-in user.
  */
 export async function POST(request: Request) {
   const supabaseUser = await createClient();
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "eur_candles_sweep_manual_only",
-        hint: "POST with ?source=manual from Sync runs, or use the worker with CRON_SECRET / QStash.",
+        hint: "POST with ?source=manual from Sync runs, or use GET/POST /api/workers/bitvavo-candles-sync with CRON_SECRET.",
       },
       { status: 400 },
     );
