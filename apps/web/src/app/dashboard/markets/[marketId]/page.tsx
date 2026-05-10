@@ -156,6 +156,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
       }
       content={
         <RecordDetailTabs
+          defaultTab="details"
           details={
             <div className="bk-stack bk-stack_gap-md">
               <RecordDetailCard>

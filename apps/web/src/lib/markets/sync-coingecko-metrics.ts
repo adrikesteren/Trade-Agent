@@ -18,7 +18,10 @@ type AssetRow = { id: string; code: string; coingecko_coin_id: string | null };
 /** Patches catalog `assets` with live CoinGecko /coins/markets fields (one row per asset, overwritten each sync). */
 function marketRowToAssetPatch(row: CoinGeckoMarketRow) {
   const now = new Date().toISOString();
+  const displayName =
+    typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : null;
   return {
+    ...(displayName != null ? { name: displayName } : {}),
     coingecko_fetched_at: now,
     coingecko_coin_id: row.id,
     coingecko_price_usd: row.current_price,

@@ -1,17 +1,12 @@
-import {
-  AssetCoingeckoMetricsBlock,
-  AssetCoingeckoMetricsNoSnapshot,
-  AssetCoingeckoMetricsPlaceholder,
-  buildAssetCoingeckoMetricsRow,
-  type AssetLiveCoingeckoDb,
-} from "@/components/asset-coingecko-metrics-block";
+import { AssetCoingeckoHeaderActions } from "@/app/dashboard/assets/[assetId]/asset-set-coingecko-id-dialog";
+import { AssetCoingeckoDetailOutputs } from "@/components/asset-coingecko-detail-outputs";
+import { type AssetLiveCoingeckoDb } from "@/components/asset-coingecko-metrics-block";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Alert,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -70,7 +65,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
       : {};
   const coingeckoIdHint = typeof meta.coingecko_id === "string" ? meta.coingecko_id : null;
 
-  const cgRow = isCrypto ? buildAssetCoingeckoMetricsRow(asset as AssetLiveCoingeckoDb, coingeckoIdHint) : null;
+  const assetLive = asset as AssetLiveCoingeckoDb;
   const marketRows = markets ?? [];
   const pairCount = typeof marketCount === "number" ? marketCount : marketRows.length;
 
@@ -99,45 +94,41 @@ export default async function AssetDetailPage({ params }: PageProps) {
           }
           subtitle="Catalog base instrument. Linked markets use this asset as the tradable base."
           meta={`id: ${asset.id}`}
+          actions={
+            isCrypto ? <AssetCoingeckoHeaderActions assetId={asset.id} coingeckoCoinId={assetLive.coingecko_coin_id} /> : null
+          }
         />
       }
       content={
         <RecordDetailTabs
+          defaultTab="details"
           details={
-            <div className="bk-stack bk-stack_gap-md">
-              {isCrypto && coingeckoIdHint ? (
-                <Alert tone="info" className="text-xs">
-                  <span className="bk-form-label" style={{ display: "inline" }}>
-                    CoinGecko id (catalog)
-                  </span>
-                  : <span className="font-mono">{coingeckoIdHint}</span>
-                </Alert>
-              ) : null}
-
-              {isCrypto && cgRow ? (
-                <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} localePrefs={prefs} />
-              ) : isCrypto ? (
-                <AssetCoingeckoMetricsNoSnapshot
-                  assetCode={asset.code}
-                  resolvedCoingeckoId={coingeckoIdHint}
-                  localePrefs={prefs}
-                />
-              ) : (
-                <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
-              )}
-
-              <RecordDetailCard>
-                <RecordDetailSection title="Details">
-                  <RecordDetailGrid>
-                    <Output label="Record ID" type="text" value={asset.id} span="full" />
-                    <Output label="Code" type="text" value={asset.code} />
-                    <Output label="Kind" type="text" value={asset.kind} />
-                    <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
-                    <Output label="Created" type="datetime" value={asset.created_at} formatDatetime={formatDt} />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
-            </div>
+            <RecordDetailCard>
+              <RecordDetailSection title="Details">
+                <RecordDetailGrid>
+                  <Output label="Record ID" type="text" value={asset.id} span="full" />
+                  <Output label="Code" type="text" value={asset.code} />
+                  <Output label="Kind" type="text" value={asset.kind} />
+                  <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
+                  {isCrypto ? (
+                    <AssetCoingeckoDetailOutputs
+                      asset={assetLive}
+                      metadataCoingeckoId={coingeckoIdHint}
+                      localePrefs={prefs}
+                      formatDt={formatDt}
+                    />
+                  ) : (
+                    <Output
+                      label="CoinGecko"
+                      type="text"
+                      value="Live USD fields are only collected for crypto assets in the catalog."
+                      span="full"
+                    />
+                  )}
+                  <Output label="Created" type="datetime" value={asset.created_at} formatDatetime={formatDt} />
+                </RecordDetailGrid>
+              </RecordDetailSection>
+            </RecordDetailCard>
           }
           related={
             <RecordDetailCard>

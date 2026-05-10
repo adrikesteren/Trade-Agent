@@ -11,7 +11,8 @@ export type BitvavoMarketRow = {
 };
 
 /**
- * Fetches Bitvavo /v2/markets and upserts `assets` + `markets` for the Bitvavo exchange.
+ * Fetches Bitvavo /v2/markets and upserts `markets` for the Bitvavo exchange.
+ * Inserts **new** `catalog.assets` rows only (`kind`+`code`); never updates existing assets (names/metrics stay as-is).
  * @param quoteFilter e.g. "EUR" — only markets with this quote (reduces row count for UI).
  */
 export async function syncBitvavoMarkets(
@@ -45,18 +46,39 @@ export async function syncBitvavoMarkets(
 
   const uniqueBases = [...new Set(filtered.map((m) => m.base.toUpperCase()))];
 
-  const assetRows = uniqueBases.map((code) => ({
-    kind: "crypto" as const,
-    code,
-    name: code,
-    metadata: {},
-  }));
+  const { data: existingAssets, error: existingErr } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("code")
+    .eq("kind", "crypto")
+    .in("code", uniqueBases);
 
-  const { error: assetsErr } = await supabase.schema("catalog").from("assets").upsert(assetRows, {
-    onConflict: "kind,code",
-  });
-  if (assetsErr) {
-    throw new Error(assetsErr.message);
+  if (existingErr) {
+    throw new Error(existingErr.message);
+  }
+
+  const existingCodes = new Set(
+    (existingAssets ?? []).map((a) => String(a.code).toUpperCase()),
+  );
+
+  const newBases = uniqueBases.filter((code) => !existingCodes.has(code));
+
+  let insertedAssets = 0;
+  if (newBases.length > 0) {
+    const assetRows = newBases.map((code) => ({
+      kind: "crypto" as const,
+      code,
+      name: code,
+      metadata: {},
+    }));
+
+    const { error: assetsErr } = await supabase.schema("catalog").from("assets").upsert(assetRows, {
+      onConflict: "kind,code",
+    });
+    if (assetsErr) {
+      throw new Error(assetsErr.message);
+    }
+    insertedAssets = newBases.length;
   }
 
   const { data: assetRowsDb, error: selErr } = await supabase
@@ -107,7 +129,8 @@ export async function syncBitvavoMarkets(
   }
 
   return {
-    upsertedAssets: uniqueBases.length,
+    /** New `catalog.assets` rows inserted this run; existing assets are never updated by Bitvavo sync. */
+    upsertedAssets: insertedAssets,
     upsertedListings: listingRows.length,
   };
 }
