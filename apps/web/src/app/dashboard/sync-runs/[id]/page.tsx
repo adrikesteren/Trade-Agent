@@ -2,12 +2,12 @@ import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-
 import { createClient } from "@/lib/supabase/server";
 import {
   Breadcrumbs,
+  DetailPageLayout,
   ListViewObjectIcon,
   Output,
   PageHeader,
   RecordDetailCard,
   RecordDetailGrid,
-  RecordDetailLayout,
   RecordDetailSection,
 } from "@repo/blocks";
 import { notFound } from "next/navigation";
@@ -57,42 +57,47 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
   const showReason = (run.status === "failed" || run.status === "skipped") && run.reason;
 
   return (
-    <RecordDetailLayout className="bk-container bk-stack bk-stack_gap-md px-1" style={{ maxWidth: "48rem" }}>
-      <PageHeader
-        variant="detail"
-        icon={<ListViewObjectIcon letter="S" />}
-        breadcrumb={<Breadcrumbs items={[{ label: "Sync runs", href: "/dashboard/sync-runs" }, { label: "Detail" }]} />}
-        back={{ href: "/dashboard/sync-runs", label: "← All sync runs" }}
-        eyebrow="Sync run"
-        title={run.job_key}
-        titleClassName="font-mono"
-        highlights={
-          <>
-            <Output label="Status" type="text" value={run.status} />
-            <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
-          </>
-        }
-        meta={run.id}
-      />
+    <DetailPageLayout
+      className="bk-container px-1"
+      style={{ maxWidth: "48rem" }}
+      header={
+        <PageHeader
+          variant="detail"
+          icon={<ListViewObjectIcon letter="S" />}
+          breadcrumb={<Breadcrumbs items={[{ label: "Sync runs", href: "/dashboard/sync-runs" }, { label: "Detail" }]} />}
+          back={{ href: "/dashboard/sync-runs", label: "← All sync runs" }}
+          eyebrow="Sync run"
+          title={run.job_key}
+          titleClassName="font-mono"
+          highlights={
+            <>
+              <Output label="Status" type="text" value={run.status} />
+              <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
+            </>
+          }
+          meta={run.id}
+        />
+      }
+      content={
+        <RecordDetailCard>
+          <RecordDetailSection title="Details">
+            <RecordDetailGrid>
+              <Output label="Run ID" type="text" value={run.id} span="full" />
+              <Output label="Job" type="text" value={run.job_key} span="full" />
+              <Output label="Status" type="text" value={run.status} />
+              <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
+              <Output label="Started" type="datetime" value={run.created_at} />
+              <Output label="Ended" type="datetime" value={run.ended_at} />
+              <Output label="Updated" type="datetime" value={run.updated_at} />
+              {showReason ? <Output label="Reason" type="text" value={run.reason} span="full" /> : null}
+            </RecordDetailGrid>
+          </RecordDetailSection>
 
-      <RecordDetailCard>
-        <RecordDetailSection title="Details">
-          <RecordDetailGrid>
-            <Output label="Run ID" type="text" value={run.id} span="full" />
-            <Output label="Job" type="text" value={run.job_key} span="full" />
-            <Output label="Status" type="text" value={run.status} />
-            <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
-            <Output label="Started" type="datetime" value={run.created_at} />
-            <Output label="Ended" type="datetime" value={run.ended_at} />
-            <Output label="Updated" type="datetime" value={run.updated_at} />
-            {showReason ? <Output label="Reason" type="text" value={run.reason} span="full" /> : null}
-          </RecordDetailGrid>
-        </RecordDetailSection>
-
-        <RecordDetailSection title="Metadata">
-          <pre className="bk-pre">{metadataJson}</pre>
-        </RecordDetailSection>
-      </RecordDetailCard>
-    </RecordDetailLayout>
+          <RecordDetailSection title="Metadata">
+            <pre className="bk-pre">{metadataJson}</pre>
+          </RecordDetailSection>
+        </RecordDetailCard>
+      }
+    />
   );
 }

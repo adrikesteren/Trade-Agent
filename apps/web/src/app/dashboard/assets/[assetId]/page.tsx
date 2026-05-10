@@ -9,12 +9,12 @@ import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
   Breadcrumbs,
+  DetailPageLayout,
   ListViewObjectIcon,
   Output,
   PageHeader,
   RecordDetailCard,
   RecordDetailGrid,
-  RecordDetailLayout,
   RecordDetailSection,
 } from "@repo/blocks";
 import Link from "next/link";
@@ -67,96 +67,103 @@ export default async function AssetDetailPage({ params }: PageProps) {
   const pairCount = (markets ?? []).length;
 
   return (
-    <RecordDetailLayout className="bk-container bk-stack bk-stack_gap-md px-1" style={{ maxWidth: "48rem" }}>
-      <PageHeader
-        variant="detail"
-        icon={<ListViewObjectIcon letter="A" />}
-        breadcrumb={<Breadcrumbs items={[{ label: "Assets", href: "/dashboard/assets" }, { label: "Detail" }]} />}
-        back={{ href: "/dashboard/assets", label: "← All assets" }}
-        eyebrow="Asset"
-        title={
-          <>
-            {asset.name ?? asset.code}{" "}
-            <span className="font-mono bk-text-muted" style={{ fontSize: "1.125rem", fontWeight: 500 }}>
-              ({asset.code})
-            </span>
-          </>
-        }
-        highlights={
-          <>
-            <Output label="Code" type="text" value={asset.code} />
-            <Output label="Kind" type="text" value={asset.kind} />
-            <Output label="Pairs" type="number" value={pairCount} />
-          </>
-        }
-        subtitle="Catalog base instrument. Linked markets use this asset as the tradable base."
-        meta={`id: ${asset.id}`}
-      />
+    <DetailPageLayout
+      className="bk-container px-1"
+      style={{ maxWidth: "48rem" }}
+      header={
+        <PageHeader
+          variant="detail"
+          icon={<ListViewObjectIcon letter="A" />}
+          breadcrumb={<Breadcrumbs items={[{ label: "Assets", href: "/dashboard/assets" }, { label: "Detail" }]} />}
+          back={{ href: "/dashboard/assets", label: "← All assets" }}
+          eyebrow="Asset"
+          title={
+            <>
+              {asset.name ?? asset.code}{" "}
+              <span className="font-mono bk-text-muted" style={{ fontSize: "1.125rem", fontWeight: 500 }}>
+                ({asset.code})
+              </span>
+            </>
+          }
+          highlights={
+            <>
+              <Output label="Code" type="text" value={asset.code} />
+              <Output label="Kind" type="text" value={asset.kind} />
+              <Output label="Pairs" type="number" value={pairCount} />
+            </>
+          }
+          subtitle="Catalog base instrument. Linked markets use this asset as the tradable base."
+          meta={`id: ${asset.id}`}
+        />
+      }
+      content={
+        <div className="bk-stack bk-stack_gap-md">
+          {isCrypto && coingeckoIdHint ? (
+            <Alert tone="info" className="text-xs">
+              <span className="bk-form-label" style={{ display: "inline" }}>
+                CoinGecko id (catalog)
+              </span>
+              : <span className="font-mono">{coingeckoIdHint}</span>
+            </Alert>
+          ) : null}
 
-      {isCrypto && coingeckoIdHint ? (
-        <Alert tone="info" className="text-xs">
-          <span className="bk-form-label" style={{ display: "inline" }}>
-            CoinGecko id (catalog)
-          </span>
-          : <span className="font-mono">{coingeckoIdHint}</span>
-        </Alert>
-      ) : null}
+          {isCrypto && cgRow ? (
+            <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} />
+          ) : isCrypto ? (
+            <AssetCoingeckoMetricsNoSnapshot assetCode={asset.code} resolvedCoingeckoId={coingeckoIdHint} />
+          ) : (
+            <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
+          )}
 
-      {isCrypto && cgRow ? (
-        <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} />
-      ) : isCrypto ? (
-        <AssetCoingeckoMetricsNoSnapshot assetCode={asset.code} resolvedCoingeckoId={coingeckoIdHint} />
-      ) : (
-        <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
-      )}
+          <RecordDetailCard>
+            <RecordDetailSection title="Details">
+              <RecordDetailGrid>
+                <Output label="Record ID" type="text" value={asset.id} span="full" />
+                <Output label="Code" type="text" value={asset.code} />
+                <Output label="Kind" type="text" value={asset.kind} />
+                <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
+                <Output label="Created" type="datetime" value={asset.created_at} />
+              </RecordDetailGrid>
+            </RecordDetailSection>
 
-      <RecordDetailCard>
-        <RecordDetailSection title="Details">
-          <RecordDetailGrid>
-            <Output label="Record ID" type="text" value={asset.id} span="full" />
-            <Output label="Code" type="text" value={asset.code} />
-            <Output label="Kind" type="text" value={asset.kind} />
-            <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
-            <Output label="Created" type="datetime" value={asset.created_at} />
-          </RecordDetailGrid>
-        </RecordDetailSection>
-
-        <RecordDetailSection title="Markets (pairs)" description="Up to 100 listings that use this asset as base.">
-          <ul className="bk-list-divided">
-            {(markets ?? []).map((m) => {
-              const rawEx = m.exchanges as unknown;
-              const ex = (Array.isArray(rawEx) ? rawEx[0] : rawEx) as {
-                id?: string;
-                code?: string;
-                name?: string;
-              } | null;
-              return (
-                <li key={m.id} className="flex flex-wrap items-center justify-between gap-2" style={{ fontSize: "0.8125rem" }}>
-                  <Link href={`/dashboard/markets/${m.id}`} className="bk-link font-mono">
-                    {m.market_symbol}
-                  </Link>
-                  <div className="flex items-center gap-2 bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                    {ex?.id ? (
-                      <Link href={`/dashboard/exchanges/${ex.id}`} className="bk-link">
-                        {ex.code ?? "—"}
+            <RecordDetailSection title="Markets (pairs)" description="Up to 100 listings that use this asset as base.">
+              <ul className="bk-list-divided">
+                {(markets ?? []).map((m) => {
+                  const rawEx = m.exchanges as unknown;
+                  const ex = (Array.isArray(rawEx) ? rawEx[0] : rawEx) as {
+                    id?: string;
+                    code?: string;
+                    name?: string;
+                  } | null;
+                  return (
+                    <li key={m.id} className="flex flex-wrap items-center justify-between gap-2" style={{ fontSize: "0.8125rem" }}>
+                      <Link href={`/dashboard/markets/${m.id}`} className="bk-link font-mono">
+                        {m.market_symbol}
                       </Link>
-                    ) : (
-                      <span>{ex?.code ?? "—"}</span>
-                    )}
-                    <span>·</span>
-                    <span>{m.status}</span>
-                  </div>
-                </li>
-              );
-            })}
-            {!markets?.length ? (
-              <li className="bk-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
-                No market listings linked yet.
-              </li>
-            ) : null}
-          </ul>
-        </RecordDetailSection>
-      </RecordDetailCard>
-    </RecordDetailLayout>
+                      <div className="flex items-center gap-2 bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                        {ex?.id ? (
+                          <Link href={`/dashboard/exchanges/${ex.id}`} className="bk-link">
+                            {ex.code ?? "—"}
+                          </Link>
+                        ) : (
+                          <span>{ex?.code ?? "—"}</span>
+                        )}
+                        <span>·</span>
+                        <span>{m.status}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+                {!markets?.length ? (
+                  <li className="bk-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
+                    No market listings linked yet.
+                  </li>
+                ) : null}
+              </ul>
+            </RecordDetailSection>
+          </RecordDetailCard>
+        </div>
+      }
+    />
   );
 }

@@ -9,6 +9,7 @@ import {
   Alert,
   Card,
   CardBody,
+  DetailPageLayout,
   Table,
   TableWrap,
   Td,
@@ -157,150 +158,158 @@ export default async function ExecutorDetailPage({ params }: { params: Promise<{
   }
 
   return (
-    <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <DashboardListViewHeader
-        eyebrow="Trading"
-        title={String(ex.name)}
-        iconLetter="E"
-        rowCount={orders.length}
-        sortLine="Executor portfolio"
-        actions={
-          <Link href="/dashboard/executors" className={listViewOutlineActionClass}>
-            All executors
-          </Link>
-        }
-      />
-      {ordErr ? <Alert tone="error">{ordErr.message}</Alert> : null}
-      {rsErr ? <Alert tone="error">{rsErr.message}</Alert> : null}
-      {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
+    <DetailPageLayout
+      className="bk-container bk-container_lg"
+      header={
+        <div className="bk-stack bk-stack_gap-md">
+          <DashboardListViewHeader
+            eyebrow="Trading"
+            title={String(ex.name)}
+            iconLetter="E"
+            rowCount={orders.length}
+            sortLine="Executor portfolio"
+            actions={
+              <Link href="/dashboard/executors" className={listViewOutlineActionClass}>
+                All executors
+              </Link>
+            }
+          />
+          {ordErr ? <Alert tone="error">{ordErr.message}</Alert> : null}
+          {rsErr ? <Alert tone="error">{rsErr.message}</Alert> : null}
+          {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
+        </div>
+      }
+      content={
+        <div className="bk-stack bk-stack_gap-md">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Balance (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtNum(rsRow?.equity_eur ?? 0, 2)}</p>
+                <p className="bk-text-muted mt-2 text-xs">
+                  Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
+                </p>
+                <p className="bk-text-muted mt-1 text-xs font-mono">
+                  Updated {rsRow?.updated_at ? String(rsRow.updated_at).slice(0, 19).replace("T", " ") + " UTC" : "—"}
+                </p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtNum(pnl.filledBuyNotionalEur, 2)}</p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
+                <p className="mt-1 font-mono text-lg">{fmtNum(pnl.openCostBasisEur, 2)}</p>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
+                <p className="mt-1 font-mono text-lg">
+                  {pnl.unrealizedEur == null ? "—" : fmtNum(pnl.unrealizedEur, 2)}
+                </p>
+                <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
+              </CardBody>
+            </Card>
+          </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Card>
-          <CardBody>
-            <p className="bk-text-muted text-xs">Balance (EUR)</p>
-            <p className="mt-1 font-mono text-lg">{fmtNum(rsRow?.equity_eur ?? 0, 2)}</p>
-            <p className="bk-text-muted mt-2 text-xs">
-              Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
-            </p>
-            <p className="bk-text-muted mt-1 text-xs font-mono">
-              Updated {rsRow?.updated_at ? String(rsRow.updated_at).slice(0, 19).replace("T", " ") + " UTC" : "—"}
-            </p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
-            <p className="mt-1 font-mono text-lg">{fmtNum(pnl.filledBuyNotionalEur, 2)}</p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
-            <p className="mt-1 font-mono text-lg">{fmtNum(pnl.openCostBasisEur, 2)}</p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
-            <p className="mt-1 font-mono text-lg">
-              {pnl.unrealizedEur == null ? "—" : fmtNum(pnl.unrealizedEur, 2)}
-            </p>
-            <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
-          </CardBody>
-        </Card>
-      </div>
+          <Card>
+            <CardBody className="bk-stack bk-stack_gap-md">
+              <p className="bk-text-muted text-sm">Balance & transfers</p>
+              <ExecutorBalancePanel executorId={id} />
+            </CardBody>
+          </Card>
 
-      <Card>
-        <CardBody className="bk-stack bk-stack_gap-md">
-          <p className="bk-text-muted text-sm">Balance & transfers</p>
-          <ExecutorBalancePanel executorId={id} />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardBody className="!pt-0">
-          <p className="bk-text-muted mb-2 text-sm">Activity (ledger)</p>
-          <TableWrap>
-            <Table className="text-xs">
-              <thead>
-                <tr>
-                  <Th>Type</Th>
-                  <Th className="text-right">Amount (EUR)</Th>
-                  <Th className="text-right">Balance after</Th>
-                  <Th>Note</Th>
-                  <Th>Time (UTC)</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((row) => (
-                  <tr key={row.id}>
-                    <Td>{ledgerKindLabel(row.kind)}</Td>
-                    <Td className="text-right font-mono">{fmtNum(row.amount_eur, 2)}</Td>
-                    <Td className="text-right font-mono">{fmtNum(row.balance_after_eur, 2)}</Td>
-                    <Td className="max-w-[200px] truncate">{row.note ?? "—"}</Td>
-                    <Td className="whitespace-nowrap font-mono">
-                      {String(row.created_at).slice(0, 19).replace("T", " ")}
-                    </Td>
-                  </tr>
-                ))}
-                {!ledger.length ? (
-                  <tr>
-                    <Td colSpan={5} muted className="py-6 text-center">
-                      No ledger entries yet. Use Add balance to fund this executor.
-                    </Td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </Table>
-          </TableWrap>
-        </CardBody>
-      </Card>
-
-      <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
-
-      <Card>
-        <CardBody className="!pt-0">
-          <p className="bk-text-muted mb-2 text-sm">Recent orders (this executor)</p>
-          <TableWrap>
-            <Table className="text-xs">
-              <thead>
-                <tr>
-                  <Th>Market</Th>
-                  <Th>Side</Th>
-                  <Th className="text-right">Notional (EUR)</Th>
-                  <Th>Status</Th>
-                  <Th>Created (UTC)</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((o) => {
-                  const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
-                  return (
-                    <tr key={o.id}>
-                      <Td className="font-mono">
-                        <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link">
-                          {sym}
-                        </Link>
-                      </Td>
-                      <Td className="font-mono">{o.side}</Td>
-                      <Td className="text-right font-mono">{fmtNum(o.notional_eur, 2)}</Td>
-                      <Td>{o.status}</Td>
-                      <Td className="whitespace-nowrap font-mono">{String(o.created_at).slice(0, 19).replace("T", " ")}</Td>
+          <Card>
+            <CardBody className="!pt-0">
+              <p className="bk-text-muted mb-2 text-sm">Activity (ledger)</p>
+              <TableWrap>
+                <Table className="text-xs">
+                  <thead>
+                    <tr>
+                      <Th>Type</Th>
+                      <Th className="text-right">Amount (EUR)</Th>
+                      <Th className="text-right">Balance after</Th>
+                      <Th>Note</Th>
+                      <Th>Time (UTC)</Th>
                     </tr>
-                  );
-                })}
-                {!orders.length ? (
-                  <tr>
-                    <Td colSpan={5} muted className="py-6 text-center">
-                      No orders for this executor yet.
-                    </Td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </Table>
-          </TableWrap>
-        </CardBody>
-      </Card>
-    </div>
+                  </thead>
+                  <tbody>
+                    {ledger.map((row) => (
+                      <tr key={row.id}>
+                        <Td>{ledgerKindLabel(row.kind)}</Td>
+                        <Td className="text-right font-mono">{fmtNum(row.amount_eur, 2)}</Td>
+                        <Td className="text-right font-mono">{fmtNum(row.balance_after_eur, 2)}</Td>
+                        <Td className="max-w-[200px] truncate">{row.note ?? "—"}</Td>
+                        <Td className="whitespace-nowrap font-mono">
+                          {String(row.created_at).slice(0, 19).replace("T", " ")}
+                        </Td>
+                      </tr>
+                    ))}
+                    {!ledger.length ? (
+                      <tr>
+                        <Td colSpan={5} muted className="py-6 text-center">
+                          No ledger entries yet. Use Add balance to fund this executor.
+                        </Td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </Table>
+              </TableWrap>
+            </CardBody>
+          </Card>
+
+          <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
+
+          <Card>
+            <CardBody className="!pt-0">
+              <p className="bk-text-muted mb-2 text-sm">Recent orders (this executor)</p>
+              <TableWrap>
+                <Table className="text-xs">
+                  <thead>
+                    <tr>
+                      <Th>Market</Th>
+                      <Th>Side</Th>
+                      <Th className="text-right">Notional (EUR)</Th>
+                      <Th>Status</Th>
+                      <Th>Created (UTC)</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.map((o) => {
+                      const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
+                      return (
+                        <tr key={o.id}>
+                          <Td className="font-mono">
+                            <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link">
+                              {sym}
+                            </Link>
+                          </Td>
+                          <Td className="font-mono">{o.side}</Td>
+                          <Td className="text-right font-mono">{fmtNum(o.notional_eur, 2)}</Td>
+                          <Td>{o.status}</Td>
+                          <Td className="whitespace-nowrap font-mono">{String(o.created_at).slice(0, 19).replace("T", " ")}</Td>
+                        </tr>
+                      );
+                    })}
+                    {!orders.length ? (
+                      <tr>
+                        <Td colSpan={5} muted className="py-6 text-center">
+                          No orders for this executor yet.
+                        </Td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </Table>
+              </TableWrap>
+            </CardBody>
+          </Card>
+        </div>
+      }
+    />
   );
 }

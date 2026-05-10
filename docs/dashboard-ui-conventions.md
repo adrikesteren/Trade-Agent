@@ -33,18 +33,31 @@ Do **not** revert list pages to a bare `PageHeader` without `variant="list"` unl
 
 ## Record detail pages (single record)
 
-Treat each `*/[id]/page.tsx` (or similar dynamic segment) as a **Lightning record page**: soft page background, header with object icon and key fields, white primary card, stacked label/value fields.
+Treat each `*/[id]/page.tsx` (or similar dynamic segment) as a **Lightning record page**: soft page background, full-width header, then main content (and optional right column).
 
-### Use these building blocks
+### Page shell: `DetailPageLayout`
+
+Wrap the whole screen in **`DetailPageLayout`** from `@repo/blocks`. It composes `RecordDetailLayout` (page background) and defines three slots:
+
+| Slot | Role |
+|------|--------|
+| `header` | Full width: typically `PageHeader` with `variant="detail"` (or another top chrome such as `DashboardListViewHeader` where that route still uses list-style chrome). |
+| `content` | Main column: cards, charts, tables, alerts that belong below the header. |
+| `sidebar` | Optional. From **48rem** viewport width, the row under the header is always **60%** main / **40%** sidebar (`3fr` / `2fr`). Below that width, main and sidebar **stack** (main first). If `sidebar` is omitted or `null`, the right column is still reserved on wide screens as a dashed placeholder; on narrow screens it is hidden so you do not get a blank block under the content. |
+
+Pass layout width utilities on `DetailPageLayout` itself (e.g. `className="bk-container px-1"` and optional `style={{ maxWidth: "48rem" }}` or `bk-container_lg` for wide charts).
+
+### Use these building blocks (inside the slots)
 
 | Piece | Component / API | Notes |
 |--------|------------------|--------|
-| Page shell | `RecordDetailLayout` | Sets page background (`--bk-color-page`). |
-| Header | `PageHeader` with `variant="detail"` | Optional `icon` (`ListViewObjectIcon`), optional `highlights` (compact `Output` row under title). |
+| Record chrome (inside `header`) | `PageHeader` with `variant="detail"` | Optional `icon` (`ListViewObjectIcon`), optional `highlights` (compact `Output` row under title). |
 | Primary card | `RecordDetailCard` | White card; put sections inside. |
 | Sections | `RecordDetailSection` | Uppercase section title (SF-style band). |
 | Field grid | `RecordDetailGrid` + `Output` | Two columns from `sm` up; use `span="full"` for long values (IDs, JSON). |
 | FK / related record | `Output` with `lookup={{ href, name }}` or `record={{ pathPrefix, id, name }}` | `pathPrefix` is the app path without trailing slash, e.g. `/dashboard/assets`. |
+
+`RecordDetailLayout` remains exported for edge cases; **new detail routes should use `DetailPageLayout`** so header / 60–40 behavior stays consistent.
 
 ### `Output` types
 
@@ -58,8 +71,10 @@ Record IDs, tickers, exchange codes, job keys, etc. are **normal fields** → us
 - `apps/web/src/app/dashboard/exchanges/[exchangeId]/page.tsx`
 - `apps/web/src/app/dashboard/markets/[marketId]/page.tsx`
 - `apps/web/src/app/dashboard/sync-runs/[id]/page.tsx`
+- `apps/web/src/app/dashboard/signal-agents/[signalAgentId]/page.tsx`
+- `apps/web/src/app/dashboard/executors/[id]/page.tsx`
 
-Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listview`, `bk-record-detail`, `bk-output`).
+Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listview`, `bk-record-detail`, `bk-detail-page-layout`, `bk-output`).
 
 ---
 
@@ -68,7 +83,7 @@ Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listvie
 When adding or editing dashboard routes:
 
 1. **List route** → apply the list view checklist above; reuse `DashboardListViewHeader` when the page is a simple data dump.
-2. **Detail route** → apply the detail checklist; use `Output` + `record`/`lookup` for every foreign key that has a detail URL in this app.
+2. **Detail route** → wrap with `DetailPageLayout` (`header` / `content` / optional `sidebar`); apply the detail checklist; use `Output` + `record`/`lookup` for every foreign key that has a detail URL in this app.
 3. Prefer extending `@repo/blocks` over one-off Tailwind in pages when the pattern is reusable.
 
 Point agents at this file when working under `apps/web/src/app/dashboard/**` or `packages/blocks/**`.

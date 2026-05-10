@@ -6,12 +6,12 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { createClient } from "@/lib/supabase/server";
 import {
   Breadcrumbs,
+  DetailPageLayout,
   ListViewObjectIcon,
   Output,
   PageHeader,
   RecordDetailCard,
   RecordDetailGrid,
-  RecordDetailLayout,
   RecordDetailSection,
 } from "@repo/blocks";
 import Link from "next/link";
@@ -114,89 +114,95 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
 
   return (
-    <RecordDetailLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md px-1">
-      <PageHeader
-        variant="detail"
-        icon={<ListViewObjectIcon letter="M" />}
-        breadcrumb={<Breadcrumbs items={[{ label: "Markets", href: "/dashboard/markets" }, { label: "Pair" }]} />}
-        back={{ href: "/dashboard/markets", label: "← All markets" }}
-        eyebrow="Market"
-        title={market.market_symbol}
-        titleClassName="font-mono"
-        highlights={
-          <>
-            {ex?.id ? (
-              <Output
-                label="Exchange"
-                record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
-              />
-            ) : (
-              <Output label="Exchange" type="text" value="—" />
-            )}
-            {asset?.id ? (
-              <Output
-                label="Base asset"
-                record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
-              />
-            ) : (
-              <Output label="Base asset" type="text" value="—" />
-            )}
-          </>
-        }
-        subtitle={
-          <>
-            Quote <span className="font-mono">{market.quote_code ?? "—"}</span> · Status {market.status ?? "—"}
-          </>
-        }
-        meta={`id: ${market.id}`}
-      />
+    <DetailPageLayout
+      className="bk-container bk-container_lg px-1"
+      header={
+        <PageHeader
+          variant="detail"
+          icon={<ListViewObjectIcon letter="M" />}
+          breadcrumb={<Breadcrumbs items={[{ label: "Markets", href: "/dashboard/markets" }, { label: "Pair" }]} />}
+          back={{ href: "/dashboard/markets", label: "← All markets" }}
+          eyebrow="Market"
+          title={market.market_symbol}
+          titleClassName="font-mono"
+          highlights={
+            <>
+              {ex?.id ? (
+                <Output
+                  label="Exchange"
+                  record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
+                />
+              ) : (
+                <Output label="Exchange" type="text" value="—" />
+              )}
+              {asset?.id ? (
+                <Output
+                  label="Base asset"
+                  record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
+                />
+              ) : (
+                <Output label="Base asset" type="text" value="—" />
+              )}
+            </>
+          }
+          subtitle={
+            <>
+              Quote <span className="font-mono">{market.quote_code ?? "—"}</span> · Status {market.status ?? "—"}
+            </>
+          }
+          meta={`id: ${market.id}`}
+        />
+      }
+      content={
+        <div className="bk-stack bk-stack_gap-md">
+          <RecordDetailCard>
+            <RecordDetailSection title="Details">
+              <RecordDetailGrid>
+                <Output label="Record ID" type="text" value={market.id} span="full" />
+                <Output label="Symbol" type="text" value={market.market_symbol} />
+                <Output label="Quote" type="text" value={market.quote_code ?? "—"} />
+                <Output label="Status" type="text" value={market.status ?? "—"} />
+                <Output label="Created" type="datetime" value={market.created_at} />
+                {ex?.id ? (
+                  <Output
+                    label="Exchange"
+                    record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
+                  />
+                ) : (
+                  <Output label="Exchange" type="text" value="—" />
+                )}
+                {asset?.id ? (
+                  <Output
+                    label="Base asset"
+                    record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
+                  />
+                ) : (
+                  <Output label="Base asset" type="text" value="—" />
+                )}
+                <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
+              </RecordDetailGrid>
+            </RecordDetailSection>
+          </RecordDetailCard>
 
-      <RecordDetailCard>
-        <RecordDetailSection title="Details">
-          <RecordDetailGrid>
-            <Output label="Record ID" type="text" value={market.id} span="full" />
-            <Output label="Symbol" type="text" value={market.market_symbol} />
-            <Output label="Quote" type="text" value={market.quote_code ?? "—"} />
-            <Output label="Status" type="text" value={market.status ?? "—"} />
-            <Output label="Created" type="datetime" value={market.created_at} />
-            {ex?.id ? (
-              <Output
-                label="Exchange"
-                record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
-              />
-            ) : (
-              <Output label="Exchange" type="text" value="—" />
-            )}
-            {asset?.id ? (
-              <Output
-                label="Base asset"
-                record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
-              />
-            ) : (
-              <Output label="Base asset" type="text" value="—" />
-            )}
-            <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
-          </RecordDetailGrid>
-        </RecordDetailSection>
-      </RecordDetailCard>
-
-      <MarketCandleChart
-        marketId={marketId}
-        initialTimeframe={CHART_DEFAULT_TF}
-        initialCandles={initialCandles}
-      />
-      <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-        Timeframe buttons load aggregated OHLCV for this market. Axis, crosshair, and hover labels use{" "}
-        <strong className="font-mono">{chartDisplayTz}</strong> (
-        <code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>, default Europe/Amsterdam). Bars stay the
-        same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
-        <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
-        <Link href="/dashboard/markets" className="bk-link">
-          Markets
-        </Link>
-        . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
-        <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
-      </p>
-    </RecordDetailLayout>
+          <MarketCandleChart
+            marketId={marketId}
+            initialTimeframe={CHART_DEFAULT_TF}
+            initialCandles={initialCandles}
+          />
+          <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+            Timeframe buttons load aggregated OHLCV for this market. Axis, crosshair, and hover labels use{" "}
+            <strong className="font-mono">{chartDisplayTz}</strong> (
+            <code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>, default Europe/Amsterdam). Bars stay the
+            same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
+            <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
+            <Link href="/dashboard/markets" className="bk-link">
+              Markets
+            </Link>
+            . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
+            <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
+          </p>
+        </div>
+      }
+    />
   );
 }

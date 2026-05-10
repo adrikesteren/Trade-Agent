@@ -1257,6 +1257,51 @@
   background: var(--bk-color-page);
 }
 
+/* Detail page: header 100%, then 60/40 (3fr / 2fr) from 48rem; stacked below that */
+.bk-detail-page-layout_inner {
+  width: 100%;
+}
+
+.bk-detail-page-layout_header {
+  width: 100%;
+  min-width: 0;
+}
+
+.bk-detail-page-layout_row {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+}
+
+/* Empty aside: no second row on narrow viewports */
+.bk-detail-page-layout_aside_empty {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .bk-detail-page-layout_row {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+
+  .bk-detail-page-layout_aside_empty {
+    display: block;
+    border-radius: var(--bk-radius-md);
+    border: 1px dashed var(--bk-color-border);
+    background: var(--bk-color-surface-alt);
+    min-height: 8rem;
+  }
+}
+
+.bk-detail-page-layout_main {
+  min-width: 0;
+}
+
+.bk-detail-page-layout_aside {
+  min-width: 0;
+}
+
 .bk-record-detail-card {
   border-color: var(--bk-color-border);
   box-shadow: var(--bk-shadow-sm);

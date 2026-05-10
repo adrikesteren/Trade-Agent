@@ -7,6 +7,7 @@ export { Breadcrumbs, type BreadcrumbsProps, type Crumb } from "./components/bre
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from "./components/button";
 export { Card, CardBody, CardFooter, CardHeader, type CardBodyProps, type CardFooterProps, type CardHeaderProps, type CardProps } from "./components/card";
 export { Checkbox, type CheckboxProps } from "./components/checkbox";
+export { DetailPageLayout, type DetailPageLayoutProps } from "./components/detail-page-layout";
 export {
   Dialog,
   DialogClose,
