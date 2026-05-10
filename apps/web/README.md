@@ -16,6 +16,10 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+**Supabase auth on localhost with multiple apps:** if another Next.js app on the same machine uses the same Supabase project (same `NEXT_PUBLIC_SUPABASE_URL`), give each app a unique `cookieOptions.name` on every `@supabase/ssr` client and use `signOut({ scope: "local" })` for logout. This app uses `src/lib/supabase/auth-cookie.ts` (`trade-sb-auth`). Browsers share one cookie jar per hostname, not per port.
+
+**HTTP 431 in Chrome:** that means the request headers (usually cookies) exceed the server limit. After renaming cookies or running several Supabase apps on `localhost`, old `sb-*` cookies may still be present alongside `trade-sb-auth` / other apps — clear site data for `http://localhost:3000` (Application → Storage → Clear site data, or delete `localhost` cookies). The `dev` / `start` scripts run Node with a larger `--max-http-header-size` so normal multi-cookie dev still fits; clearing stale cookies is still the right long-term fix.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -1,14 +1,12 @@
 "use client";
 
-import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sync-jobs-overview-table";
 import { formatDatetime } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
 import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
-import { type BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type SyncRunRow = {
@@ -25,15 +23,6 @@ export type SyncRunRow = {
 
 
 const TRACKED_JOB_KEYS = new Set<string>(SYNC_RUN_DASHBOARD_JOB_KEYS);
-
-export type SyncRunsOverviewTemplate = Omit<SyncJobsOverviewRow, "status" | "lastStartedAt" | "lastSuccessAt">;
-
-function lastCompletedAtForJob(rows: SyncRunRow[], jobKey: string): string | null {
-  for (const r of rows) {
-    if (r.job_key === jobKey && r.status === "completed" && r.ended_at) return r.ended_at;
-  }
-  return null;
-}
 
 function sortByCreatedDesc(a: SyncRunRow, b: SyncRunRow): number {
   const ta = a.created_at ?? "";
@@ -114,7 +103,11 @@ function ElapsedCell({ r, nowMs, ready }: { r: SyncRunRow; nowMs: number; ready:
   if (!Number.isFinite(endMs)) return <span className="bk-text-muted">…</span>;
   const live = r.status === "running" && !r.ended_at;
   return (
-    <span style={live ? { color: "var(--bk-color-warning)" } : undefined} title={live ? "Live (run still open)" : undefined}>
+    <span
+      suppressHydrationWarning={live}
+      style={live ? { color: "var(--bk-color-warning)" } : undefined}
+      title={live ? "Live (run still open)" : undefined}
+    >
       {formatElapsedMs(endMs - startMs)}
       {live ? <span className="bk-text-muted ml-1 text-[9px] font-normal">live</span> : null}
     </span>
@@ -133,15 +126,12 @@ function mergeRunIntoList(prev: SyncRunRow[], row: SyncRunRow): SyncRunRow[] {
 export function SyncRunsLiveClient({
   initialRuns,
   initialError,
-  overviewTemplate,
   localePrefs,
 }: {
   initialRuns: SyncRunRow[];
   initialError: string | null;
-  overviewTemplate: SyncRunsOverviewTemplate[];
   localePrefs: UserLocalePreferences;
 }) {
-  const router = useRouter();
   const [runs, setRuns] = useState<SyncRunRow[]>(() => [...initialRuns].sort(sortByCreatedDesc));
   const [fetchError] = useState<string | null>(initialError);
   const { ready, nowMs } = useClientTick();
@@ -150,19 +140,6 @@ export function SyncRunsLiveClient({
     (iso: string | null | undefined) => (iso ? formatDatetime(iso, localePrefs) : "—"),
     [localePrefs],
   );
-
-  const overviewRows: SyncJobsOverviewRow[] = useMemo(() => {
-    const latestByJob = new Map<string, SyncRunRow>();
-    for (const row of runs) {
-      if (!latestByJob.has(row.job_key)) latestByJob.set(row.job_key, row);
-    }
-    return overviewTemplate.map((t) => ({
-      ...t,
-      status: (latestByJob.get(t.jobKey)?.status as BitvavoSyncJobStatus | null) ?? null,
-      lastStartedAt: latestByJob.get(t.jobKey)?.created_at ?? null,
-      lastSuccessAt: lastCompletedAtForJob(runs, t.jobKey),
-    }));
-  }, [runs, overviewTemplate]);
 
   const recentRuns = useMemo(() => runs.slice(0, DASHBOARD_LIST_VIEW_LIMIT), [runs]);
 
@@ -203,8 +180,6 @@ export function SyncRunsLiveClient({
 
   return (
     <>
-      <SyncJobsOverviewTable rows={overviewRows} localePrefs={localePrefs} onSyncDone={() => router.refresh()} />
-
       <Card>
         <CardBody>
           <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
@@ -212,7 +187,7 @@ export function SyncRunsLiveClient({
           </h2>
           <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
             Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via
-            Realtime. Click a row to open the detail page.
+            Realtime. Open a run via the <strong>Job</strong> link.
           </p>
           {fetchError ? (
             <Alert tone="error" className="mt-2 !text-xs">
@@ -235,21 +210,16 @@ export function SyncRunsLiveClient({
               </thead>
               <tbody>
                 {recentRuns.map((r) => (
-                  <tr
-                    key={r.id}
-                    role="link"
-                    tabIndex={0}
-                    aria-label={`Open sync run ${r.job_key} ${r.id}`}
-                    className="bk-tr-clickable"
-                    onClick={() => router.push(`/dashboard/sync-runs/${r.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        router.push(`/dashboard/sync-runs/${r.id}`);
-                      }
-                    }}
-                  >
-                    <Td className="py-1.5 pr-2 font-mono">{r.job_key}</Td>
+                  <tr key={r.id}>
+                    <Td className="py-1.5 pr-2">
+                      <Link
+                        href={`/dashboard/sync-runs/${r.id}`}
+                        className="bk-link font-mono"
+                        prefetch={false}
+                      >
+                        {r.job_key}
+                      </Link>
+                    </Td>
                     <Td className="py-1.5 pr-2">{r.status}</Td>
                     <Td className="max-w-[200px] truncate py-1.5 pr-2 bk-text-muted" title={r.reason ?? ""}>
                       {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
@@ -268,7 +238,7 @@ export function SyncRunsLiveClient({
                 {!recentRuns.length ? (
                   <tr>
                     <Td colSpan={8} muted className="py-6 text-center">
-                      No runs yet. Use <strong>Sync now</strong> in the table above, or wait for QStash workers.
+                      No runs yet. Scheduled workers will append rows here when they run.
                     </Td>
                   </tr>
                 ) : null}

@@ -1,24 +1,7 @@
-import {
-  SyncRunsLiveClient,
-  type SyncRunRow,
-  type SyncRunsOverviewTemplate,
-} from "@/components/sync-runs-live-client";
+import { SyncRunsLiveClient, type SyncRunRow } from "@/components/sync-runs-live-client";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
-import {
-  BITVAVO_SYNC_JOB_CANDLES_EUR,
-  BITVAVO_SYNC_JOB_MARKETS_EUR,
-  COINGECKO_SYNC_JOB_COIN_ID,
-  COINGECKO_SYNC_JOB_METRICS,
-} from "@/lib/markets/record-bitvavo-sync-status";
-import {
-  getCandlesSyncIntervalMs,
-  getCoingeckoCoinIdSyncIntervalMs,
-  getCoingeckoMetricsSyncIntervalMs,
-  getMarketsSyncIntervalMs,
-} from "@/lib/markets/sync-schedule";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
-import { MANAGED_QSTASH_SCHEDULES } from "@/lib/workers/qstash-managed-schedules";
 import { createClient } from "@/lib/supabase/server";
 import {
   ListViewObjectIcon,
@@ -28,45 +11,6 @@ import {
   listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
-
-function qstashScheduleIdForJob(jobKey: string): string | null {
-  return MANAGED_QSTASH_SCHEDULES.find((s) => s.jobKey === jobKey)?.scheduleId ?? null;
-}
-
-const OVERVIEW_TEMPLATE: SyncRunsOverviewTemplate[] = [
-  {
-    jobKey: BITVAVO_SYNC_JOB_MARKETS_EUR,
-    label: "EUR market catalog",
-    provider: "Bitvavo",
-    intervalMs: getMarketsSyncIntervalMs(),
-    action: "bitvavo-markets",
-    qstashScheduleId: qstashScheduleIdForJob(BITVAVO_SYNC_JOB_MARKETS_EUR),
-  },
-  {
-    jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
-    label: "EUR candles sweep",
-    provider: "Bitvavo",
-    intervalMs: getCandlesSyncIntervalMs(),
-    action: "bitvavo-candles",
-    qstashScheduleId: qstashScheduleIdForJob(BITVAVO_SYNC_JOB_CANDLES_EUR),
-  },
-  {
-    jobKey: COINGECKO_SYNC_JOB_METRICS,
-    label: "Asset fundamentals (USD)",
-    provider: "CoinGecko",
-    intervalMs: getCoingeckoMetricsSyncIntervalMs(),
-    action: "coingecko",
-    qstashScheduleId: qstashScheduleIdForJob(COINGECKO_SYNC_JOB_METRICS),
-  },
-  {
-    jobKey: COINGECKO_SYNC_JOB_COIN_ID,
-    label: "CoinGecko coin id (catalog)",
-    provider: "CoinGecko",
-    intervalMs: getCoingeckoCoinIdSyncIntervalMs(),
-    action: "coingecko-coin-id",
-    qstashScheduleId: qstashScheduleIdForJob(COINGECKO_SYNC_JOB_COIN_ID),
-  },
-];
 
 export default async function SyncRunsPage() {
   const supabase = await createClient();
@@ -117,12 +61,7 @@ export default async function SyncRunsPage() {
         }
       />
 
-      <SyncRunsLiveClient
-        initialRuns={runsSafe}
-        initialError={runsError?.message ?? null}
-        overviewTemplate={OVERVIEW_TEMPLATE}
-        localePrefs={localePrefs}
-      />
+      <SyncRunsLiveClient initialRuns={runsSafe} initialError={runsError?.message ?? null} localePrefs={localePrefs} />
     </div>
   );
 }

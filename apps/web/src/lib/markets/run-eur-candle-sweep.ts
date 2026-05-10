@@ -10,11 +10,13 @@ import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candl
 import {
   beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
+  failSyncRunIfExceededMaxDuration,
   patchSyncRunMetadata,
   recordBitvavoSyncCompleted,
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
   SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
+  SYNC_RUN_TIMED_OUT_REASON,
   type BitvavoSyncTriggerSource,
 } from "@/lib/markets/record-bitvavo-sync-status";
 import {
@@ -296,6 +298,26 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     }
   }
 
+  if (isEurQuote && syncRunId) {
+    const timedOutId = await failSyncRunIfExceededMaxDuration(admin, {
+      jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+      runId: syncRunId,
+    });
+    if (timedOutId) {
+      return {
+        ok: true,
+        incomplete: false,
+        chunksProcessed: 0,
+        candleRowsUpserted: 0,
+        marketsProcessed: 0,
+        totalMarkets: 0,
+        nextMarketOffset: null,
+        syncRunId,
+        warning: SYNC_RUN_TIMED_OUT_REASON,
+      };
+    }
+  }
+
   if (
     isEurQuote &&
     timeframe === CATALOG_STORAGE_TIMEFRAME &&
@@ -322,8 +344,8 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
               incomplete: false,
             },
           });
-        } catch {
-          /* non-fatal */
+        } catch (e) {
+          console.error("[eur-candle-sweep] recordBitvavoSyncCompleted (emptyWindow) failed:", e);
         }
         return {
           ok: true,
@@ -377,6 +399,35 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     delayMsBetweenMarkets,
   });
 
+  if (isEurQuote && syncRunId && marketOffset === 0) {
+    try {
+      const patch: Record<string, unknown> = {
+        effectiveCandleSyncMode: chunkTiming.syncMode,
+      };
+      if (chunkTiming.syncMode === "window") {
+        patch.effectiveWindowBarCount = chunkTiming.windowBarCount;
+        const large = chunkTiming.windowBarCount > 72;
+        if (large) {
+          console.warn(
+            "[eur-candle-sweep] Large EUR catalog candle window — expect slower Bitvavo/DB work (many bars × all markets).",
+            { windowBarCount: chunkTiming.windowBarCount, timeframe, syncRunId },
+          );
+        }
+      } else if (chunkTiming.syncMode === "incremental") {
+        patch.incrementalTargetCloseIso = chunkTiming.targetCloseTimeIso;
+      } else {
+        patch.fullSweepBarsPerMarket = barsPerMarket;
+      }
+      await patchSyncRunMetadata(admin, {
+        runId: syncRunId,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        patch,
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   for (; chunksProcessed < maxChunks; chunksProcessed++) {
     lastResult = await syncBitvavoCandlesChunk(admin, {
       ...chunkOptsBase,
@@ -419,6 +470,7 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
     incomplete = lastResult != null && lastResult.nextMarketOffset != null;
   }
 
+  let candleSyncRunMarkedComplete = false;
   if (!incomplete && isEurQuote) {
     try {
       await recordBitvavoSyncCompleted(admin, {
@@ -435,13 +487,18 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
           incomplete: false,
         },
       });
-    } catch {
-      /* non-fatal */
+      candleSyncRunMarkedComplete = true;
+    } catch (e) {
+      console.error("[eur-candle-sweep] recordBitvavoSyncCompleted failed:", e);
     }
 
     // Signal pass: candle sync internally picks full / incremental / window; after a successful EUR catalog
     // sweep with new rows we always evaluate the latest closed bar on the global `candle_timestamps` grid.
-    if (timeframe === CATALOG_STORAGE_TIMEFRAME && candleRowsUpserted > 0) {
+    if (
+      candleSyncRunMarkedComplete &&
+      timeframe === CATALOG_STORAGE_TIMEFRAME &&
+      candleRowsUpserted > 0
+    ) {
       try {
         const signalCloseIso = await resolveLatestCatalogCandleCloseIso(admin);
         if (signalCloseIso) {
@@ -517,6 +574,32 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
       : incomplete && !canQueueFollowUp && shouldInlineRemainder(canQueueFollowUp)
         ? "Sweep stopped: inline time/chunk limit reached; run again or use QStash + APP_BASE_URL."
         : undefined;
+
+  // Without this, `automation.sync_runs` stays `running` forever (partial unique blocks new starts).
+  if (incomplete && isEurQuote && syncRunId && !canQueueFollowUp) {
+    try {
+      await recordBitvavoSyncFailed(admin, {
+        runId: syncRunId,
+        jobKey: BITVAVO_SYNC_JOB_CANDLES_EUR,
+        source: triggerSource,
+        reason:
+          warning ??
+          "EUR candle sweep incomplete and no QStash follow-up was available to continue.",
+        metadata: {
+          chunksProcessed,
+          candleRowsUpserted,
+          marketsProcessed,
+          totalMarkets: lastTotalMarkets,
+          nextMarketOffset: lastResult?.nextMarketOffset ?? marketOffset,
+          incomplete: true,
+          timeframe,
+          barsPerMarket,
+        },
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
 
   return {
     ok: true,

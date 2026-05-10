@@ -100,6 +100,104 @@ function isUniqueViolation(err: unknown): boolean {
   return code === "23505";
 }
 
+/** Human-readable `sync_runs.reason` when a run is failed for exceeding max wall time in `running`. */
+export const SYNC_RUN_TIMED_OUT_REASON =
+  "Timed out: run exceeded the maximum running duration without completing (server safeguard).";
+
+function syncRunRunningTimeoutMs(): number {
+  const raw = process.env.SYNC_RUN_RUNNING_TIMEOUT_MS?.trim();
+  if (!raw) return 600_000;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 600_000;
+  return Math.min(Math.max(Math.floor(n), 60_000), 24 * 60 * 60 * 1000);
+}
+
+type StaleRunRow = {
+  id: string;
+  created_at: string;
+  trigger_source: string | null;
+  metadata: unknown;
+};
+
+/**
+ * If a `running` row exceeds the configured wall time since `created_at` (default 10 minutes), mark it `failed`.
+ * - With `runId`: only that row (for QStash continuations).
+ * - Without `runId`: the single `running` row for `job_key` if stale (before starting a new run).
+ *
+ * Returns the run id that was timed out, or null.
+ */
+export async function failSyncRunIfExceededMaxDuration(
+  admin: SupabaseClient,
+  args: { jobKey: string; runId?: string | null },
+): Promise<string | null> {
+  const maxMs = syncRunRunningTimeoutMs();
+  const cutoffIso = new Date(Date.now() - maxMs).toISOString();
+  const now = new Date().toISOString();
+
+  let row: StaleRunRow | null = null;
+
+  if (args.runId && String(args.runId).trim()) {
+    const id = String(args.runId).trim();
+    const { data, error } = await admin
+      .schema(AUTOMATION_SCHEMA)
+      .from(TABLE)
+      .select("id, created_at, trigger_source, metadata, status")
+      .eq("id", id)
+      .eq("job_key", args.jobKey)
+      .maybeSingle();
+    if (error || !data || String(data.status) !== "running") return null;
+    const created = typeof data.created_at === "string" ? Date.parse(data.created_at) : NaN;
+    if (!Number.isFinite(created) || created >= Date.now() - maxMs) return null;
+    row = {
+      id: data.id as string,
+      created_at: data.created_at as string,
+      trigger_source: (data.trigger_source as string | null) ?? null,
+      metadata: data.metadata,
+    };
+  } else {
+    const { data, error } = await admin
+      .schema(AUTOMATION_SCHEMA)
+      .from(TABLE)
+      .select("id, created_at, trigger_source, metadata")
+      .eq("job_key", args.jobKey)
+      .eq("status", "running")
+      .lt("created_at", cutoffIso)
+      .maybeSingle();
+    if (error || !data?.id) return null;
+    row = {
+      id: data.id as string,
+      created_at: data.created_at as string,
+      trigger_source: (data.trigger_source as string | null) ?? null,
+      metadata: data.metadata,
+    };
+  }
+
+  const prev = isPlainMetadataObject(row.metadata) ? row.metadata : {};
+  const merged = { ...prev, timedOut: true, timedOutAfterMs: maxMs };
+  const trig: BitvavoSyncTriggerSource = row.trigger_source === "manual" ? "manual" : "automated";
+
+  const { error: upErr } = await admin
+    .schema(AUTOMATION_SCHEMA)
+    .from(TABLE)
+    .update({
+      status: "failed",
+      reason: SYNC_RUN_TIMED_OUT_REASON,
+      ended_at: now,
+      updated_at: now,
+      trigger_source: trig,
+      metadata: merged,
+    })
+    .eq("id", row.id)
+    .eq("job_key", args.jobKey)
+    .eq("status", "running");
+
+  if (upErr) {
+    console.error(`${TABLE}: failSyncRunIfExceededMaxDuration: ${upErr.message}`);
+    return null;
+  }
+  return row.id;
+}
+
 /**
  * Starts a new sync run. Concurrent `running` rows for the same `job_key` are prevented by a partial unique
  * index; on conflict, `automated` inserts a `skipped` audit row (manual callers get an error).
@@ -110,6 +208,8 @@ export async function beginBitvavoSyncRun(
   source: BitvavoSyncTriggerSource,
   options?: { metadata?: SyncRunMetadataPatch },
 ): Promise<BeginBitvavoSyncRunResult> {
+  await failSyncRunIfExceededMaxDuration(admin, { jobKey });
+
   const now = new Date().toISOString();
   const initialMeta =
     options?.metadata && Object.keys(options.metadata).length > 0 ? options.metadata : undefined;
@@ -189,7 +289,7 @@ export async function recordBitvavoSyncCompleted(
     ? await readMergedMetadata(admin, runId, args.jobKey, args.metadata as SyncRunMetadataPatch)
     : undefined;
 
-  const { error } = await admin
+  const { data: updatedRows, error } = await admin
     .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
@@ -201,9 +301,28 @@ export async function recordBitvavoSyncCompleted(
     })
     .eq("id", runId)
     .eq("job_key", args.jobKey)
-    .eq("status", "running");
+    .eq("status", "running")
+    .select("id");
 
   if (error) throw new Error(`${TABLE}: ${error.message}`);
+
+  if (updatedRows && updatedRows.length > 0) return;
+
+  const { data: existing, error: readErr } = await admin
+    .schema(AUTOMATION_SCHEMA)
+    .from(TABLE)
+    .select("id,status")
+    .eq("id", runId)
+    .eq("job_key", args.jobKey)
+    .maybeSingle();
+  if (readErr) throw new Error(`${TABLE}: ${readErr.message}`);
+  if (existing && String(existing.status) === "completed") {
+    return;
+  }
+
+  const detail = `runId=${runId} jobKey=${args.jobKey} currentStatus=${existing ? String(existing.status) : "missing"}`;
+  console.error(`[${TABLE}] recordBitvavoSyncCompleted: update matched 0 rows while row was not completed (${detail})`);
+  throw new Error(`${TABLE}: recordBitvavoSyncCompleted matched 0 rows (${detail})`);
 }
 
 /**
@@ -230,7 +349,7 @@ export async function recordBitvavoSyncFailed(
     ? await readMergedMetadata(admin, runId, args.jobKey, args.metadata as SyncRunMetadataPatch)
     : undefined;
 
-  const { error } = await admin
+  const { data: updatedRows, error } = await admin
     .schema(AUTOMATION_SCHEMA)
     .from(TABLE)
     .update({
@@ -243,7 +362,27 @@ export async function recordBitvavoSyncFailed(
     })
     .eq("id", runId)
     .eq("job_key", args.jobKey)
-    .eq("status", "running");
+    .eq("status", "running")
+    .select("id");
 
   if (error) throw new Error(`${TABLE}: ${error.message}`);
+
+  if (updatedRows && updatedRows.length > 0) return;
+
+  const { data: existing, error: readErr } = await admin
+    .schema(AUTOMATION_SCHEMA)
+    .from(TABLE)
+    .select("id,status")
+    .eq("id", runId)
+    .eq("job_key", args.jobKey)
+    .maybeSingle();
+  if (readErr) throw new Error(`${TABLE}: ${readErr.message}`);
+  const st = existing ? String(existing.status) : "";
+  if (st === "failed" || st === "skipped") {
+    return;
+  }
+
+  const detail = `runId=${runId} jobKey=${args.jobKey} currentStatus=${st || "missing"}`;
+  console.error(`[${TABLE}] recordBitvavoSyncFailed: update matched 0 rows (${detail})`);
+  throw new Error(`${TABLE}: recordBitvavoSyncFailed matched 0 rows (${detail})`);
 }
