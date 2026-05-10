@@ -8,6 +8,7 @@ import { fetchBitvavoOrder } from "@/lib/bitvavo/fetch-bitvavo-order";
 import { bitvavoPrivateEnv } from "@/lib/bitvavo/signed-request";
 import { mergeBuyPositionAvg } from "@/lib/executor/paper-fill";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { sendTradeFillSlack } from "@/lib/ops/send-trade-fill-slack";
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/trading/executor-wallet";
 
 function batchSize(): number {
@@ -134,9 +135,16 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     const { data: execRows, error: exErr } = await admin
       .schema("trading")
       .from("executors")
-      .select("id, execution_mode")
+      .select("id, execution_mode, name")
       .in("id", execIds);
     if (exErr) throw new Error(exErr.message);
+
+    const executorNameById = new Map<string, string>();
+    for (const row of execRows ?? []) {
+      const id = String((row as { id?: string }).id ?? "");
+      if (!id) continue;
+      executorNameById.set(id, String((row as { name?: string | null }).name ?? "").trim());
+    }
 
     const liveExecutor = new Set(
       (execRows ?? [])
@@ -228,6 +236,7 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
               addQty: fillQty,
               price: fillPrice,
             });
+            let ledgerDebitFailed = false;
             if (String(o.side) === "buy") {
               const notional = Number(o.notional_eur ?? 0);
               const actualFee = Number.isFinite(fillFee) ? fillFee : 0;
@@ -239,11 +248,27 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
                   debitEur: tradeBuyDebitEur(notional, actualFee),
                 });
               } catch (ledgerErr) {
+                ledgerDebitFailed = true;
                 errors.push(
                   `order ${o.id}: ledger debit: ${ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr)}`,
                 );
               }
             }
+            const execName = executorNameById.get(o.executor_id) ?? "";
+            await sendTradeFillSlack({
+              source: "bitvavo-reconcile",
+              side: String(o.side).toLowerCase() === "sell" ? "sell" : "buy",
+              executorName: execName || "Executor",
+              executorId: o.executor_id,
+              marketSymbol,
+              quantity: fillQty,
+              price: fillPrice,
+              fee: Number.isFinite(fillFee) ? fillFee : 0,
+              executionMode: "live",
+              paper: false,
+              orderId: o.id,
+              ledgerDebitFailed: String(o.side) === "buy" ? ledgerDebitFailed : undefined,
+            });
           }
         }
 

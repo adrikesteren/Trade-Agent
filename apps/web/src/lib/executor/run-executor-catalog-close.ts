@@ -25,6 +25,7 @@ import {
   restoreExecutorPositionSnapshot,
   tradeBuyDebitEur,
 } from "@/lib/trading/executor-wallet";
+import { sendTradeFillSlack } from "@/lib/ops/send-trade-fill-slack";
 import { workerPublicBaseUrl } from "@/lib/workers/worker-public-base-url";
 
 import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
@@ -389,6 +390,19 @@ export async function runExecutorCatalogClose(
             });
             throw e;
           }
+          await sendTradeFillSlack({
+            source: "executor-catalog-close",
+            side: "buy",
+            executorName: ex.name,
+            executorId: ex.id,
+            marketSymbol,
+            quantity: qty,
+            price: px.price,
+            fee: feeEur,
+            executionMode: ex.execution_mode,
+            paper: true,
+            orderId,
+          });
           ordersInserted += 1;
           continue;
         }
@@ -482,6 +496,7 @@ export async function runExecutorCatalogClose(
                 .update({ quantity: fillQty, updated_at: new Date().toISOString() })
                 .eq("id", localOrderId);
               const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
+              let ledgerDebitFailed = false;
               try {
                 await applyExecutorTradeBuyDebit(admin, {
                   userId,
@@ -490,8 +505,23 @@ export async function runExecutorCatalogClose(
                   debitEur: debitLive,
                 });
               } catch (ledgerErr) {
+                ledgerDebitFailed = true;
                 console.error(`${marketSymbol}: live fill debit failed`, ledgerErr);
               }
+              await sendTradeFillSlack({
+                source: "executor-catalog-close",
+                side: "buy",
+                executorName: ex.name,
+                executorId: ex.id,
+                marketSymbol,
+                quantity: fillQty,
+                price: fillPrice,
+                fee: Number.isFinite(fillFee) ? fillFee : 0,
+                executionMode: ex.execution_mode,
+                paper: false,
+                orderId: localOrderId,
+                ledgerDebitFailed,
+              });
             }
           }
           ordersInserted += 1;
