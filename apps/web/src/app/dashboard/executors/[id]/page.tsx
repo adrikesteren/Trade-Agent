@@ -1,7 +1,8 @@
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "@/app/dashboard/executors/actions";
-import { ExecutorBalancePanel } from "@/app/dashboard/executors/[id]/executor-balance-panel";
+import { ExecutorDetailBalanceActions } from "@/app/dashboard/executors/[id]/executor-detail-balance-actions";
 import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/dashboard/executors/[id]/executor-related-load";
-import { ExecutorForm, type AssetOption, type ExecutorFormInitial } from "@/app/dashboard/executors/executor-form";
+import { ExecutorEditDialog } from "@/app/dashboard/executors/[id]/executor-edit-dialog";
+import type { AssetOption, ExecutorFormInitial } from "@/app/dashboard/executors/executor-form";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
 import {
   DASHBOARD_LIST_VIEW_LIMIT,
@@ -19,15 +20,16 @@ import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   Alert,
-  Breadcrumbs,
   Card,
   CardBody,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
   PageHeader,
+  RecordDetailCard,
+  RecordDetailGrid,
+  RecordDetailSection,
   RecordRelatedList,
-  listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -166,6 +168,17 @@ function orderStatusClass(status: string): string {
   if (s === "open" || s === "pending") return "font-medium text-amber-700 dark:text-amber-400";
   if (s === "rejected" || s === "cancelled") return "bk-text-muted";
   return "";
+}
+
+function executionModeLabel(m: string): string {
+  if (m === "live") return "Live (Bitvavo — server API keys)";
+  return "Paper (simulated fills)";
+}
+
+function assetFilterModeLabel(m: ExecutorAssetFilterMode): string {
+  if (m === "whitelist") return "Whitelist (only listed base assets)";
+  if (m === "blacklist") return "Blacklist (all except listed base assets)";
+  return "All assets";
 }
 
 type ExecutorPageProps = {
@@ -341,10 +354,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
           <PageHeader
             variant="detail"
             icon={<ListViewObjectIcon letter="E" />}
-            breadcrumb={
-              <Breadcrumbs items={[{ label: "Executors", href: "/dashboard/executors" }, { label: String(ex.name) }]} />
-            }
-            back={{ href: "/dashboard/executors", label: "← All executors" }}
             eyebrow="Executor"
             title={String(ex.name)}
             subtitle="Balance, orders, and related activity for this portfolio."
@@ -357,44 +366,12 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             }
             meta={id}
             actions={
-              <Link href="/dashboard/executors" className={listViewOutlineActionClass}>
-                All executors
-              </Link>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <ExecutorDetailBalanceActions executorId={id} />
+                <ExecutorEditDialog executorId={id} assetOptions={assetOptions} initial={initial} />
+              </div>
             }
           />
-          <div className="grid gap-3 md:grid-cols-4">
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Balance (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
-                <p className="bk-text-muted mt-2 text-xs">
-                  Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
-                </p>
-                <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtEur(pnl.openCostBasisEur)}</p>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
-                <p className="mt-1 font-mono text-lg">
-                  {pnl.unrealizedEur == null ? "—" : fmtEur(pnl.unrealizedEur)}
-                </p>
-                <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
-              </CardBody>
-            </Card>
-          </div>
           {ledgerFull ? (
             <Alert tone="info">
               Showing expanded balance ledger (newest first, cap {EXECUTOR_LEDGER_FULL_FETCH_CAP} rows).
@@ -420,41 +397,138 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
         <RecordDetailTabs
           details={
             <div className="bk-stack bk-stack_gap-md">
-              <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
+              <RecordDetailCard>
+                <RecordDetailSection title="Configuration">
+                  <RecordDetailGrid>
+                    <Output label="Name" type="text" value={String(ex.name ?? "")} />
+                    <Output label="Enabled" type="boolean" value={ex.enabled} />
+                    <Output label="Execution mode" type="text" value={executionModeLabel(String(ex.execution_mode ?? ""))} />
+                    <Output label="Asset filter" type="text" value={assetFilterModeLabel(ex.asset_filter_mode as ExecutorAssetFilterMode)} />
+                    <Output
+                      label="Filter assets (base)"
+                      type="text"
+                      value={
+                        ex.asset_filter_mode === "all"
+                          ? "—"
+                          : filterIds
+                              .map((fid) => assetOptions.find((o) => o.id === fid)?.code ?? fid.slice(0, 8) + "…")
+                              .join(", ") || "—"
+                      }
+                      span="full"
+                    />
+                  </RecordDetailGrid>
+                </RecordDetailSection>
+                <RecordDetailSection title="Mediator / risk rails">
+                  <RecordDetailGrid>
+                    <Output label="Default order size (EUR)" type="text" value={fmtEur(ex.default_notional_eur)} />
+                    <Output label="Max risk per trade (0–1)" type="text" value={String(ex.max_risk_per_trade ?? "—")} />
+                    <Output label="Max open positions" type="number" value={ex.max_open_positions ?? 0} />
+                    <Output label="Max exposure per symbol (EUR)" type="text" value={fmtEur(ex.max_exposure_per_symbol_eur)} />
+                    <Output label="Daily loss limit (EUR)" type="text" value={fmtEur(ex.daily_loss_limit_eur)} />
+                    <Output label="Max drawdown (EUR)" type="text" value={fmtEur(ex.max_drawdown_eur)} />
+                    <Output label="Cooldown after losses" type="number" value={ex.cooldown_after_losses ?? 0} />
+                    <Output label="Allow ADD intent" type="boolean" value={Boolean(ex.allow_add)} />
+                    <Output label="Advanced rails (JSON)" type="codeblock" value={mediator_rails_extra_json} span="full" />
+                  </RecordDetailGrid>
+                </RecordDetailSection>
+              </RecordDetailCard>
             </div>
           }
           related={
             <Card>
               <CardBody className="bk-stack bk-stack_gap-md !pt-4">
                 <RecordRelatedList
-                  title="Executor balance ledger"
-                  description={
-                    ledgerFull && ledgerTotal > ledger.length
-                      ? `Sorted by created date (newest first) · loaded ${ledger.length} of ${ledgerTotal} (in-page cap ${EXECUTOR_LEDGER_FULL_FETCH_CAP}).`
-                      : ledgerTotal > ledger.length
-                        ? `Sorted by created date (newest first) · preview ${ledgerUiPreviewLimit} of ${ledgerTotal}.`
-                        : "Sorted by created date (newest first)."
-                  }
-                  items={ledger}
-                  getKey={(r) => r.id}
-                  totalCount={ledgerTotal}
-                  previewLimit={ledgerUiPreviewLimit}
-                  viewAllHref={ledgerViewAll}
-                  alwaysShowViewAll={!ledgerFull && Boolean(ledgerViewAll)}
-                  emptyMessage="No ledger entries yet. Use Add balance to fund this executor."
-                  renderRow={(row) => (
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                      <span>{ledgerKindLabel(row.kind)}</span>
-                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1 bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                        <span className="font-mono">{fmtEur(row.amount_eur)}</span>
-                        <span>after {fmtEur(row.balance_after_eur)}</span>
-                        <span className="max-w-[200px] truncate" title={row.note ?? undefined}>
-                          {row.note ?? "—"}
+                  title="Positions"
+                  description="Sorted by updated date (newest first)."
+                  items={positions}
+                  getKey={(p) => p.id}
+                  totalCount={positionTotal}
+                  viewAllHref={`/dashboard/positions?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No open positions for this executor yet."
+                  renderRow={(p) => {
+                    const sym = symMap.get(p.market_id) ?? p.market_id.slice(0, 8) + "…";
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${p.market_id}`} className="bk-link font-mono">
+                          {sym}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          qty {fmtQty(p.quantity)} · avg{" "}
+                          {p.avg_price != null && String(p.avg_price).trim() !== "" ? fmtQty(p.avg_price) : "—"} ·{" "}
+                          {p.paper ? "paper" : "live"} ·{" "}
+                          <span className="whitespace-nowrap font-mono">{fmtDt(p.updated_at)}</span>
                         </span>
-                        <span className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</span>
-                      </span>
-                    </div>
-                  )}
+                      </div>
+                    );
+                  }}
+                />
+
+                <RecordRelatedList
+                  title="Orders"
+                  description="Sorted by created time (newest first)."
+                  items={orders}
+                  getKey={(o) => o.id}
+                  totalCount={orderTotal}
+                  viewAllHref={`/dashboard/orders?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No orders for this executor yet."
+                  renderRow={(o) => {
+                    const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Link href={`/dashboard/orders/${o.id}`} className="bk-link font-mono" title={o.id}>
+                            {o.id.slice(0, 8)}…
+                          </Link>
+                          <span className="bk-text-muted">·</span>
+                          <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link font-mono">
+                            {sym}
+                          </Link>
+                        </span>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          <span className="font-mono">{o.side}</span> · {fmtEur(o.notional_eur)} ·{" "}
+                          <span className={orderStatusClass(o.status)}>{o.status}</span> ·{" "}
+                          <span className="whitespace-nowrap font-mono">{fmtDt(o.created_at)}</span>
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
+
+                <RecordRelatedList
+                  title="Trade decisions"
+                  description="Approved first · bar close desc · one row per market · preview 10."
+                  items={tradeDecisionsSorted}
+                  getKey={(r) => r.id}
+                  totalCount={tradeDecisionTotal}
+                  viewAllHref={`/dashboard/trade-decisions?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No trade decisions for this executor yet."
+                  renderRow={(row) => {
+                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
+                    const resolved = resolvedIntentFromRow(row);
+                    const reasons = formatReasonCodes(row.reason_codes);
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
+                          {mLabel}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          <span className={intentClassDecision(resolved)}>{resolved}</span>
+                          {" · "}
+                          <span className={approvedClass(row.approved)}>{row.approved ? "approved" : "rejected"}</span>
+                          {" · "}
+                          {row.timeframe} · <span className="font-mono">{fmtDt(row.close_time)}</span>
+                          {reasons !== "—" ? (
+                            <>
+                              {" · "}
+                              <span className="max-w-[12rem] truncate font-mono" title={reasons}>
+                                {reasons}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      </div>
+                    );
+                  }}
                 />
 
                 <RecordRelatedList
@@ -503,112 +577,81 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     </div>
                   )}
                 />
-
-                <RecordRelatedList
-                  title="Trade decisions"
-                  description="Approved first · bar close desc · one row per market · preview 10."
-                  items={tradeDecisionsSorted}
-                  getKey={(r) => r.id}
-                  totalCount={tradeDecisionTotal}
-                  viewAllHref={`/dashboard/trade-decisions?executorId=${encodeURIComponent(id)}`}
-                  emptyMessage="No trade decisions for this executor yet."
-                  renderRow={(row) => {
-                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
-                    const resolved = resolvedIntentFromRow(row);
-                    const reasons = formatReasonCodes(row.reason_codes);
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
-                          {mLabel}
-                        </Link>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          <span className={intentClassDecision(resolved)}>{resolved}</span>
-                          {" · "}
-                          <span className={approvedClass(row.approved)}>{row.approved ? "approved" : "rejected"}</span>
-                          {" · "}
-                          {row.timeframe} · <span className="font-mono">{fmtDt(row.close_time)}</span>
-                          {reasons !== "—" ? (
-                            <>
-                              {" · "}
-                              <span className="max-w-[12rem] truncate font-mono" title={reasons}>
-                                {reasons}
-                              </span>
-                            </>
-                          ) : null}
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
-
-                <RecordRelatedList
-                  title="Orders"
-                  description="Sorted by created time (newest first)."
-                  items={orders}
-                  getKey={(o) => o.id}
-                  totalCount={orderTotal}
-                  viewAllHref={`/dashboard/orders?executorId=${encodeURIComponent(id)}`}
-                  emptyMessage="No orders for this executor yet."
-                  renderRow={(o) => {
-                    const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <Link href={`/dashboard/orders/${o.id}`} className="bk-link font-mono" title={o.id}>
-                            {o.id.slice(0, 8)}…
-                          </Link>
-                          <span className="bk-text-muted">·</span>
-                          <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link font-mono">
-                            {sym}
-                          </Link>
-                        </span>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          <span className="font-mono">{o.side}</span> · {fmtEur(o.notional_eur)} ·{" "}
-                          <span className={orderStatusClass(o.status)}>{o.status}</span> ·{" "}
-                          <span className="whitespace-nowrap font-mono">{fmtDt(o.created_at)}</span>
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
-
-                <RecordRelatedList
-                  title="Positions"
-                  description="Sorted by updated date (newest first)."
-                  items={positions}
-                  getKey={(p) => p.id}
-                  totalCount={positionTotal}
-                  viewAllHref={`/dashboard/positions?executorId=${encodeURIComponent(id)}`}
-                  emptyMessage="No open positions for this executor yet."
-                  renderRow={(p) => {
-                    const sym = symMap.get(p.market_id) ?? p.market_id.slice(0, 8) + "…";
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <Link href={`/dashboard/markets/${p.market_id}`} className="bk-link font-mono">
-                          {sym}
-                        </Link>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          qty {fmtQty(p.quantity)} · avg{" "}
-                          {p.avg_price != null && String(p.avg_price).trim() !== "" ? fmtQty(p.avg_price) : "—"} ·{" "}
-                          {p.paper ? "paper" : "live"} ·{" "}
-                          <span className="whitespace-nowrap font-mono">{fmtDt(p.updated_at)}</span>
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
               </CardBody>
             </Card>
           }
         />
       }
       sidebar={
-        <Card>
-          <CardBody className="bk-stack bk-stack_gap-md">
-            <p className="bk-text-muted text-sm">Balance & transfers</p>
-            <ExecutorBalancePanel executorId={id} />
-          </CardBody>
-        </Card>
+        <div className="bk-stack bk-stack_gap-md">
+          <p className="bk-text-muted text-xs font-medium uppercase tracking-wide">Reports</p>
+          <Card>
+            <CardBody>
+              <p className="bk-text-muted text-xs">Balance (EUR)</p>
+              <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
+              <p className="bk-text-muted mt-2 text-xs">
+                Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
+              </p>
+              <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
+              <p className="mt-1 font-mono text-lg">
+                {pnl.unrealizedEur == null ? "—" : fmtEur(pnl.unrealizedEur)}
+              </p>
+              <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
+              <p className="mt-1 font-mono text-lg">{fmtEur(pnl.openCostBasisEur)}</p>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
+              <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
+            </CardBody>
+          </Card>
+
+          <Card className="mt-4">
+            <CardBody className="!pt-4">
+              <RecordRelatedList
+                title="Executor balance ledger"
+                description={
+                  ledgerFull && ledgerTotal > ledger.length
+                    ? `Sorted by created date (newest first) · loaded ${ledger.length} of ${ledgerTotal} (in-page cap ${EXECUTOR_LEDGER_FULL_FETCH_CAP}).`
+                    : ledgerTotal > ledger.length
+                      ? `Sorted by created date (newest first) · preview ${ledgerUiPreviewLimit} of ${ledgerTotal}.`
+                      : "Sorted by created date (newest first)."
+                }
+                items={ledger}
+                getKey={(r) => r.id}
+                totalCount={ledgerTotal}
+                previewLimit={ledgerUiPreviewLimit}
+                viewAllHref={ledgerViewAll}
+                alwaysShowViewAll={!ledgerFull && Boolean(ledgerViewAll)}
+                emptyMessage="No ledger entries yet. Use Add balance in the header to fund this executor."
+                renderRow={(row) => (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                    <span>{ledgerKindLabel(row.kind)}</span>
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                      <span className="font-mono">{fmtEur(row.amount_eur)}</span>
+                      <span>after {fmtEur(row.balance_after_eur)}</span>
+                      <span className="max-w-[200px] truncate" title={row.note ?? undefined}>
+                        {row.note ?? "—"}
+                      </span>
+                      <span className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</span>
+                    </span>
+                  </div>
+                )}
+              />
+            </CardBody>
+          </Card>
+        </div>
       }
     />
   );

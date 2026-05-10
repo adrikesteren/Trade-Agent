@@ -4,7 +4,6 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -68,8 +67,6 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="S" />}
-          breadcrumb={<Breadcrumbs items={[{ label: "Sync runs", href: "/dashboard/sync-runs" }, { label: "Detail" }]} />}
-          back={{ href: "/dashboard/sync-runs", label: "← All sync runs" }}
           eyebrow="Sync run"
           title={run.job_key}
           titleClassName="font-mono"

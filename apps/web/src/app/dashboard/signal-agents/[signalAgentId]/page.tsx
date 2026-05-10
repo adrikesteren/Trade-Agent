@@ -3,7 +3,6 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -43,12 +42,6 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="A" />}
-          breadcrumb={
-            <Breadcrumbs
-              items={[{ label: "Signal agents", href: "/dashboard/signal-agents" }, { label: "Detail" }]}
-            />
-          }
-          back={{ href: "/dashboard/signal-agents", label: "← All signal agents" }}
           eyebrow="Signal agent"
           title={row.agent_id}
           highlights={

@@ -4,7 +4,6 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -115,8 +114,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="O" />}
-          breadcrumb={<Breadcrumbs items={[{ label: "Orders", href: "/dashboard/orders" }, { label: "Detail" }]} />}
-          back={{ href: "/dashboard/orders", label: "← All orders" }}
           eyebrow="Order"
           title={titleLabel}
           titleClassName="font-mono"

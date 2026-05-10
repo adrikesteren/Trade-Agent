@@ -4,7 +4,6 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -55,10 +54,6 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="E" />}
-          breadcrumb={
-            <Breadcrumbs items={[{ label: "Exchanges", href: "/dashboard/exchanges" }, { label: "Detail" }]} />
-          }
-          back={{ href: "/dashboard/exchanges", label: "← All exchanges" }}
           eyebrow="Exchange"
           title={ex.name}
           highlights={

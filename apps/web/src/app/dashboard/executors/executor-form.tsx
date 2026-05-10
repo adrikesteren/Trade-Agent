@@ -31,11 +31,14 @@ export function ExecutorForm({
   executorId,
   assetOptions,
   initial,
+  onSaved,
 }: {
   mode: "create" | "edit";
   executorId?: string;
   assetOptions: AssetOption[];
   initial?: ExecutorFormInitial;
+  /** Called after a successful create or update (server action completed without throwing). */
+  onSaved?: () => void;
 }) {
   const [filterMode, setFilterMode] = useState<ExecutorAssetFilterMode>(initial?.asset_filter_mode ?? "all");
   const [execMode, setExecMode] = useState<ExecutionModeValue>(initial?.execution_mode ?? "paper");
@@ -52,6 +55,7 @@ export function ExecutorForm({
               if (!executorId) throw new Error("Missing executor id");
               await updateExecutor(executorId, formData);
             }
+            onSaved?.();
           }}
         >
           {mode === "edit" && initial ? (

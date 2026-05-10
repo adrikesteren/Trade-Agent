@@ -12,7 +12,6 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -82,8 +81,6 @@ export default async function AssetDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="A" />}
-          breadcrumb={<Breadcrumbs items={[{ label: "Assets", href: "/dashboard/assets" }, { label: "Detail" }]} />}
-          back={{ href: "/dashboard/assets", label: "← All assets" }}
           eyebrow="Asset"
           title={
             <>

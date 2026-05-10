@@ -11,7 +11,7 @@ export type RecordDetailTabsProps = {
 /** Salesforce-style Details / Related tabs for record pages (used inside `DetailPageLayout` `content`). */
 export function RecordDetailTabs({ details, related }: RecordDetailTabsProps) {
   return (
-    <Tabs defaultValue="details" className="w-full min-w-0">
+    <Tabs defaultValue="related" className="w-full min-w-0">
       <TabsList>
         <TabsTrigger value="details">Details</TabsTrigger>
         <TabsTrigger value="related">Related</TabsTrigger>

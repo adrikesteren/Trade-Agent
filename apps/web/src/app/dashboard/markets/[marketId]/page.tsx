@@ -8,7 +8,6 @@ import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Breadcrumbs,
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
@@ -124,8 +123,6 @@ export default async function MarketDetailPage({ params }: PageProps) {
         <PageHeader
           variant="detail"
           icon={<ListViewObjectIcon letter="M" />}
-          breadcrumb={<Breadcrumbs items={[{ label: "Markets", href: "/dashboard/markets" }, { label: "Pair" }]} />}
-          back={{ href: "/dashboard/markets", label: "← All markets" }}
           eyebrow="Market"
           title={market.market_symbol}
           titleClassName="font-mono"
