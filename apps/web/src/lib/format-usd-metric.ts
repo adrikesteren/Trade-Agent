@@ -1,14 +1,13 @@
-/** Compact USD for tables (CoinGecko-style amounts). */
-export function formatUsdMetric(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  const n = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(n)) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: Math.abs(n) >= 1_000_000 ? "compact" : "standard",
-    maximumFractionDigits: Math.abs(n) < 1 ? 6 : 2,
-  }).format(n);
+import { DEFAULT_USER_LOCALE_PREFERENCES } from "@/lib/locale/defaults";
+import { formatUsdAmount } from "@/lib/locale/format";
+import type { UserLocalePreferences } from "@/lib/locale/types";
+
+/** Compact USD for tables (CoinGecko-style amounts); grouping follows user `decimal_format` when `prefs` is passed. */
+export function formatUsdMetric(
+  value: number | string | null | undefined,
+  prefs: UserLocalePreferences = DEFAULT_USER_LOCALE_PREFERENCES,
+): string {
+  return formatUsdAmount(value, prefs, { compactAbove: 1_000_000 });
 }
 
 export function numericOrNegInf(value: number | string | null | undefined): number {

@@ -1,3 +1,6 @@
+import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { formatDatetime } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
   Breadcrumbs,
@@ -16,6 +19,8 @@ type PageProps = { params: Promise<{ signalAgentId: string }> };
 export default async function SignalAgentDetailPage({ params }: PageProps) {
   const { signalAgentId } = await params;
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
+  const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
   const { data: row, error } = await supabase
     .schema("trading")
@@ -34,7 +39,6 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      style={{ maxWidth: "48rem" }}
       header={
         <PageHeader
           variant="detail"
@@ -57,22 +61,27 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailCard>
-          <RecordDetailSection title="Details">
-            <RecordDetailGrid>
-              <Output label="Record ID" type="text" value={row.id} span="full" />
-              <Output label="Agent key" type="text" value={row.agent_id} />
-              <Output label="Allowed timeframes" type="text" value={allowedLabel} span="full" />
-              <Output label="Description" type="text" value={row.description?.trim() ? row.description : "—"} span="full" />
-              <Output label="Created" type="datetime" value={row.created_at} />
-              <Output label="Updated" type="datetime" value={row.updated_at} />
-            </RecordDetailGrid>
-          </RecordDetailSection>
+        <RecordDetailTabs
+          details={
+            <RecordDetailCard>
+              <RecordDetailSection title="Details">
+                <RecordDetailGrid>
+                  <Output label="Record ID" type="text" value={row.id} span="full" />
+                  <Output label="Agent key" type="text" value={row.agent_id} />
+                  <Output label="Allowed timeframes" type="text" value={allowedLabel} span="full" />
+                  <Output label="Description" type="text" value={row.description?.trim() ? row.description : "—"} span="full" />
+                  <Output label="Created" type="datetime" value={row.created_at} formatDatetime={formatDt} />
+                  <Output label="Updated" type="datetime" value={row.updated_at} formatDatetime={formatDt} />
+                </RecordDetailGrid>
+              </RecordDetailSection>
 
-          <RecordDetailSection title="Config (JSON)">
-            <Output label="config" type="codeblock" value={JSON.stringify(row.config ?? {}, null, 2)} span="full" />
-          </RecordDetailSection>
-        </RecordDetailCard>
+              <RecordDetailSection title="Config (JSON)">
+                <Output label="config" type="codeblock" value={JSON.stringify(row.config ?? {}, null, 2)} span="full" />
+              </RecordDetailSection>
+            </RecordDetailCard>
+          }
+          related={<p className="bk-text-muted text-sm">No related lists for this signal agent yet.</p>}
+        />
       }
     />
   );

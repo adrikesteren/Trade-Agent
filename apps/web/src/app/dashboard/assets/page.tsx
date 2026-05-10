@@ -1,4 +1,5 @@
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -27,6 +28,7 @@ type AssetRow = {
 
 export default async function AssetsIndexPage() {
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
 
   const { data: rows, error } = await supabase
     .schema("catalog")
@@ -101,8 +103,8 @@ export default async function AssetsIndexPage() {
                     </Td>
                     <Td className="font-mono">{r.code}</Td>
                     <Td>{r.kind}</Td>
-                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_market_cap_usd)}</Td>
-                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_total_volume_usd)}</Td>
+                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_market_cap_usd, prefs)}</Td>
+                    <Td className="text-right font-mono">{formatUsdMetric(r.coingecko_total_volume_usd, prefs)}</Td>
                   </tr>
                 ))}
                 {!sortedRows.length ? (

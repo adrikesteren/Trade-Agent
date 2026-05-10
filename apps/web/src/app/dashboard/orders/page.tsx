@@ -1,4 +1,6 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { formatDatetime, formatDecimal } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -33,20 +35,6 @@ type CatalogMarketRow = {
 };
 
 const MARKET_ID_CHUNK = 120;
-
-function fmtUtc(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toISOString().slice(0, 19).replace("T", " ");
-}
-
-function fmtNum(v: string | number | null | undefined, decimals: number): string {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return n.toFixed(decimals);
-}
 
 function statusClass(status: string): string {
   const s = status.toLowerCase();
@@ -99,9 +87,23 @@ async function fetchExecutorNamesById(
   return map;
 }
 
-export default async function OrdersPage() {
+type OrdersPageProps = {
+  searchParams?: Promise<{ executorId?: string | string[] }>;
+};
+
+export default async function OrdersPage({ searchParams }: OrdersPageProps) {
+  const sp = (await searchParams) ?? {};
+  const executorIdFilter = typeof sp.executorId === "string" && sp.executorId.trim() ? sp.executorId.trim() : null;
+
   const supabase = await createClient();
-  const { data: rows, error } = await supabase
+  const prefs = await getUserLocalePreferences();
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtQty = (v: string | number | null | undefined) =>
+    formatDecimal(v, prefs, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+  const fmtEur = (v: string | number | null | undefined) =>
+    formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  let q = supabase
     .schema("trading")
     .from("orders")
     .select(
@@ -109,6 +111,10 @@ export default async function OrdersPage() {
     )
     .order("created_at", { ascending: false })
     .limit(200);
+  if (executorIdFilter) {
+    q = q.eq("executor_id", executorIdFilter);
+  }
+  const { data: rows, error } = await q;
 
   const list = (rows ?? []) as OrderRow[];
   const marketIds = [...new Set(list.map((r) => r.market_id))];
@@ -123,7 +129,11 @@ export default async function OrdersPage() {
         title="Orders"
         iconLetter="O"
         rowCount={list.length}
-        sortLine="Sorted by Created (UTC) · max 200 rows"
+        sortLine={
+          executorIdFilter
+            ? `Filtered by executor · sorted by Created · max 200 rows`
+            : "Sorted by Created · max 200 rows"
+        }
         actions={
           <>
             <Link href="/dashboard/trade-decisions" className={listViewOutlineActionClass}>
@@ -154,7 +164,7 @@ export default async function OrdersPage() {
                   <Th>Paper</Th>
                   <Th>External</Th>
                   <Th>Decision</Th>
-                  <Th>Created (UTC)</Th>
+                  <Th>Created</Th>
                 </tr>
               </thead>
               <tbody>
@@ -175,8 +185,8 @@ export default async function OrdersPage() {
                         </Link>
                       </Td>
                       <Td className="font-mono">{row.side}</Td>
-                      <Td className="text-right font-mono">{fmtNum(row.quantity, 8)}</Td>
-                      <Td className="text-right font-mono">{fmtNum(row.notional_eur, 2)}</Td>
+                      <Td className="text-right font-mono">{fmtQty(row.quantity)}</Td>
+                      <Td className="text-right font-mono">{fmtEur(row.notional_eur)}</Td>
                       <Td>
                         <span className={statusClass(row.status)}>{row.status}</span>
                       </Td>
@@ -191,7 +201,7 @@ export default async function OrdersPage() {
                           "—"
                         )}
                       </Td>
-                      <Td className="whitespace-nowrap font-mono">{fmtUtc(row.created_at)}</Td>
+                      <Td className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</Td>
                     </tr>
                   );
                 })}

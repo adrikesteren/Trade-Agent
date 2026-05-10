@@ -9,7 +9,7 @@ export default async function Home() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="bk-container mx-auto max-w-2xl px-4 py-20">
+    <main className="bk-container w-full px-4 py-20">
       <Stack gap="lg">
         <div>
           <h1 className="bk-page-header_title" style={{ fontSize: "1.875rem" }}>

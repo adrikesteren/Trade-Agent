@@ -1,6 +1,8 @@
 "use client";
 
 import { SyncJobsOverviewTable, type SyncJobsOverviewRow } from "@/components/sync-jobs-overview-table";
+import { formatDatetime } from "@/lib/locale/format";
+import type { UserLocalePreferences } from "@/lib/locale/types";
 import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { type BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
@@ -133,15 +135,22 @@ export function SyncRunsLiveClient({
   initialRuns,
   initialError,
   overviewTemplate,
+  localePrefs,
 }: {
   initialRuns: SyncRunRow[];
   initialError: string | null;
   overviewTemplate: SyncRunsOverviewTemplate[];
+  localePrefs: UserLocalePreferences;
 }) {
   const router = useRouter();
   const [runs, setRuns] = useState<SyncRunRow[]>(() => [...initialRuns].sort(sortByCreatedDesc));
   const [fetchError] = useState<string | null>(initialError);
   const { ready, nowMs } = useClientTick();
+
+  const formatRunDatetime = useCallback(
+    (iso: string | null | undefined) => (iso ? formatDatetime(iso, localePrefs) : "—"),
+    [localePrefs],
+  );
 
   const overviewRows: SyncJobsOverviewRow[] = useMemo(() => {
     const latestByJob = new Map<string, SyncRunRow>();
@@ -195,7 +204,7 @@ export function SyncRunsLiveClient({
 
   return (
     <>
-      <SyncJobsOverviewTable rows={overviewRows} onSyncDone={() => router.refresh()} />
+      <SyncJobsOverviewTable rows={overviewRows} localePrefs={localePrefs} onSyncDone={() => router.refresh()} />
 
       <Card>
         <CardBody>
@@ -250,16 +259,8 @@ export function SyncRunsLiveClient({
                       <MetadataCell metadata={r.metadata} />
                     </Td>
                     <Td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</Td>
-                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">
-                      {r.created_at
-                        ? new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                        : "—"}
-                    </Td>
-                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">
-                      {r.ended_at
-                        ? new Date(r.ended_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
-                        : "—"}
-                    </Td>
+                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">{formatRunDatetime(r.created_at)}</Td>
+                    <Td className="bk-text-muted py-1.5 pr-2 font-mono">{formatRunDatetime(r.ended_at)}</Td>
                     <Td className="bk-text-muted py-1.5 pr-2 font-mono">
                       <ElapsedCell r={r} nowMs={nowMs} ready={ready} />
                     </Td>

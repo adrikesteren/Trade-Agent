@@ -1,7 +1,12 @@
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "@/app/dashboard/executors/actions";
 import { ExecutorBalancePanel } from "@/app/dashboard/executors/[id]/executor-balance-panel";
+import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/dashboard/executors/[id]/executor-related-load";
+import { compareTradeDecisionsByCloseThenApproved } from "@/app/dashboard/executors/[id]/executor-related-sort";
 import { ExecutorForm, type AssetOption, type ExecutorFormInitial } from "@/app/dashboard/executors/executor-form";
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { formatDatetime, formatDecimal } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { loadExecutorPnlSnapshot } from "@/lib/trading/executor-pnl";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -10,10 +15,7 @@ import {
   Card,
   CardBody,
   DetailPageLayout,
-  Table,
-  TableWrap,
-  Td,
-  Th,
+  RecordRelatedList,
   listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
@@ -34,6 +36,20 @@ async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[
   return ((data ?? []) as { id: string; code: string }[]).map((a) => ({ id: a.id, code: a.code }));
 }
 
+async function marketSymbolMap(supabase: SupabaseClient, ids: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const uniq = [...new Set(ids)].filter(Boolean);
+  for (let i = 0; i < uniq.length; i += 120) {
+    const chunk = uniq.slice(i, i + 120);
+    const { data } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
+    for (const m of data ?? []) {
+      const sym = String((m as { id: string; market_symbol?: string | null }).market_symbol ?? "").trim();
+      if (sym) map.set(m.id as string, sym);
+    }
+  }
+  return map;
+}
+
 type OrderRow = {
   id: string;
   market_id: string;
@@ -52,6 +68,28 @@ type LedgerRow = {
   created_at: string;
 };
 
+type TradeDecisionRow = {
+  id: string;
+  market_id: string;
+  approved: boolean;
+  reason_codes: string[] | null;
+  close_time: string;
+  timeframe: string;
+  decision_payload: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type RiskStateRow = {
+  id: string;
+  equity_eur: string | number | null;
+  open_position_count: number;
+  daily_pnl_eur: string | number | null;
+  max_drawdown_eur: string | number | null;
+  kill_switch: boolean;
+  consecutive_losses: number;
+  updated_at: string;
+};
+
 function ledgerKindLabel(kind: string): string {
   switch (kind) {
     case "deposit":
@@ -67,20 +105,71 @@ function ledgerKindLabel(kind: string): string {
   }
 }
 
-function fmtNum(v: string | number | null | undefined, decimals: number): string {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return n.toFixed(decimals);
+function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
+  if (!payload) return null;
+  const v = payload[key];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-export default async function ExecutorDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function resolvedIntentFromRow(row: TradeDecisionRow): string {
+  const fromPayload = payloadString(row.decision_payload, "resolvedIntent");
+  if (fromPayload) return fromPayload;
+  return "—";
+}
+
+function intentClassSignal(intent: string): string {
+  if (intent === "ENTER") return "font-medium text-emerald-700 dark:text-emerald-400";
+  if (intent === "EXIT") return "font-medium text-red-700 dark:text-red-400";
+  if (intent === "HOLD") return "bk-text-muted";
+  return "";
+}
+
+function intentClassDecision(intent: string): string {
+  if (intent === "ENTER") return "font-medium text-emerald-700 dark:text-emerald-400";
+  if (intent === "EXIT" || intent === "REDUCE") return "font-medium text-amber-700 dark:text-amber-400";
+  if (intent === "HOLD") return "bk-text-muted";
+  return "";
+}
+
+function approvedClass(approved: boolean): string {
+  return approved ? "font-medium text-emerald-700 dark:text-emerald-400" : "bk-text-muted";
+}
+
+function formatReasonCodes(codes: string[] | null | undefined): string {
+  if (!codes?.length) return "—";
+  return codes.join(", ");
+}
+
+function orderStatusClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "filled") return "font-medium text-emerald-700 dark:text-emerald-400";
+  if (s === "open" || s === "pending") return "font-medium text-amber-700 dark:text-amber-400";
+  if (s === "rejected" || s === "cancelled") return "bk-text-muted";
+  return "";
+}
+
+type ExecutorPageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ ledger?: string | string[] }>;
+};
+
+export default async function ExecutorDetailPage({ params, searchParams }: ExecutorPageProps) {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const ledgerParam = sp.ledger;
+  const ledgerFull =
+    ledgerParam === "all" || ledgerParam === "full" || (Array.isArray(ledgerParam) && ledgerParam.includes("all"));
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  const prefs = await getUserLocalePreferences();
+  const fmtEur = (v: string | number | null | undefined) =>
+    formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
 
   const { data: ex, error: exErr } = await supabase
     .schema("trading")
@@ -129,33 +218,68 @@ export default async function ExecutorDetailPage({ params }: { params: Promise<{
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const { data: ledgerRows, error: lgErr } = await supabase
+  const ledgerLimit = ledgerFull ? 500 : 10;
+  const { data: ledgerRows, count: ledgerCount, error: lgErr } = await supabase
     .schema("trading")
     .from("executor_balance_ledger")
-    .select("id, kind, amount_eur, balance_after_eur, note, created_at")
+    .select("id, kind, amount_eur, balance_after_eur, note, created_at", { count: "exact" })
     .eq("executor_id", id)
-    .order("created_at", { ascending: false })
-    .limit(100);
+    .order("created_at", { ascending: true })
+    .limit(ledgerLimit);
 
   const ledger = (ledgerRows ?? []) as LedgerRow[];
+  const ledgerTotal = typeof ledgerCount === "number" ? ledgerCount : ledger.length;
 
-  const { data: ordRows, error: ordErr } = await supabase
+  const { data: ordRows, count: orderCount, error: ordErr } = await supabase
     .schema("trading")
     .from("orders")
-    .select("id, market_id, side, notional_eur, status, created_at")
+    .select("id, market_id, side, notional_eur, status, created_at", { count: "exact" })
     .eq("executor_id", id)
     .order("created_at", { ascending: false })
-    .limit(40);
+    .limit(10);
 
   const orders = (ordRows ?? []) as OrderRow[];
-  const marketIds = [...new Set(orders.map((o) => o.market_id))];
-  const symMap = new Map<string, string>();
-  if (marketIds.length) {
-    const { data: mkts } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", marketIds);
-    for (const m of mkts ?? []) {
-      symMap.set(m.id as string, String(m.market_symbol ?? ""));
-    }
-  }
+  const orderTotal = typeof orderCount === "number" ? orderCount : orders.length;
+
+  const { data: tdRows, count: tdCount, error: tdErr } = await supabase
+    .schema("trading")
+    .from("trade_decisions")
+    .select(
+      "id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
+      { count: "exact" },
+    )
+    .eq("executor_id", id)
+    .limit(200);
+
+  const tradeDecisionsSorted = [...((tdRows ?? []) as TradeDecisionRow[])].sort(compareTradeDecisionsByCloseThenApproved);
+  const tradeDecisionTotal = typeof tdCount === "number" ? tdCount : tradeDecisionsSorted.length;
+
+  const { data: rsListRows, count: rsCount, error: rsListErr } = await supabase
+    .schema("trading")
+    .from("risk_state")
+    .select(
+      "id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
+      { count: "exact" },
+    )
+    .eq("executor_id", id)
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false })
+    .limit(10);
+
+  const riskStates = (rsListRows ?? []) as RiskStateRow[];
+  const riskStateTotal = typeof rsCount === "number" ? rsCount : riskStates.length;
+
+  const { rows: signalRows, error: sigErrMsg } = await fetchSignalsLinkedViaDecisions(supabase, id);
+
+  const marketIdsForLabels = [
+    ...orders.map((o) => o.market_id),
+    ...tradeDecisionsSorted.map((d) => d.market_id),
+    ...signalRows.map((s) => s.market_id),
+  ];
+  const symMap = await marketSymbolMap(supabase, marketIdsForLabels);
+
+  const ledgerViewAll = ledgerFull ? undefined : `/dashboard/executors/${id}?ledger=all`;
+  const ledgerPreview = ledgerFull ? 500 : 10;
 
   return (
     <DetailPageLayout
@@ -166,7 +290,7 @@ export default async function ExecutorDetailPage({ params }: { params: Promise<{
             eyebrow="Trading"
             title={String(ex.name)}
             iconLetter="E"
-            rowCount={orders.length}
+            rowCount={orderTotal}
             sortLine="Executor portfolio"
             actions={
               <Link href="/dashboard/executors" className={listViewOutlineActionClass}>
@@ -174,141 +298,214 @@ export default async function ExecutorDetailPage({ params }: { params: Promise<{
               </Link>
             }
           />
+          {ledgerFull ? (
+            <Alert tone="info">
+              Showing full balance ledger (newest cap 500 rows).{" "}
+              <Link href={`/dashboard/executors/${id}`} className="bk-link">
+                Back to preview
+              </Link>
+              .
+            </Alert>
+          ) : null}
           {ordErr ? <Alert tone="error">{ordErr.message}</Alert> : null}
           {rsErr ? <Alert tone="error">{rsErr.message}</Alert> : null}
+          {rsListErr ? <Alert tone="error">{rsListErr.message}</Alert> : null}
           {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
+          {tdErr ? <Alert tone="error">{tdErr.message}</Alert> : null}
+          {sigErrMsg ? <Alert tone="error">{sigErrMsg}</Alert> : null}
         </div>
       }
       content={
-        <div className="bk-stack bk-stack_gap-md">
-          <div className="grid gap-3 md:grid-cols-4">
+        <RecordDetailTabs
+          details={
+            <div className="bk-stack bk-stack_gap-md">
+              <div className="grid gap-3 md:grid-cols-4">
+                <Card>
+                  <CardBody>
+                    <p className="bk-text-muted text-xs">Balance (EUR)</p>
+                    <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
+                    <p className="bk-text-muted mt-2 text-xs">
+                      Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
+                    </p>
+                    <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
+                  </CardBody>
+                </Card>
+                <Card>
+                  <CardBody>
+                    <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
+                    <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
+                  </CardBody>
+                </Card>
+                <Card>
+                  <CardBody>
+                    <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
+                    <p className="mt-1 font-mono text-lg">{fmtEur(pnl.openCostBasisEur)}</p>
+                  </CardBody>
+                </Card>
+                <Card>
+                  <CardBody>
+                    <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
+                    <p className="mt-1 font-mono text-lg">
+                      {pnl.unrealizedEur == null ? "—" : fmtEur(pnl.unrealizedEur)}
+                    </p>
+                    <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
+                  </CardBody>
+                </Card>
+              </div>
+
+              <Card>
+                <CardBody className="bk-stack bk-stack_gap-md">
+                  <p className="bk-text-muted text-sm">Balance & transfers</p>
+                  <ExecutorBalancePanel executorId={id} />
+                </CardBody>
+              </Card>
+
+              <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
+            </div>
+          }
+          related={
             <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Balance (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtNum(rsRow?.equity_eur ?? 0, 2)}</p>
-                <p className="bk-text-muted mt-2 text-xs">
-                  Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
-                </p>
-                <p className="bk-text-muted mt-1 text-xs font-mono">
-                  Updated {rsRow?.updated_at ? String(rsRow.updated_at).slice(0, 19).replace("T", " ") + " UTC" : "—"}
-                </p>
+              <CardBody className="bk-stack bk-stack_gap-md !pt-4">
+                <RecordRelatedList
+                  title="Executor balance ledger"
+                  description={
+                    ledgerTotal > ledger.length
+                      ? `Sorted oldest first · preview ${ledger.length} of ${ledgerTotal}.`
+                      : "Sorted oldest first."
+                  }
+                  items={ledger}
+                  getKey={(r) => r.id}
+                  totalCount={ledgerTotal}
+                  previewLimit={ledgerPreview}
+                  viewAllHref={ledgerViewAll}
+                  emptyMessage="No ledger entries yet. Use Add balance to fund this executor."
+                  renderRow={(row) => (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                      <span>{ledgerKindLabel(row.kind)}</span>
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1 bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                        <span className="font-mono">{fmtEur(row.amount_eur)}</span>
+                        <span>after {fmtEur(row.balance_after_eur)}</span>
+                        <span className="max-w-[200px] truncate" title={row.note ?? undefined}>
+                          {row.note ?? "—"}
+                        </span>
+                        <span className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</span>
+                      </span>
+                    </div>
+                  )}
+                />
+
+                <RecordRelatedList
+                  title="Signals"
+                  description="Linked via trade decisions for this executor · bar close time desc, then ENTER → EXIT → other."
+                  items={signalRows}
+                  getKey={(r) => r.id}
+                  totalCount={signalRows.length}
+                  viewAllHref="/dashboard/signals"
+                  emptyMessage="No linked signals yet (no trade decisions with signal_id for this executor)."
+                  renderRow={(row) => {
+                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
+                    const summary = formatExecutorSignalSummary(row, mLabel);
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
+                          {mLabel}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          <span className={intentClassSignal(row.intent)}>{row.intent}</span>
+                          {" · "}
+                          {summary}
+                          {" · "}
+                          <span className="whitespace-nowrap font-mono">{fmtDt(row.close_time)}</span>
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
+
+                <RecordRelatedList
+                  title="Risk states"
+                  description="Risk book rows for this executor."
+                  items={riskStates}
+                  getKey={(r) => r.id}
+                  totalCount={riskStateTotal}
+                  viewAllHref={`/dashboard/risk-state?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No risk state row for this executor."
+                  renderRow={(r) => (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                      <span className="font-mono">Equity {fmtEur(r.equity_eur)}</span>
+                      <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                        Open {r.open_position_count} · daily PnL {fmtEur(r.daily_pnl_eur)} · kill {r.kill_switch ? "on" : "off"}{" "}
+                        · updated {fmtDt(r.updated_at)}
+                      </span>
+                    </div>
+                  )}
+                />
+
+                <RecordRelatedList
+                  title="Trade decisions"
+                  description="Bar close time desc · approved first when close time ties."
+                  items={tradeDecisionsSorted}
+                  getKey={(r) => r.id}
+                  totalCount={tradeDecisionTotal}
+                  viewAllHref={`/dashboard/trade-decisions?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No trade decisions for this executor yet."
+                  renderRow={(row) => {
+                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
+                    const resolved = resolvedIntentFromRow(row);
+                    const reasons = formatReasonCodes(row.reason_codes);
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${row.market_id}`} className="bk-link font-mono">
+                          {mLabel}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          <span className={intentClassDecision(resolved)}>{resolved}</span>
+                          {" · "}
+                          <span className={approvedClass(row.approved)}>{row.approved ? "approved" : "rejected"}</span>
+                          {" · "}
+                          {row.timeframe} · <span className="font-mono">{fmtDt(row.close_time)}</span>
+                          {reasons !== "—" ? (
+                            <>
+                              {" · "}
+                              <span className="max-w-[12rem] truncate font-mono" title={reasons}>
+                                {reasons}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
+
+                <RecordRelatedList
+                  title="Orders"
+                  description="Sorted by created time (newest first)."
+                  items={orders}
+                  getKey={(o) => o.id}
+                  totalCount={orderTotal}
+                  viewAllHref={`/dashboard/orders?executorId=${encodeURIComponent(id)}`}
+                  emptyMessage="No orders for this executor yet."
+                  renderRow={(o) => {
+                    const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                        <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link font-mono">
+                          {sym}
+                        </Link>
+                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
+                          <span className="font-mono">{o.side}</span> · {fmtEur(o.notional_eur)} ·{" "}
+                          <span className={orderStatusClass(o.status)}>{o.status}</span> ·{" "}
+                          <span className="whitespace-nowrap font-mono">{fmtDt(o.created_at)}</span>
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
               </CardBody>
             </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Filled buy notional (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtNum(pnl.filledBuyNotionalEur, 2)}</p>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Open cost basis (EUR)</p>
-                <p className="mt-1 font-mono text-lg">{fmtNum(pnl.openCostBasisEur, 2)}</p>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardBody>
-                <p className="bk-text-muted text-xs">Unrealized (mark − cost)</p>
-                <p className="mt-1 font-mono text-lg">
-                  {pnl.unrealizedEur == null ? "—" : fmtNum(pnl.unrealizedEur, 2)}
-                </p>
-                <p className="bk-text-muted mt-2 text-xs">Mark uses latest catalog closes per open market.</p>
-              </CardBody>
-            </Card>
-          </div>
-
-          <Card>
-            <CardBody className="bk-stack bk-stack_gap-md">
-              <p className="bk-text-muted text-sm">Balance & transfers</p>
-              <ExecutorBalancePanel executorId={id} />
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardBody className="!pt-0">
-              <p className="bk-text-muted mb-2 text-sm">Activity (ledger)</p>
-              <TableWrap>
-                <Table className="text-xs">
-                  <thead>
-                    <tr>
-                      <Th>Type</Th>
-                      <Th className="text-right">Amount (EUR)</Th>
-                      <Th className="text-right">Balance after</Th>
-                      <Th>Note</Th>
-                      <Th>Time (UTC)</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledger.map((row) => (
-                      <tr key={row.id}>
-                        <Td>{ledgerKindLabel(row.kind)}</Td>
-                        <Td className="text-right font-mono">{fmtNum(row.amount_eur, 2)}</Td>
-                        <Td className="text-right font-mono">{fmtNum(row.balance_after_eur, 2)}</Td>
-                        <Td className="max-w-[200px] truncate">{row.note ?? "—"}</Td>
-                        <Td className="whitespace-nowrap font-mono">
-                          {String(row.created_at).slice(0, 19).replace("T", " ")}
-                        </Td>
-                      </tr>
-                    ))}
-                    {!ledger.length ? (
-                      <tr>
-                        <Td colSpan={5} muted className="py-6 text-center">
-                          No ledger entries yet. Use Add balance to fund this executor.
-                        </Td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </Table>
-              </TableWrap>
-            </CardBody>
-          </Card>
-
-          <ExecutorForm mode="edit" executorId={id} assetOptions={assetOptions} initial={initial} />
-
-          <Card>
-            <CardBody className="!pt-0">
-              <p className="bk-text-muted mb-2 text-sm">Recent orders (this executor)</p>
-              <TableWrap>
-                <Table className="text-xs">
-                  <thead>
-                    <tr>
-                      <Th>Market</Th>
-                      <Th>Side</Th>
-                      <Th className="text-right">Notional (EUR)</Th>
-                      <Th>Status</Th>
-                      <Th>Created (UTC)</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map((o) => {
-                      const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
-                      return (
-                        <tr key={o.id}>
-                          <Td className="font-mono">
-                            <Link href={`/dashboard/markets/${o.market_id}`} className="bk-link">
-                              {sym}
-                            </Link>
-                          </Td>
-                          <Td className="font-mono">{o.side}</Td>
-                          <Td className="text-right font-mono">{fmtNum(o.notional_eur, 2)}</Td>
-                          <Td>{o.status}</Td>
-                          <Td className="whitespace-nowrap font-mono">{String(o.created_at).slice(0, 19).replace("T", " ")}</Td>
-                        </tr>
-                      );
-                    })}
-                    {!orders.length ? (
-                      <tr>
-                        <Td colSpan={5} muted className="py-6 text-center">
-                          No orders for this executor yet.
-                        </Td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </Table>
-              </TableWrap>
-            </CardBody>
-          </Card>
-        </div>
+          }
+        />
       }
     />
   );

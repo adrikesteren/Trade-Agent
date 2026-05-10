@@ -1,4 +1,5 @@
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -24,6 +25,7 @@ type MarketListingRow = {
 
 export default async function MarketsIndexPage() {
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
 
   const { data: exchange } = await supabase
     .schema("catalog")
@@ -159,10 +161,10 @@ export default async function MarketsIndexPage() {
                         </span>
                       </Td>
                       <Td className="text-right font-mono">
-                        {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null)}
+                        {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null, prefs)}
                       </Td>
                       <Td className="text-right font-mono">
-                        {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null)}
+                        {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null, prefs)}
                       </Td>
                     </tr>
                   );

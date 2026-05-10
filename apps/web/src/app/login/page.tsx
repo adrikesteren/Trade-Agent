@@ -36,7 +36,7 @@ function LoginForm() {
   }
 
   return (
-    <div className="bk-container bk-container_sm mx-auto flex min-h-[60vh] flex-col justify-center px-4">
+    <div className="bk-container flex min-h-[60vh] w-full flex-col justify-center px-6">
       <PageHeader
         title="Sign in"
         subtitle="We email you a one-time link (Supabase Auth). No password stored in this app."
@@ -77,7 +77,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="bk-container bk-container_sm mx-auto px-4 py-16 text-center bk-text-muted">Loading…</div>
+        <div className="bk-container w-full px-6 py-16 text-center bk-text-muted">Loading…</div>
       }
     >
       <LoginForm />

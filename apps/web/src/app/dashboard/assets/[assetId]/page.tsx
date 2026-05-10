@@ -5,6 +5,9 @@ import {
   buildAssetCoingeckoMetricsRow,
   type AssetLiveCoingeckoDb,
 } from "@/components/asset-coingecko-metrics-block";
+import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { formatDatetime } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -16,6 +19,7 @@ import {
   RecordDetailCard,
   RecordDetailGrid,
   RecordDetailSection,
+  RecordRelatedList,
 } from "@repo/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -28,6 +32,8 @@ const ASSET_CG_FIELDS =
 export default async function AssetDetailPage({ params }: PageProps) {
   const { assetId } = await params;
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
+  const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
   const { data: asset, error } = await supabase
     .schema("catalog")
@@ -40,7 +46,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const { data: markets } = await supabase
+  const { data: markets, count: marketCount } = await supabase
     .schema("catalog")
     .from("markets")
     .select(
@@ -51,10 +57,11 @@ export default async function AssetDetailPage({ params }: PageProps) {
       status,
       exchanges ( id, code, name )
     `,
+      { count: "exact" },
     )
     .eq("asset_id", assetId)
     .order("market_symbol", { ascending: true })
-    .limit(100);
+    .limit(10);
 
   const isCrypto = asset.kind === "crypto";
   const meta =
@@ -64,12 +71,12 @@ export default async function AssetDetailPage({ params }: PageProps) {
   const coingeckoIdHint = typeof meta.coingecko_id === "string" ? meta.coingecko_id : null;
 
   const cgRow = isCrypto ? buildAssetCoingeckoMetricsRow(asset as AssetLiveCoingeckoDb, coingeckoIdHint) : null;
-  const pairCount = (markets ?? []).length;
+  const marketRows = markets ?? [];
+  const pairCount = typeof marketCount === "number" ? marketCount : marketRows.length;
 
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      style={{ maxWidth: "48rem" }}
       header={
         <PageHeader
           variant="detail"
@@ -97,38 +104,60 @@ export default async function AssetDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <div className="bk-stack bk-stack_gap-md">
-          {isCrypto && coingeckoIdHint ? (
-            <Alert tone="info" className="text-xs">
-              <span className="bk-form-label" style={{ display: "inline" }}>
-                CoinGecko id (catalog)
-              </span>
-              : <span className="font-mono">{coingeckoIdHint}</span>
-            </Alert>
-          ) : null}
+        <RecordDetailTabs
+          details={
+            <div className="bk-stack bk-stack_gap-md">
+              {isCrypto && coingeckoIdHint ? (
+                <Alert tone="info" className="text-xs">
+                  <span className="bk-form-label" style={{ display: "inline" }}>
+                    CoinGecko id (catalog)
+                  </span>
+                  : <span className="font-mono">{coingeckoIdHint}</span>
+                </Alert>
+              ) : null}
 
-          {isCrypto && cgRow ? (
-            <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} />
-          ) : isCrypto ? (
-            <AssetCoingeckoMetricsNoSnapshot assetCode={asset.code} resolvedCoingeckoId={coingeckoIdHint} />
-          ) : (
-            <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
-          )}
+              {isCrypto && cgRow ? (
+                <AssetCoingeckoMetricsBlock row={cgRow} assetCode={asset.code} localePrefs={prefs} />
+              ) : isCrypto ? (
+                <AssetCoingeckoMetricsNoSnapshot
+                  assetCode={asset.code}
+                  resolvedCoingeckoId={coingeckoIdHint}
+                  localePrefs={prefs}
+                />
+              ) : (
+                <AssetCoingeckoMetricsPlaceholder reason="non_crypto" />
+              )}
 
-          <RecordDetailCard>
-            <RecordDetailSection title="Details">
-              <RecordDetailGrid>
-                <Output label="Record ID" type="text" value={asset.id} span="full" />
-                <Output label="Code" type="text" value={asset.code} />
-                <Output label="Kind" type="text" value={asset.kind} />
-                <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
-                <Output label="Created" type="datetime" value={asset.created_at} />
-              </RecordDetailGrid>
-            </RecordDetailSection>
-
-            <RecordDetailSection title="Markets (pairs)" description="Up to 100 listings that use this asset as base.">
-              <ul className="bk-list-divided">
-                {(markets ?? []).map((m) => {
+              <RecordDetailCard>
+                <RecordDetailSection title="Details">
+                  <RecordDetailGrid>
+                    <Output label="Record ID" type="text" value={asset.id} span="full" />
+                    <Output label="Code" type="text" value={asset.code} />
+                    <Output label="Kind" type="text" value={asset.kind} />
+                    <Output label="Name" type="text" value={asset.name?.trim() ? asset.name : "—"} />
+                    <Output label="Created" type="datetime" value={asset.created_at} formatDatetime={formatDt} />
+                  </RecordDetailGrid>
+                </RecordDetailSection>
+              </RecordDetailCard>
+            </div>
+          }
+          related={
+            <RecordDetailCard>
+              <RecordRelatedList
+                title="Markets (pairs)"
+                description={
+                  pairCount > marketRows.length
+                    ? `Preview: first ${marketRows.length} of ${pairCount} listings using this asset as base.`
+                    : pairCount > 0
+                      ? `Listings that use this asset as base.`
+                      : undefined
+                }
+                items={marketRows}
+                getKey={(m) => m.id}
+                totalCount={typeof marketCount === "number" ? marketCount : undefined}
+                viewAllHref="/dashboard/markets"
+                emptyMessage="No market listings linked yet."
+                renderRow={(m) => {
                   const rawEx = m.exchanges as unknown;
                   const ex = (Array.isArray(rawEx) ? rawEx[0] : rawEx) as {
                     id?: string;
@@ -136,7 +165,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     name?: string;
                   } | null;
                   return (
-                    <li key={m.id} className="flex flex-wrap items-center justify-between gap-2" style={{ fontSize: "0.8125rem" }}>
+                    <div className="flex flex-wrap items-center justify-between gap-2" style={{ fontSize: "0.8125rem" }}>
                       <Link href={`/dashboard/markets/${m.id}`} className="bk-link font-mono">
                         {m.market_symbol}
                       </Link>
@@ -151,18 +180,13 @@ export default async function AssetDetailPage({ params }: PageProps) {
                         <span>·</span>
                         <span>{m.status}</span>
                       </div>
-                    </li>
+                    </div>
                   );
-                })}
-                {!markets?.length ? (
-                  <li className="bk-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
-                    No market listings linked yet.
-                  </li>
-                ) : null}
-              </ul>
-            </RecordDetailSection>
-          </RecordDetailCard>
-        </div>
+                }}
+              />
+            </RecordDetailCard>
+          }
+        />
       }
     />
   );

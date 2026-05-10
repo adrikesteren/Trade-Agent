@@ -1,3 +1,5 @@
+import { formatDatetime, formatDecimal, formatPercentSigned, formatUsdAmount, formatUsdSigned } from "@/lib/locale/format";
+import type { UserLocalePreferences } from "@/lib/locale/types";
 import { Card, CardBody } from "@repo/blocks";
 import Link from "next/link";
 
@@ -49,44 +51,15 @@ function num(v: number | string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function fmtUsd(v: number | string | null | undefined): string {
-  const n = num(v);
-  if (n === null) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: Math.abs(n) >= 1_000_000 ? "compact" : "standard",
-    maximumFractionDigits: Math.abs(n) < 1 ? 6 : 2,
-  }).format(n);
-}
-
-function fmtUsdDelta(v: number | string | null | undefined): string {
-  const n = num(v);
-  if (n === null) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    signDisplay: "exceptZero",
-    maximumFractionDigits: 2,
-  }).format(n);
-}
-
-function fmtPct(v: number | string | null | undefined): string {
-  const n = num(v);
-  if (n === null) return "—";
-  const s = n > 0 ? "+" : "";
-  return `${s}${n.toFixed(2)}%`;
-}
-
-function fmtInt(v: number | null | undefined): string {
+function fmtInt(prefs: UserLocalePreferences, v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  return String(Math.round(v));
+  return formatDecimal(Math.round(v), prefs, { maximumFractionDigits: 0, minimumFractionDigits: 0 });
 }
 
-function fmtSupply(v: number | string | null | undefined): string {
+function fmtSupply(prefs: UserLocalePreferences, v: number | string | null | undefined): string {
   const n = num(v);
   if (n === null) return "—";
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n);
+  return formatDecimal(n, prefs, { notation: "compact", maximumFractionDigits: 2, minimumFractionDigits: 0 });
 }
 
 export function buildAssetCoingeckoMetricsRow(
@@ -116,12 +89,6 @@ export function buildAssetCoingeckoMetricsRow(
   };
 }
 
-function fmtUtcShort(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
-  return new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-}
-
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="bk-stat-cell">
@@ -131,19 +98,31 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function metricsStatGrid(row: AssetCoingeckoMetricsRow) {
+function metricsStatGrid(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences) {
   return (
     <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-      <Stat label="Price" value={fmtUsd(row.price_usd)} />
-      <Stat label="24h Δ (USD)" value={fmtUsdDelta(row.price_change_24h_usd)} />
-      <Stat label="Market cap" value={fmtUsd(row.market_cap_usd)} />
-      <Stat label="24h volume" value={fmtUsd(row.total_volume_usd)} />
-      <Stat label="FDV" value={fmtUsd(row.fully_diluted_valuation_usd)} />
-      <Stat label="24h high / low" value={`${fmtUsd(row.high_24h_usd)} / ${fmtUsd(row.low_24h_usd)}`} />
-      <Stat label="24h / 7d %" value={`${fmtPct(row.price_change_24h_pct)} / ${fmtPct(row.price_change_7d_pct)}`} />
-      <Stat label="Rank (mcap)" value={fmtInt(row.market_cap_rank)} />
-      <Stat label="Circ. / total / max supply" value={`${fmtSupply(row.circulating_supply)} · ${fmtSupply(row.total_supply)} · ${fmtSupply(row.max_supply)}`} />
-      <Stat label="ATH / vs ATH" value={`${fmtUsd(row.ath_usd)} · ${fmtPct(row.ath_change_pct)}`} />
+      <Stat label="Price" value={formatUsdAmount(row.price_usd, prefs, { compactAbove: 1_000_000 })} />
+      <Stat label="24h Δ (USD)" value={formatUsdSigned(row.price_change_24h_usd, prefs)} />
+      <Stat label="Market cap" value={formatUsdAmount(row.market_cap_usd, prefs, { compactAbove: 1_000_000 })} />
+      <Stat label="24h volume" value={formatUsdAmount(row.total_volume_usd, prefs, { compactAbove: 1_000_000 })} />
+      <Stat label="FDV" value={formatUsdAmount(row.fully_diluted_valuation_usd, prefs, { compactAbove: 1_000_000 })} />
+      <Stat
+        label="24h high / low"
+        value={`${formatUsdAmount(row.high_24h_usd, prefs)} / ${formatUsdAmount(row.low_24h_usd, prefs)}`}
+      />
+      <Stat
+        label="24h / 7d %"
+        value={`${formatPercentSigned(row.price_change_24h_pct, prefs)} / ${formatPercentSigned(row.price_change_7d_pct, prefs)}`}
+      />
+      <Stat label="Rank (mcap)" value={fmtInt(prefs, row.market_cap_rank)} />
+      <Stat
+        label="Circ. / total / max supply"
+        value={`${fmtSupply(prefs, row.circulating_supply)} · ${fmtSupply(prefs, row.total_supply)} · ${fmtSupply(prefs, row.max_supply)}`}
+      />
+      <Stat
+        label="ATH / vs ATH"
+        value={`${formatUsdAmount(row.ath_usd, prefs)} · ${formatPercentSigned(row.ath_change_pct, prefs)}`}
+      />
     </dl>
   );
 }
@@ -151,9 +130,11 @@ function metricsStatGrid(row: AssetCoingeckoMetricsRow) {
 export function AssetCoingeckoMetricsBlock({
   row,
   assetCode,
+  localePrefs,
 }: {
   row: AssetCoingeckoMetricsRow;
   assetCode: string;
+  localePrefs: UserLocalePreferences;
 }) {
   const cgUrl = `https://www.coingecko.com/en/coins/${encodeURIComponent(row.coingecko_id)}`;
 
@@ -175,11 +156,11 @@ export function AssetCoingeckoMetricsBlock({
           </Link>
         </div>
         <p className="bk-text-muted mt-2" style={{ fontSize: "0.6875rem" }}>
-          Fetched <span className="font-mono">{fmtUtcShort(row.fetched_at)}</span>
+          Fetched <span className="font-mono">{formatDatetime(row.fetched_at, localePrefs)}</span>
           <span className="mx-1.5">·</span>
           <span className="font-mono">id: {row.coingecko_id}</span>
         </p>
-        {metricsStatGrid(row)}
+        {metricsStatGrid(row, localePrefs)}
       </CardBody>
     </Card>
   );
@@ -189,9 +170,11 @@ export function AssetCoingeckoMetricsBlock({
 export function AssetCoingeckoMetricsNoSnapshot({
   assetCode,
   resolvedCoingeckoId,
+  localePrefs,
 }: {
   assetCode: string;
   resolvedCoingeckoId: string | null;
+  localePrefs: UserLocalePreferences;
 }) {
   const dashRow: AssetCoingeckoMetricsRow = {
     fetched_at: "",
@@ -239,7 +222,7 @@ export function AssetCoingeckoMetricsNoSnapshot({
             </span>
           ) : null}
         </p>
-        <div className="opacity-90">{metricsStatGrid(dashRow)}</div>
+        <div className="opacity-90">{metricsStatGrid(dashRow, localePrefs)}</div>
       </CardBody>
     </Card>
   );

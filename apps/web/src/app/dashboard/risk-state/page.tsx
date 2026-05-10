@@ -2,16 +2,27 @@ import { DashboardListViewHeader } from "@/components/dashboard-list-view-header
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@repo/blocks";
 
-export default async function RiskStatePage() {
+type RiskStatePageProps = {
+  searchParams?: Promise<{ executorId?: string | string[] }>;
+};
+
+export default async function RiskStatePage({ searchParams }: RiskStatePageProps) {
+  const sp = (await searchParams) ?? {};
+  const executorIdFilter = typeof sp.executorId === "string" && sp.executorId.trim() ? sp.executorId.trim() : null;
+
   const supabase = await createClient();
-  const { data: rows, error } = await supabase
+  let q = supabase
     .schema("trading")
     .from("risk_state")
     .select(
-      "id, user_id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
+      "id, user_id, executor_id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
     )
     .order("updated_at", { ascending: false })
     .limit(200);
+  if (executorIdFilter) {
+    q = q.eq("executor_id", executorIdFilter);
+  }
+  const { data: rows, error } = await q;
 
   const list = rows ?? [];
 
@@ -22,7 +33,9 @@ export default async function RiskStatePage() {
         title="Risk State"
         iconLetter="R"
         rowCount={list.length}
-        sortLine="Sorted by Updated date"
+        sortLine={
+          executorIdFilter ? "Filtered by executor · sorted by Updated date" : "Sorted by Updated date"
+        }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
       <Card>

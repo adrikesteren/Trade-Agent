@@ -1,4 +1,6 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
+import { formatDatetime } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -31,13 +33,6 @@ type CatalogMarketRow = {
 };
 
 const MARKET_ID_CHUNK = 120;
-
-function fmtUtc(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toISOString().slice(0, 19).replace("T", " ");
-}
 
 function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
   if (!payload) return null;
@@ -121,9 +116,19 @@ function marketLabel(row: DecisionRow, symbolByMarketId: Map<string, string>): s
   return symbolByMarketId.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
 }
 
-export default async function TradeDecisionsPage() {
+type TradeDecisionsPageProps = {
+  searchParams?: Promise<{ executorId?: string | string[] }>;
+};
+
+export default async function TradeDecisionsPage({ searchParams }: TradeDecisionsPageProps) {
+  const sp = (await searchParams) ?? {};
+  const executorIdFilter = typeof sp.executorId === "string" && sp.executorId.trim() ? sp.executorId.trim() : null;
+
   const supabase = await createClient();
-  const { data: rows, error } = await supabase
+  const prefs = await getUserLocalePreferences();
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+
+  let q = supabase
     .schema("trading")
     .from("trade_decisions")
     .select(
@@ -131,6 +136,10 @@ export default async function TradeDecisionsPage() {
     )
     .order("created_at", { ascending: false })
     .limit(200);
+  if (executorIdFilter) {
+    q = q.eq("executor_id", executorIdFilter);
+  }
+  const { data: rows, error } = await q;
 
   const list = (rows ?? []) as DecisionRow[];
   const marketIds = [...new Set(list.map((r) => r.market_id))];
@@ -145,7 +154,11 @@ export default async function TradeDecisionsPage() {
         title="Trading Decisions"
         iconLetter="D"
         rowCount={list.length}
-        sortLine="Sorted by Created (UTC) · max 200 rows"
+        sortLine={
+          executorIdFilter
+            ? `Filtered by executor · sorted by Created · max 200 rows`
+            : "Sorted by Created · max 200 rows"
+        }
         actions={
           <>
             <Link href="/dashboard/signals" className={listViewOutlineActionClass}>
@@ -173,11 +186,11 @@ export default async function TradeDecisionsPage() {
                   <Th>Market</Th>
                   <Th>Executor</Th>
                   <Th>TF</Th>
-                  <Th>Bar close (UTC)</Th>
+                  <Th>Bar close</Th>
                   <Th>Resolved</Th>
                   <Th>Approved</Th>
                   <Th>Reason codes</Th>
-                  <Th>Created (UTC)</Th>
+                  <Th>Created</Th>
                 </tr>
               </thead>
               <tbody>
@@ -199,7 +212,7 @@ export default async function TradeDecisionsPage() {
                         </Link>
                       </Td>
                       <Td>{row.timeframe}</Td>
-                      <Td className="whitespace-nowrap font-mono">{fmtUtc(row.close_time)}</Td>
+                      <Td className="whitespace-nowrap font-mono">{fmtDt(row.close_time)}</Td>
                       <Td>
                         <span className={intentClass(resolved)}>{resolved}</span>
                       </Td>
@@ -209,7 +222,7 @@ export default async function TradeDecisionsPage() {
                       <Td className="max-w-[14rem] truncate font-mono" title={reasons}>
                         {reasons}
                       </Td>
-                      <Td className="whitespace-nowrap font-mono">{fmtUtc(row.created_at)}</Td>
+                      <Td className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</Td>
                     </tr>
                   );
                 })}

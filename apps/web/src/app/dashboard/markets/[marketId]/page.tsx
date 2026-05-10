@@ -1,5 +1,8 @@
 import { MarketCandleChart } from "@/components/market-candle-chart";
-import { getChartDisplayTimeZone } from "@/lib/markets/chart-display-timezone";
+import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { formatDatetime } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { resolveChartDisplayIana, userTimezoneToIana } from "@/lib/locale/timezones";
 import { aggregateOhlcvToTarget } from "@/lib/markets/aggregate-ohlcv";
 import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
@@ -14,7 +17,6 @@ import {
   RecordDetailGrid,
   RecordDetailSection,
 } from "@repo/blocks";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ marketId: string }> };
@@ -49,6 +51,9 @@ function mapCandleRow(r: {
 export default async function MarketDetailPage({ params }: PageProps) {
   const { marketId } = await params;
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
+  const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
+  const chartDisplayIana = resolveChartDisplayIana(userTimezoneToIana(prefs.timezone));
 
   const { data: market, error } = await supabase
     .schema("catalog")
@@ -101,7 +106,6 @@ export default async function MarketDetailPage({ params }: PageProps) {
     .filter((c): c is CandleRowJson => c != null)
     .sort((a, b) => Date.parse(a.closeTime) - Date.parse(b.closeTime));
   const initialCandles = aggregateOhlcvToTarget(baseCandles, CHART_DEFAULT_TF);
-  const chartDisplayTz = getChartDisplayTimeZone();
 
   const metadataJson =
     market.metadata && typeof market.metadata === "object"
@@ -154,54 +158,52 @@ export default async function MarketDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <div className="bk-stack bk-stack_gap-md">
-          <RecordDetailCard>
-            <RecordDetailSection title="Details">
-              <RecordDetailGrid>
-                <Output label="Record ID" type="text" value={market.id} span="full" />
-                <Output label="Symbol" type="text" value={market.market_symbol} />
-                <Output label="Quote" type="text" value={market.quote_code ?? "—"} />
-                <Output label="Status" type="text" value={market.status ?? "—"} />
-                <Output label="Created" type="datetime" value={market.created_at} />
-                {ex?.id ? (
-                  <Output
-                    label="Exchange"
-                    record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
-                  />
-                ) : (
-                  <Output label="Exchange" type="text" value="—" />
-                )}
-                {asset?.id ? (
-                  <Output
-                    label="Base asset"
-                    record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
-                  />
-                ) : (
-                  <Output label="Base asset" type="text" value="—" />
-                )}
-                <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
-              </RecordDetailGrid>
-            </RecordDetailSection>
-          </RecordDetailCard>
+        <RecordDetailTabs
+          details={
+            <div className="bk-stack bk-stack_gap-md">
+              <RecordDetailCard>
+                <RecordDetailSection title="Details">
+                  <RecordDetailGrid>
+                    <Output label="Record ID" type="text" value={market.id} span="full" />
+                    <Output label="Symbol" type="text" value={market.market_symbol} />
+                    <Output label="Quote" type="text" value={market.quote_code ?? "—"} />
+                    <Output label="Status" type="text" value={market.status ?? "—"} />
+                    <Output label="Created" type="datetime" value={market.created_at} formatDatetime={formatDt} />
+                    {ex?.id ? (
+                      <Output
+                        label="Exchange"
+                        record={{ pathPrefix: "/dashboard/exchanges", id: ex.id, name: exchangeName }}
+                      />
+                    ) : (
+                      <Output label="Exchange" type="text" value="—" />
+                    )}
+                    {asset?.id ? (
+                      <Output
+                        label="Base asset"
+                        record={{ pathPrefix: "/dashboard/assets", id: asset.id, name: assetName }}
+                      />
+                    ) : (
+                      <Output label="Base asset" type="text" value="—" />
+                    )}
+                    <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
+                  </RecordDetailGrid>
+                </RecordDetailSection>
+              </RecordDetailCard>
 
-          <MarketCandleChart
-            marketId={marketId}
-            initialTimeframe={CHART_DEFAULT_TF}
-            initialCandles={initialCandles}
-          />
-          <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-            Timeframe buttons load aggregated OHLCV for this market. Axis, crosshair, and hover labels use{" "}
-            <strong className="font-mono">{chartDisplayTz}</strong> (
-            <code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code>, default Europe/Amsterdam). Bars stay the
-            same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
-            <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
-            <Link href="/dashboard/markets" className="bk-link">
-              Markets
-            </Link>
-            . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
-            <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
-          </p>
-        </div>
+              <MarketCandleChart
+                marketId={marketId}
+                initialTimeframe={CHART_DEFAULT_TF}
+                initialCandles={initialCandles}
+                chartDisplayIana={chartDisplayIana}
+                userTimezone={prefs.timezone}
+                decimalFormat={prefs.decimal_format}
+                dateFormat={prefs.date_format}
+                timeFormat={prefs.time_format}
+              />
+            </div>
+          }
+          related={<p className="bk-text-muted text-sm">No related lists for this market record yet.</p>}
+        />
       }
     />
   );

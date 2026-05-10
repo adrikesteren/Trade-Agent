@@ -16,6 +16,7 @@ import {
   getCoingeckoMetricsSyncIntervalMs,
   getMarketsSyncIntervalMs,
 } from "@/lib/markets/sync-schedule";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { MANAGED_QSTASH_SCHEDULES } from "@/lib/workers/qstash-managed-schedules";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -68,6 +69,7 @@ const OVERVIEW_TEMPLATE: SyncRunsOverviewTemplate[] = [
 
 export default async function SyncRunsPage() {
   const supabase = await createClient();
+  const localePrefs = await getUserLocalePreferences();
 
   const { data: runRows, error: runsError } = await supabase
     .schema("automation")
@@ -118,6 +120,7 @@ export default async function SyncRunsPage() {
         initialRuns={runsSafe}
         initialError={runsError?.message ?? null}
         overviewTemplate={OVERVIEW_TEMPLATE}
+        localePrefs={localePrefs}
       />
     </div>
   );

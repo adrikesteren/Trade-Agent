@@ -1,8 +1,9 @@
 "use client";
 
+import { dateOrderLocale, formatDatetime, formatDecimal } from "@/lib/locale/format";
+import type { UserDateFormat, UserDecimalFormat, UserLocalePreferences, UserTimeFormat, UserTimezone } from "@/lib/locale/types";
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME, CHART_TIMEFRAMES } from "@/lib/markets/chart-types";
-import { getChartDisplayTimeZone } from "@/lib/markets/chart-display-timezone";
 import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -20,19 +21,20 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { Button, Card, CardBody } from "@repo/blocks";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-function formatChartCrosshairTime(t: Time, timeZone: string): string {
+function formatChartCrosshairTime(t: Time, timeZone: string, tickLocale: string, hour12: boolean): string {
   if (typeof t !== "number" || !Number.isFinite(t)) return String(t);
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(tickLocale, {
       timeZone,
       year: "numeric",
       month: "short",
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hour12,
       timeZoneName: "short",
     }).format(new Date(t * 1000));
   } catch {
@@ -44,10 +46,16 @@ function formatChartCrosshairTime(t: Time, timeZone: string): string {
  * v5: `localization.timeFormatter` only affects the crosshair label, not time-axis ticks.
  * Tick marks use the same display timezone (≤8 chars where possible).
  */
-function formatChartTickMark(time: Time, tickMarkType: TickMarkType, locale: string, timeZone: string): string | null {
+function formatChartTickMark(
+  time: Time,
+  tickMarkType: TickMarkType,
+  tickLocale: string,
+  timeZone: string,
+  hour12: boolean,
+): string | null {
   if (typeof time !== "number" || !Number.isFinite(time)) return null;
   const d = new Date(time * 1000);
-  const loc = locale || undefined;
+  const loc = tickLocale || undefined;
   const max = (s: string) => (s.length > 8 ? s.slice(0, 8) : s);
   try {
     switch (tickMarkType) {
@@ -58,9 +66,7 @@ function formatChartTickMark(time: Time, tickMarkType: TickMarkType, locale: str
       case TickMarkType.DayOfMonth:
         return max(new Intl.DateTimeFormat(loc, { timeZone, month: "2-digit", day: "2-digit" }).format(d));
       case TickMarkType.Time:
-        return max(
-          new Intl.DateTimeFormat(loc, { timeZone, hour: "2-digit", minute: "2-digit", hour12: false }).format(d),
-        );
+        return max(new Intl.DateTimeFormat(loc, { timeZone, hour: "2-digit", minute: "2-digit", hour12 }).format(d));
       case TickMarkType.TimeWithSeconds:
         return max(
           new Intl.DateTimeFormat(loc, {
@@ -68,7 +74,7 @@ function formatChartTickMark(time: Time, tickMarkType: TickMarkType, locale: str
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
-            hour12: false,
+            hour12,
           }).format(d),
         );
       default:
@@ -98,15 +104,6 @@ function toVolume(row: CandleRowJson, prevClose: number): HistogramData<UTCTimes
     value: row.volume,
     color: up ? "rgba(34,197,94,0.45)" : "rgba(239,68,68,0.45)",
   };
-}
-
-function fmtPrice(n: number): string {
-  return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
-}
-
-function fmtVol(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 /** Tooltip placement next to crosshair (chart-local px), CoinGecko-style: prefer right of cursor, flip if needed. */
@@ -182,6 +179,12 @@ type Props = {
   marketId: string;
   initialTimeframe: ChartTimeframe;
   initialCandles: CandleRowJson[];
+  /** Resolved IANA for axis + crosshair (`NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE` wins when set). */
+  chartDisplayIana: string;
+  userTimezone: UserTimezone;
+  decimalFormat: UserDecimalFormat;
+  dateFormat: UserDateFormat;
+  timeFormat: UserTimeFormat;
 };
 
 type HoverOhlcv = {
@@ -198,13 +201,46 @@ type HoverOhlcv = {
   transform: string;
 };
 
-export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }: Props) {
+export function MarketCandleChart({
+  marketId,
+  initialTimeframe,
+  initialCandles,
+  chartDisplayIana,
+  userTimezone,
+  decimalFormat,
+  dateFormat,
+  timeFormat,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ReturnType<IChartApi["addSeries"]> | null>(null);
   const volSeriesRef = useRef<ReturnType<IChartApi["addSeries"]> | null>(null);
 
   const isDark = useIsDarkClass();
+
+  const localePrefs: UserLocalePreferences = useMemo(
+    () => ({
+      timezone: userTimezone,
+      decimal_format: decimalFormat,
+      date_format: dateFormat,
+      time_format: timeFormat,
+    }),
+    [userTimezone, decimalFormat, dateFormat, timeFormat],
+  );
+
+  const tickLocale = useMemo(() => dateOrderLocale(dateFormat), [dateFormat]);
+  const hour12 = timeFormat === "h12";
+  const tzOpts = useMemo(() => ({ timeZoneOverride: chartDisplayIana }), [chartDisplayIana]);
+
+  const formatPrice = useCallback(
+    (n: number) => formatDecimal(n, localePrefs, { maximumFractionDigits: 8 }),
+    [localePrefs],
+  );
+
+  const formatVolume = useCallback(
+    (n: number) => formatDecimal(n, localePrefs, { maximumFractionDigits: 4 }),
+    [localePrefs],
+  );
 
   const [timeframe, setTimeframe] = useState<ChartTimeframe>(initialTimeframe);
   const [candles, setCandles] = useState<CandleRowJson[]>(initialCandles);
@@ -250,13 +286,13 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
     const el = containerRef.current;
     if (!el) return;
 
-    const displayTz = getChartDisplayTimeZone();
+    const displayTz = chartDisplayIana;
 
     const chart = createChart(el, {
       width: el.clientWidth,
       height: 420,
       localization: {
-        timeFormatter: (t: Time) => formatChartCrosshairTime(t, displayTz),
+        timeFormatter: (t: Time) => formatChartCrosshairTime(t, displayTz, tickLocale, hour12),
       },
       layout: {
         background: { type: ColorType.Solid, color: isDark ? "#09090b" : "#ffffff" },
@@ -279,8 +315,8 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
         secondsVisible: false,
         rightOffset: 4,
         barSpacing: 8,
-        tickMarkFormatter: (time: Time, tickType: TickMarkType, loc: string) =>
-          formatChartTickMark(time, tickType, loc, displayTz),
+        tickMarkFormatter: (time: Time, tickType: TickMarkType) =>
+          formatChartTickMark(time, tickType, tickLocale, displayTz, hour12),
       },
     });
 
@@ -329,13 +365,13 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
         if (hit?.closeTime) {
           const closeSec = candleTimeToUnixSeconds(hit.closeTime);
           if (Number.isFinite(closeSec)) {
-            closeTimeLabel = formatChartCrosshairTime(closeSec as UTCTimestamp, displayTz);
+            closeTimeLabel = formatDatetime(new Date(closeSec * 1000), localePrefs, tzOpts);
           }
         }
       }
 
       setHoverOhlcv({
-        timeLabel: formatChartCrosshairTime(param.time, displayTz),
+        timeLabel: formatChartCrosshairTime(param.time, displayTz, tickLocale, hour12),
         closeTimeLabel,
         open: o.open,
         high: o.high,
@@ -367,7 +403,7 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
       volSeriesRef.current = null;
       setHoverOhlcv(null);
     };
-  }, [isDark, pushSeriesData]);
+  }, [isDark, pushSeriesData, chartDisplayIana, tickLocale, hour12, localePrefs, tzOpts]);
 
   useEffect(() => {
     pushSeriesData(candles);
@@ -462,6 +498,10 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
     return candles[candles.length - 1]!.close;
   }, [candles]);
 
+  const envOverride = Boolean(
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE?.trim(),
+  );
+
   return (
     <Card>
       <CardBody>
@@ -496,7 +536,7 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
         >
           {lastPrice != null ? (
             <span className="text-2xl font-semibold tabular-nums" style={{ color: "var(--bk-color-text)" }}>
-              {lastPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+              {formatPrice(lastPrice)}
             </span>
           ) : (
             <span className="bk-text-muted text-sm">No OHLCV yet</span>
@@ -507,7 +547,8 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
               style={{ color: changePct >= 0 ? "var(--bk-color-success)" : "var(--bk-color-error)" }}
             >
               {changePct >= 0 ? "+" : ""}
-              {changePct.toFixed(2)}% <span className="font-normal bk-text-muted">(in view)</span>
+              {formatDecimal(changePct, localePrefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%{" "}
+              <span className="font-normal bk-text-muted">(in view)</span>
             </span>
           ) : null}
           {loading ? <span className="bk-text-muted text-xs">Loading…</span> : null}
@@ -545,28 +586,48 @@ export function MarketCandleChart({ marketId, initialTimeframe, initialCandles }
                 </dd>
                 <dt className="opacity-80">O</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
-                  {fmtPrice(hoverOhlcv.open)}
+                  {formatPrice(hoverOhlcv.open)}
                 </dd>
                 <dt className="opacity-80">H</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
-                  {fmtPrice(hoverOhlcv.high)}
+                  {formatPrice(hoverOhlcv.high)}
                 </dd>
                 <dt className="opacity-80">L</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
-                  {fmtPrice(hoverOhlcv.low)}
+                  {formatPrice(hoverOhlcv.low)}
                 </dd>
                 <dt className="opacity-80">C</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
-                  {fmtPrice(hoverOhlcv.close)}
+                  {formatPrice(hoverOhlcv.close)}
                 </dd>
                 <dt className="opacity-80">V</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>
-                  {fmtVol(hoverOhlcv.volume)}
+                  {formatVolume(hoverOhlcv.volume)}
                 </dd>
               </dl>
             </div>
           ) : null}
         </div>
+
+        <p className="bk-text-muted mt-2" style={{ fontSize: "0.75rem" }}>
+          Axis, crosshair, and hover labels use <strong className="font-mono">{chartDisplayIana}</strong>
+          {envOverride ? (
+            <>
+              {" "}
+              (<code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code> overrides your saved timezone for this
+              chart only).
+            </>
+          ) : (
+            <> (from your display settings).</>
+          )}{" "}
+          Bars stay the same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
+          <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
+          <Link href="/dashboard/markets" className="bk-link">
+            Markets
+          </Link>
+          . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
+          <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
+        </p>
       </CardBody>
     </Card>
   );

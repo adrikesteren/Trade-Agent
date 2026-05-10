@@ -15,6 +15,9 @@ export function DashboardSchemaNav() {
       <Link href="/dashboard" className={menuTriggerPlainClass}>
         Overview
       </Link>
+      <Link href="/dashboard/settings" className={menuTriggerPlainClass}>
+        Settings
+      </Link>
 
       <DropdownMenu>
         <DropdownMenuTrigger className={menuTriggerPlainClass}>Catalog</DropdownMenuTrigger>

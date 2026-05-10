@@ -1,5 +1,7 @@
 import { DashboardListViewHeader } from "@/components/dashboard-list-view-header";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
+import { formatDatetime, formatDecimal } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -116,20 +118,6 @@ function topSignalPerMarket(sorted: SignalRow[]): SignalRow[] {
   });
 }
 
-function fmtUtc(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toISOString().slice(0, 19).replace("T", " ");
-}
-
-function fmtConfidence(v: number | string | null | undefined): string {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = typeof v === "number" ? v : Number(v);
-  if (Number.isNaN(n)) return "—";
-  return n.toFixed(2);
-}
-
 function intentClass(intent: string): string {
   if (intent === "ENTER") return "font-medium text-emerald-700 dark:text-emerald-400";
   if (intent === "EXIT") return "font-medium text-red-700 dark:text-red-400";
@@ -175,6 +163,10 @@ async function fetchCatalogExtrasByMarketId(
 
 export default async function SignalsPage() {
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtConfidence = (v: number | string | null | undefined) =>
+    formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("signals")
@@ -234,10 +226,10 @@ export default async function SignalsPage() {
                   <Th className="text-right">M cap (USD)</Th>
                   <Th>Agent</Th>
                   <Th>TF</Th>
-                  <Th>Bar close (UTC)</Th>
+                  <Th>Bar close</Th>
                   <Th>Intent</Th>
                   <Th className="text-right">Confidence</Th>
-                  <Th>Created (UTC)</Th>
+                  <Th>Created</Th>
                 </tr>
               </thead>
               <tbody>
@@ -253,19 +245,19 @@ export default async function SignalsPage() {
                           {label}
                         </Link>
                       </Td>
-                      <Td className="text-right font-mono">{formatUsdMetric(mcapDisplay)}</Td>
+                      <Td className="text-right font-mono">{formatUsdMetric(mcapDisplay, prefs)}</Td>
                       <Td className="max-w-[10rem] truncate" title={agentSlug ?? row.signal_agent_id}>
                         <Link href={`/dashboard/signal-agents/${row.signal_agent_id}`} className="bk-link font-mono">
                           {agentSlug ?? row.signal_agent_id.slice(0, 8) + "…"}
                         </Link>
                       </Td>
                       <Td>{row.timeframe}</Td>
-                      <Td className="whitespace-nowrap font-mono">{fmtUtc(row.close_time)}</Td>
+                      <Td className="whitespace-nowrap font-mono">{fmtDt(row.close_time)}</Td>
                       <Td>
                         <span className={intentClass(row.intent)}>{row.intent}</span>
                       </Td>
                       <Td className="text-right font-mono">{fmtConfidence(row.confidence)}</Td>
-                      <Td className="whitespace-nowrap font-mono">{fmtUtc(row.created_at)}</Td>
+                      <Td className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</Td>
                     </tr>
                   );
                 })}

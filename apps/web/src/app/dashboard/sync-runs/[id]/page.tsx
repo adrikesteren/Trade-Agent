@@ -1,4 +1,7 @@
+import { RecordDetailTabs } from "@/components/record-detail-tabs";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
+import { formatDatetime } from "@/lib/locale/format";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import {
   Breadcrumbs,
@@ -35,6 +38,8 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
   if (!isUuidLike(id)) notFound();
 
   const supabase = await createClient();
+  const prefs = await getUserLocalePreferences();
+  const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
   const { data: row, error } = await supabase
     .schema("automation")
@@ -59,7 +64,6 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      style={{ maxWidth: "48rem" }}
       header={
         <PageHeader
           variant="detail"
@@ -79,24 +83,29 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailCard>
-          <RecordDetailSection title="Details">
-            <RecordDetailGrid>
-              <Output label="Run ID" type="text" value={run.id} span="full" />
-              <Output label="Job" type="text" value={run.job_key} span="full" />
-              <Output label="Status" type="text" value={run.status} />
-              <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
-              <Output label="Started" type="datetime" value={run.created_at} />
-              <Output label="Ended" type="datetime" value={run.ended_at} />
-              <Output label="Updated" type="datetime" value={run.updated_at} />
-              {showReason ? <Output label="Reason" type="text" value={run.reason} span="full" /> : null}
-            </RecordDetailGrid>
-          </RecordDetailSection>
+        <RecordDetailTabs
+          details={
+            <RecordDetailCard>
+              <RecordDetailSection title="Details">
+                <RecordDetailGrid>
+                  <Output label="Run ID" type="text" value={run.id} span="full" />
+                  <Output label="Job" type="text" value={run.job_key} span="full" />
+                  <Output label="Status" type="text" value={run.status} />
+                  <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
+                  <Output label="Started" type="datetime" value={run.created_at} formatDatetime={formatDt} />
+                  <Output label="Ended" type="datetime" value={run.ended_at} formatDatetime={formatDt} />
+                  <Output label="Updated" type="datetime" value={run.updated_at} formatDatetime={formatDt} />
+                  {showReason ? <Output label="Reason" type="text" value={run.reason} span="full" /> : null}
+                </RecordDetailGrid>
+              </RecordDetailSection>
 
-          <RecordDetailSection title="Metadata">
-            <pre className="bk-pre">{metadataJson}</pre>
-          </RecordDetailSection>
-        </RecordDetailCard>
+              <RecordDetailSection title="Metadata">
+                <pre className="bk-pre">{metadataJson}</pre>
+              </RecordDetailSection>
+            </RecordDetailCard>
+          }
+          related={<p className="bk-text-muted text-sm">No related lists for this sync run.</p>}
+        />
       }
     />
   );

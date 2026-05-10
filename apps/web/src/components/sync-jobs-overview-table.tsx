@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDatetime } from "@/lib/locale/format";
+import type { UserLocalePreferences } from "@/lib/locale/types";
 import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
 import type { BitvavoSyncJobStatus } from "@/lib/markets/record-bitvavo-sync-status";
 import { Alert, Badge, Button, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
@@ -33,11 +35,6 @@ function formatIn(iso: string | null, nowMs: number): string {
   if (h < 48) return `in ${h}h`;
   const d = Math.floor(h / 24);
   return `in ${d}d`;
-}
-
-function formatShort(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
 function useClientTick(): { ready: boolean; nowMs: number } {
@@ -227,7 +224,17 @@ function SyncNowCell({
   );
 }
 
-function NextTickCell({ intervalMs, ready, nowMs }: { intervalMs: number; ready: boolean; nowMs: number }) {
+function NextTickCell({
+  intervalMs,
+  ready,
+  nowMs,
+  formatRunDatetime,
+}: {
+  intervalMs: number;
+  ready: boolean;
+  nowMs: number;
+  formatRunDatetime: (iso: string | null) => string;
+}) {
   const nextAt =
     ready && intervalMs > 0
       ? new Date(nextLocalWallClockBoundaryAfter(nowMs, intervalMs)).toISOString()
@@ -239,7 +246,7 @@ function NextTickCell({ intervalMs, ready, nowMs }: { intervalMs: number; ready:
   return (
     <span className="bk-text-muted text-[11px]">
       {formatIn(nextAt, nowMs)}
-      <span className="ml-1 font-normal opacity-80">({formatShort(nextAt)})</span>
+      <span className="ml-1 font-normal opacity-80">({formatRunDatetime(nextAt)})</span>
     </span>
   );
 }
@@ -318,14 +325,21 @@ function QstashScheduleCell({
 
 export function SyncJobsOverviewTable({
   rows,
+  localePrefs,
   /** Called after a manual “Sync now” request finishes. Defaults to `router.refresh()` when omitted. */
   onSyncDone,
 }: {
   rows: SyncJobsOverviewRow[];
+  localePrefs: UserLocalePreferences;
   onSyncDone?: () => void;
 }) {
   const router = useRouter();
   const { ready, nowMs } = useClientTick();
+
+  const formatRunDatetime = useCallback(
+    (iso: string | null) => (iso ? formatDatetime(iso, localePrefs) : "—"),
+    [localePrefs],
+  );
 
   const [qstashLoading, setQstashLoading] = useState(true);
   const [qstashFetchErr, setQstashFetchErr] = useState<string | null>(null);
@@ -487,7 +501,7 @@ export function SyncJobsOverviewTable({
                       {statusBadge(r.status)}
                       {r.status === "running" && r.lastStartedAt ? (
                         <span className="text-[10px]" style={{ color: "var(--bk-color-warning)" }}>
-                          {ready ? formatAgo(r.lastStartedAt, nowMs) : "…"} · {formatShort(r.lastStartedAt)}
+                          {ready ? formatAgo(r.lastStartedAt, nowMs) : "…"} · {formatRunDatetime(r.lastStartedAt)}
                         </span>
                       ) : null}
                     </div>
@@ -496,17 +510,17 @@ export function SyncJobsOverviewTable({
                     {r.lastSuccessAt ? (
                       <>
                         {ready ? formatAgo(r.lastSuccessAt, nowMs) : "—"}
-                        <div className="bk-text-muted mt-0.5 font-normal">{formatShort(r.lastSuccessAt)}</div>
+                        <div className="bk-text-muted mt-0.5 font-normal">{formatRunDatetime(r.lastSuccessAt)}</div>
                       </>
                     ) : (
                       <span className="bk-text-muted">Never</span>
                     )}
                   </Td>
                   <Td className="bk-text-muted align-top py-2.5 pr-3 font-mono">
-                    {r.lastStartedAt ? formatShort(r.lastStartedAt) : "—"}
+                    {r.lastStartedAt ? formatRunDatetime(r.lastStartedAt) : "—"}
                   </Td>
                   <Td className="align-top py-2.5 pr-3">
-                    <NextTickCell intervalMs={r.intervalMs} ready={ready} nowMs={nowMs} />
+                    <NextTickCell intervalMs={r.intervalMs} ready={ready} nowMs={nowMs} formatRunDatetime={formatRunDatetime} />
                   </Td>
                   <Td className="align-top py-2.5 pr-3">
                     <QstashScheduleCell
