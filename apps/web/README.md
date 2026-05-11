@@ -96,7 +96,7 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 | `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
 
-**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, **Add/remove balance** (assigned EUR), enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings/execution` redirects to Executors.
+**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, **Add/remove balance** (assigned EUR), enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings` and `/dashboard/settings/execution` redirect to `/dashboard/me/preferences` (and execution stub → Executors).
 
 Manual worker call (dev):
 
@@ -116,13 +116,13 @@ Background jobs for **daily risk reset** and **live order reconciliation**, plus
 | `CRON_SECRET` | Recommended | Bearer secret for `GET`/`POST /api/workers/*`. |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional | Distributed lock for `bitvavo-reconcile` (`@repo/redis`). If unset, reconcile still runs without a lock. |
 | `OPS_ALERT_WEBHOOK_URL` | Optional | `POST` JSON on hard failures (e.g. candle/markets sync throws, risk reset throws, reconcile throws). |
-| `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts a `text` message when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
+| `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts a compact **BUY/SELL — asset — signal agent** notification (colored attachment bar) when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
 | `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
 | `BITVAVO_RECONCILE_LOCK_TTL_MS` | Optional | Redis lock TTL for reconcile (default 9 minutes). |
 
 ## QStash (optional)
 
-When `QSTASH_TOKEN` and `APP_URL` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues one **`asset-close-pipeline`** HTTP call per distinct catalog asset (no per-asset CoinGecko ingest — faster than `symbol-close-pipeline`; see [docs/ops-developer.md](../../docs/ops-developer.md)). Signing keys (`QSTASH_CURRENT_SIGNING_KEY`, …) let QStash call workers without putting `CRON_SECRET` in the Upstash destination. The dashboard **Schedules** page lists QStash cron schedules when `QSTASH_TOKEN` is configured.
+When `QSTASH_TOKEN` and `APP_URL` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues one **`asset-close-pipeline`** HTTP call per distinct catalog asset (no per-asset CoinGecko ingest — faster than `symbol-close-pipeline`; see [docs/ops-developer.md](../../docs/ops-developer.md)). Signing keys (`QSTASH_CURRENT_SIGNING_KEY`, …) let QStash call workers without putting `CRON_SECRET` in the Upstash destination. The dashboard **Schedules** page lists QStash cron schedules when `QSTASH_TOKEN` is configured. **System settings** (`/dashboard/system-settings`, dashboard → Automation) stores QStash stagger / publish concurrency in `public.system_settings` so you can tune them without restarting the dev server; env vars remain fallbacks (see ops-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -130,8 +130,8 @@ When `QSTASH_TOKEN` and `APP_URL` are set, `GET`/`POST /api/workers/exchange-clo
 | `QSTASH_URL` | Optional | Override QStash API base (default cloud). |
 | `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` | Recommended with QStash | Verify `Upstash-Signature` on worker routes. |
 | `APP_URL` | For publish URLs | Public origin of this app (e.g. `https://…` or tunneled `https://…` for local QStash). |
-| `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` | Optional | Delay spread between queued asset-close jobs in seconds (default `2`; decimals e.g. `0.1` allowed). |
-| `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` | Optional | Parallel QStash `publish` calls per batch in exchange-close (default `32`, max `128`). |
+| `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` | Optional | Fallback when no DB row: delay between queued asset-close jobs in seconds (default `2`; decimals e.g. `0.1`). Prefer **Dashboard → System settings** (`/dashboard/system-settings`, table `public.system_settings`). |
+| `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` | Optional | Fallback when no DB row: parallel QStash `publish` calls per batch (default `32`, max `128`). Prefer **Dashboard → System settings** (`/dashboard/system-settings`, table `public.system_settings`). |
 | `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK` | Optional | Set `1` to serialize overlapping **asset/symbol-close** runs per asset when Redis is configured (extra latency; leave unset for throughput). |
 
 Manual worker calls (dev):

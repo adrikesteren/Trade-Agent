@@ -15,8 +15,8 @@ export function DashboardSchemaNav() {
       <Link href="/dashboard" className={menuTriggerPlainClass}>
         Overview
       </Link>
-      <Link href="/dashboard/settings" className={menuTriggerPlainClass}>
-        Settings
+      <Link href="/dashboard/me/preferences" className={menuTriggerPlainClass}>
+        Preferences
       </Link>
 
       <DropdownMenu>
@@ -63,6 +63,10 @@ export function DashboardSchemaNav() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Link href="/dashboard/system-settings" className={menuTriggerPlainClass}>
+        System settings
+      </Link>
 
       <DropdownMenu>
         <DropdownMenuTrigger className={menuTriggerPlainClass}>Automation</DropdownMenuTrigger>

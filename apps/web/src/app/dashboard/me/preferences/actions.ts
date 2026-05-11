@@ -61,6 +61,6 @@ export async function updateUserLocalePreferences(formData: FormData): Promise<v
 
   if (error) throw new Error(error.message);
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/me/preferences");
   revalidatePath("/dashboard");
 }

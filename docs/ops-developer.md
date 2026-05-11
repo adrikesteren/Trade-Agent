@@ -14,6 +14,22 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 
 ---
 
+## System settings (`public.system_settings`) and roles (`public.user_profiles`)
+
+- **Precedence:** for keys that exist in `public.system_settings` (e.g. exchange-close QStash stagger and publish concurrency), the app reads **Postgres first**, then falls back to the matching **`process.env`** variable, then the built-in default. Use the **list** at **Dashboard → System settings** (`/dashboard/system-settings`); open a row for **Edit** (dialog) or **Delete** (confirm). Changes apply on the **next** worker run without restarting `pnpm dev`. Changing only `.env` still requires a **process restart** for variables that are not overridden by a DB row (and monorepo dotenv loads once per Node process anyway).
+- **Who can edit:** only users with `public.user_profiles.role = 'administrator'`. New `auth.users` rows get `user_profiles` with role **`user`** via trigger.
+- **First administrator (SQL, once per project):** after you can sign in, promote your user (replace the email):
+
+```sql
+update public.user_profiles up
+set role = 'administrator', updated_at = now()
+from auth.users u
+where up.user_id = u.id
+  and lower(u.email) = lower('you@example.com');
+```
+
+---
+
 ## Typical worker routes
 
 | Route | Purpose |
@@ -41,7 +57,7 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 
 - **Query (required):** `exchangeCode` (case-insensitive, matches `catalog.exchanges.code`).
 - **Query (optional):** `quote` — defaults to **EUR**; only markets with that quote are considered when collecting distinct base assets.
-- **Env:** `QSTASH_TOKEN`, **`APP_URL`** (public origin of this Next app, no trailing slash). Optional `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` (seconds between queued jobs, default `2`; decimals like `0.1` allowed — restart `pnpm dev` after changing `.env`). Optional `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` (parallel `publish` calls per wave, default `32`, max `128`) speeds the **exchange-close HTTP** round-trip to Upstash. Response JSON includes `appliedStaggerSec`, `staggerDelaySamples`, and `qstashPublishConcurrency`. Optional `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK=1` adds a Redis lock **per asset-close** (slower when overlapping; leave unset for max throughput).
+- **Env / DB:** `QSTASH_TOKEN`, **`APP_URL`** (public origin of this Next app, no trailing slash). Stagger and publish concurrency are read from **`public.system_settings`** first (editable under **Dashboard → System settings** for administrators); fallback env vars: `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` (seconds between queued jobs, default `2`; decimals like `0.1` allowed) and `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` (parallel `publish` calls per wave, default `32`, max `128`). Response JSON includes `appliedStaggerSec`, `staggerDelaySamples`, and `qstashPublishConcurrency`. Optional `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK=1` adds a Redis lock **per asset-close** (slower when overlapping; leave unset for max throughput).
 - **Auth:** `Authorization: Bearer ${CRON_SECRET}` **or** valid QStash signature when `QSTASH_CURRENT_SIGNING_KEY` is set (same dual-auth pattern as `symbol-close-pipeline`).
 - **Flow:** resolve exchange → list markets for the quote → **distinct base assets ordered by `catalog.assets.coingecko_market_cap_usd` descending** (unknown cap last; tie-break `market_symbol`) → `client.publish` to `{APP_URL}/api/workers/asset-close-pipeline?...` with staggered `delay` to avoid bursting your server. A QStash **Schedule** can `POST` this worker on a cron (optionally forward Bearer or rely on signature-only downstream).
 
@@ -93,7 +109,7 @@ If env is missing, `createRedis()` returns `null`; reconcile **skips the lock** 
 
 Optional `OPS_ALERT_WEBHOOK_URL`: server-side `POST` with `Content-Type: application/json` and a small payload `{ "source", "level", "title", "detail", "at" }` on selected worker failures (see [apps/web/src/lib/ops/send-ops-alert.ts](../apps/web/src/lib/ops/send-ops-alert.ts)). Failures to send the webhook are swallowed (log only) so trading paths are not blocked.
 
-Optional `SLACK_TRADE_FILLS_WEBHOOK_URL`: Slack Incoming Webhook; `POST` JSON `{ "text": "…" }` when a trade fill row is written for an executor (see [apps/web/src/lib/ops/send-trade-fill-slack.ts](../apps/web/src/lib/ops/send-trade-fill-slack.ts)). Same non-blocking behaviour as ops alerts.
+Optional `SLACK_TRADE_FILLS_WEBHOOK_URL`: Slack Incoming Webhook; `POST` JSON with a short **BUY/SELL — asset — signal agent** line (Block Kit attachment: green bar for buy, red for sell) when a trade fill row is written (see [apps/web/src/lib/ops/send-trade-fill-slack.ts](../apps/web/src/lib/ops/send-trade-fill-slack.ts)). Same non-blocking behaviour as ops alerts.
 
 ---
 

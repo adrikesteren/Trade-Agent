@@ -6,6 +6,8 @@ import type { PublishRequest } from "@upstash/qstash";
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 import { createQstashClient, getAppBaseUrl } from "@/lib/qstash/qstash-client";
 import { escapeIlikeExactPattern } from "@/lib/markets/resolve-primary-market-by-codes";
+import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
+import { SYSTEM_SETTING_NUMERIC_KEYS } from "@/lib/system-settings/registry";
 
 export type RunExchangeClosePipelineOptions = {
   exchangeCode: string;
@@ -23,26 +25,13 @@ export type RunExchangeClosePipelineResult = {
   published: number;
   failures: ExchangeClosePublishFailure[];
   error?: string;
-  /** Effective `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` (seconds) read when this run started. */
+  /** Effective stagger in seconds (`public.system_settings` → env → default) when this run started. */
   appliedStaggerSec: number;
   /** First few `Upstash-Delay` values sent to QStash (debug: compare with terminal spacing). */
   staggerDelaySamples?: string[];
-  /** How many `client.publish` calls ran in parallel per wave (`EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY`). */
+  /** Parallel `publish` calls per wave (same resolution order as `appliedStaggerSec`). */
   qstashPublishConcurrency?: number;
 };
-
-/**
- * Seconds between each published `asset-close-pipeline` job (fractions allowed, e.g. `0.1`).
- * Sent to QStash as a **string** delay (e.g. `0.1s`) so the JS SDK does not truncate numeric delay to whole seconds.
- * QStash may still quantize small delays on their side; terminal spacing often reflects **handler wall time**, not only this stagger.
- */
-function staggerSecondsFromEnv(): number {
-  const raw = process.env.EXCHANGE_CLOSE_QSTASH_STAGGER_SEC?.trim();
-  if (!raw) return 2;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return 2;
-  return Math.min(Math.max(n, 0), 120);
-}
 
 /** QStash `Upstash-Delay` duration string; numeric `delay` in the SDK is rounded to whole seconds. */
 function qstashDelayHeaderFromSeconds(totalSec: number): PublishRequest["delay"] {
@@ -55,15 +44,6 @@ function qstashDelayHeaderFromSeconds(totalSec: number): PublishRequest["delay"]
     return `${Math.floor(rounded)}s` as PublishRequest["delay"];
   }
   return `${rounded}s` as PublishRequest["delay"];
-}
-
-/** Parallel QStash `publish` HTTP calls per batch (sequential batches avoid hammering Upstash). Default 32. */
-function qstashPublishConcurrencyFromEnv(): number {
-  const raw = process.env.EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY?.trim();
-  if (!raw) return 32;
-  const n = Math.floor(Number(raw));
-  if (!Number.isFinite(n) || n < 1) return 32;
-  return Math.min(n, 128);
 }
 
 /** PostgREST `.in()` is encoded in the query string; large exchanges exceed HTTP URI limits in one call. */
@@ -116,8 +96,11 @@ export async function runExchangeClosePipeline(
   opts: RunExchangeClosePipelineOptions,
 ): Promise<RunExchangeClosePipelineResult> {
   loadMonorepoDotenvOnce();
-  /** Read once per HTTP run so the JSON matches what was used for `publish` delays. */
-  const appliedStaggerSec = staggerSecondsFromEnv();
+  /** Read once per HTTP run from DB (then env, then defaults) so edits apply without restarting Node. */
+  const [appliedStaggerSec, qstashPublishConcurrency] = await Promise.all([
+    getNumericSystemSetting(admin, SYSTEM_SETTING_NUMERIC_KEYS.EXCHANGE_CLOSE_QSTASH_STAGGER_SEC),
+    getNumericSystemSetting(admin, SYSTEM_SETTING_NUMERIC_KEYS.EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY),
+  ]);
 
   const exchangeIn = opts.exchangeCode.trim();
   if (!exchangeIn) {
@@ -288,8 +271,6 @@ export async function runExchangeClosePipeline(
   const staggerDelaySamples = distinctAssetCodes.slice(0, 5).map((_, i) =>
     String(qstashDelayHeaderFromSeconds(i * stagger)),
   );
-
-  const qstashPublishConcurrency = qstashPublishConcurrencyFromEnv();
 
   if (process.env.NODE_ENV === "development") {
     console.info("[exchange-close-pipeline] QStash stagger", {

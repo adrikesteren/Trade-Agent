@@ -7,8 +7,16 @@ import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
 import { fetchBitvavoOrder } from "@/lib/bitvavo/fetch-bitvavo-order";
 import { bitvavoPrivateEnv } from "@/lib/bitvavo/signed-request";
 import { mergeBuyPositionAvg } from "@/lib/executor/paper-fill";
+import {
+  fetchAssetDisplayNameByMarketId,
+  fetchTradeFillSignalAgentLabels,
+  labelFromSignalAgentMap,
+  primaryAgentSlugFromDecisionPayload,
+  resolveTradeFillAssetDisplayName,
+  sendTradeFillSlack,
+} from "@/lib/ops/send-trade-fill-slack";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { sendTradeFillSlack } from "@/lib/ops/send-trade-fill-slack";
+import { fetchMarketAssetIds } from "@/lib/trading/executors";
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/trading/executor-wallet";
 
 function batchSize(): number {
@@ -42,6 +50,7 @@ type OrderRow = {
   side: string;
   notional_eur: string | number | null;
   quantity: string | number | null;
+  decision_id: string | null;
 };
 
 async function upsertPositionAfterBuy(
@@ -117,7 +126,7 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     const { data: ordRows, error: ordErr } = await admin
       .schema("trading")
       .from("orders")
-      .select("id, user_id, executor_id, market_id, external_id, status, notional_eur, quantity, side")
+      .select("id, user_id, executor_id, market_id, external_id, status, notional_eur, quantity, side, decision_id")
       .eq("paper", false)
       .in("status", ["pending", "open"])
       .not("external_id", "is", null)
@@ -135,16 +144,9 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     const { data: execRows, error: exErr } = await admin
       .schema("trading")
       .from("executors")
-      .select("id, execution_mode, name")
+      .select("id, execution_mode")
       .in("id", execIds);
     if (exErr) throw new Error(exErr.message);
-
-    const executorNameById = new Map<string, string>();
-    for (const row of execRows ?? []) {
-      const id = String((row as { id?: string }).id ?? "");
-      if (!id) continue;
-      executorNameById.set(id, String((row as { name?: string | null }).name ?? "").trim());
-    }
 
     const liveExecutor = new Set(
       (execRows ?? [])
@@ -166,6 +168,29 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
         symByMarket.set(m.id as string, String(m.market_symbol ?? "").trim());
       }
     }
+
+    const decisionIds = [...new Set(liveOrders.map((o) => o.decision_id).filter(Boolean))] as string[];
+    const decisionPayloadById = new Map<string, Record<string, unknown> | null>();
+    if (decisionIds.length) {
+      const { data: decRows, error: decErr } = await admin
+        .schema("trading")
+        .from("trade_decisions")
+        .select("id, decision_payload")
+        .in("id", decisionIds);
+      if (decErr) throw new Error(decErr.message);
+      for (const r of decRows ?? []) {
+        decisionPayloadById.set(
+          r.id as string,
+          (r.decision_payload as Record<string, unknown> | null) ?? null,
+        );
+      }
+    }
+
+    const assetIdByMarket = await fetchMarketAssetIds(admin, marketIds);
+    const [signalAgentLabelsBySlug, assetNameByMarketIdRaw] = await Promise.all([
+      fetchTradeFillSignalAgentLabels(admin),
+      fetchAssetDisplayNameByMarketId(admin, assetIdByMarket),
+    ]);
 
     for (const o of liveOrders) {
       examined += 1;
@@ -254,20 +279,20 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
                 );
               }
             }
-            const execName = executorNameById.get(o.executor_id) ?? "";
+            const decPayload = o.decision_id ? decisionPayloadById.get(o.decision_id) : undefined;
+            const signalAgentName = labelFromSignalAgentMap(
+              signalAgentLabelsBySlug,
+              primaryAgentSlugFromDecisionPayload(decPayload ?? null),
+            );
+            const assetName = resolveTradeFillAssetDisplayName(
+              assetNameByMarketIdRaw.get(o.market_id),
+              marketSymbol,
+            );
             await sendTradeFillSlack({
               source: "bitvavo-reconcile",
               side: String(o.side).toLowerCase() === "sell" ? "sell" : "buy",
-              executorName: execName || "Executor",
-              executorId: o.executor_id,
-              marketSymbol,
-              quantity: fillQty,
-              price: fillPrice,
-              fee: Number.isFinite(fillFee) ? fillFee : 0,
-              executionMode: "live",
-              paper: false,
-              orderId: o.id,
-              ledgerDebitFailed: String(o.side) === "buy" ? ledgerDebitFailed : undefined,
+              assetName,
+              signalAgentName,
             });
           }
         }

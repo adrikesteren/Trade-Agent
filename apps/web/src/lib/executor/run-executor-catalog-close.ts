@@ -24,7 +24,14 @@ import {
   restoreExecutorPositionSnapshot,
   tradeBuyDebitEur,
 } from "@/lib/trading/executor-wallet";
-import { sendTradeFillSlack } from "@/lib/ops/send-trade-fill-slack";
+import {
+  fetchAssetDisplayNameByMarketId,
+  fetchTradeFillSignalAgentLabels,
+  labelFromSignalAgentMap,
+  primaryAgentSlugFromDecisionPayload,
+  resolveTradeFillAssetDisplayName,
+  sendTradeFillSlack,
+} from "@/lib/ops/send-trade-fill-slack";
 
 import { baseQuantityFromNotionalEur, mergeBuyPositionAvg } from "./paper-fill";
 
@@ -312,6 +319,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
+  const [signalAgentLabelsBySlug, assetNameByMarketIdRaw] = await Promise.all([
+    fetchTradeFillSignalAgentLabels(admin),
+    fetchAssetDisplayNameByMarketId(admin, assetIdByMarket),
+  ]);
 
   let ordersInserted = 0;
 
@@ -319,6 +330,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
+    const assetNameForSlack = resolveTradeFillAssetDisplayName(
+      assetNameByMarketIdRaw.get(marketId),
+      marketSymbol,
+    );
 
     for (const userId of userIds) {
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
@@ -346,6 +361,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
         const proposed = parseProposedBuy(dec.decision_payload);
         if (!proposed) continue;
+
+        const signalAgentNameForSlack = labelFromSignalAgentMap(
+          signalAgentLabelsBySlug,
+          primaryAgentSlugFromDecisionPayload(dec.decision_payload),
+        );
 
         const { data: existingOrder, error: ordSelErr } = await admin
           .schema("trading")
@@ -434,15 +454,8 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           await sendTradeFillSlack({
             source: "executor-catalog-close",
             side: "buy",
-            executorName: ex.name,
-            executorId: ex.id,
-            marketSymbol,
-            quantity: qty,
-            price: px.price,
-            fee: feeEur,
-            executionMode: ex.execution_mode,
-            paper: true,
-            orderId,
+            assetName: assetNameForSlack,
+            signalAgentName: signalAgentNameForSlack,
           });
           ordersInserted += 1;
           continue;
@@ -537,7 +550,6 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                 .update({ quantity: fillQty, updated_at: new Date().toISOString() })
                 .eq("id", localOrderId);
               const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
-              let ledgerDebitFailed = false;
               try {
                 await applyExecutorTradeBuyDebit(admin, {
                   userId,
@@ -546,22 +558,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                   debitEur: debitLive,
                 });
               } catch (ledgerErr) {
-                ledgerDebitFailed = true;
                 console.error(`${marketSymbol}: live fill debit failed`, ledgerErr);
               }
               await sendTradeFillSlack({
                 source: "executor-catalog-close",
                 side: "buy",
-                executorName: ex.name,
-                executorId: ex.id,
-                marketSymbol,
-                quantity: fillQty,
-                price: fillPrice,
-                fee: Number.isFinite(fillFee) ? fillFee : 0,
-                executionMode: ex.execution_mode,
-                paper: false,
-                orderId: localOrderId,
-                ledgerDebitFailed,
+                assetName: assetNameForSlack,
+                signalAgentName: signalAgentNameForSlack,
               });
             }
           }

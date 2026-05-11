@@ -25,6 +25,8 @@ Shared helper (optional): `apps/web/src/components/dashboard-list-view-header.ts
 - Rich list: `apps/web/src/app/dashboard/markets/page.tsx`
 - Catalog lists: `assets/page.tsx`, `exchanges/page.tsx`
 - Automation: `sync-runs/page.tsx`
+- System settings (top-level nav): `system-settings/page.tsx` (list for `public.system_settings`)
+- Account locale: `me/preferences/page.tsx` (display formats; not “system settings”)
 - Trading/automation stubs: pages using `DashboardListViewHeader`
 
 Do **not** revert list pages to a bare `PageHeader` without `variant="list"` unless the route is intentionally not a list screen.
@@ -72,6 +74,7 @@ Record IDs, tickers, exchange codes, job keys, etc. are **normal fields** → us
 - `apps/web/src/app/dashboard/exchanges/[exchangeId]/page.tsx`
 - `apps/web/src/app/dashboard/markets/[marketId]/page.tsx`
 - `apps/web/src/app/dashboard/sync-runs/[id]/page.tsx`
+- `apps/web/src/app/dashboard/system-settings/[key]/page.tsx`
 - `apps/web/src/app/dashboard/signal-agents/[signalAgentId]/page.tsx`
 - `apps/web/src/app/dashboard/executors/[id]/page.tsx`
 
