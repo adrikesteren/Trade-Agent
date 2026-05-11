@@ -8,12 +8,12 @@ Audience: human developers and **Cursor / automation agents** editing this codeb
 
 ## Role in the pipeline
 
-1. **Ingest** writes closed OHLCV to `catalog.candles` (catalog storage timeframe: `5m` — see `CATALOG_STORAGE_TIMEFRAME` in the web app).
+1. **Ingest** writes closed OHLCV to `catalog.candles` (catalog storage timeframe: `15m` — see `CATALOG_STORAGE_TIMEFRAME` in the web app).
 2. **Signal agents** (this document) read that data and append **advice** to `trading.signals` (`intent`, `confidence`, `reasons`, …). They **never** place orders.
 3. **Trade Mediator** reads signals + portfolio/risk and upserts `trade_decisions` (see [mediator-developer.md](./mediator-developer.md)).
 4. **Executor** executes approved decisions into `orders` / `fills` ([executor-developer.md](./executor-developer.md)).
 
-Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer**: stable slug `trading.signal_agents.agent_id` (e.g. `ma-cross-5m-v1`) plus row PK `trading.signal_agents.id` used as **`trading.signals.signal_agent_id`** (FK for UI and integrity).
+Signal agents are **not** the Cursor IDE assistant; here “agent” means a **named signal producer**: stable slug `trading.signal_agents.agent_id` (e.g. `ma-cross-15m-v1`) plus row PK `trading.signal_agents.id` used as **`trading.signals.signal_agent_id`** (FK for UI and integrity).
 
 ---
 
@@ -47,7 +47,7 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 | `user_id` | yes | Trusted env UUID(s); RLS for `authenticated` users still applies to dashboard reads. |
 | `signal_agent_id` | yes | UUID FK to `trading.signal_agents.id`. |
 | `market_id` | yes | `catalog.markets.id`. |
-| `timeframe` | yes | Must match the evaluated series (catalog `5m` in v1). |
+| `timeframe` | yes | Must match the evaluated series (catalog `15m` in v1). |
 | `close_time` | yes | Bar close instant; keep consistent with `candle_timestamps.close_time`. |
 | `intent` | yes | Enum literal as string in JS. |
 | `confidence` | optional | Numeric or `null`. |
@@ -61,7 +61,7 @@ Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timefra
 
 ## When signal runs are triggered
 
-- After a **successful** Bitvavo **EUR** candle sweep **finishes** (`incomplete: false`) for the **catalog storage timeframe** (`5m`) and **`candleRowsUpserted > 0`**, `runEurCandleSweep` resolves the **latest** `catalog.candle_timestamps.close_time` and calls `enqueueSignalsCatalogCloseAfterIncremental` once for that bar.
+- After a **successful** Bitvavo **EUR** candle sweep **finishes** (`incomplete: false`) for the **catalog storage timeframe** (`15m`) and **`candleRowsUpserted > 0`**, `runEurCandleSweep` resolves the **latest** `catalog.candle_timestamps.close_time` and calls `enqueueSignalsCatalogCloseAfterIncremental` once for that bar.
 - The candle worker still chooses how to fetch Bitvavo data internally; the signal step does **not** branch on those modes — it always targets the newest closed bar on the shared timestamp grid.
 - **Opt-out**: set `SIGNALS_AFTER_CANDLE_DISABLE=1`.
 - **No-op** if neither `SIGNAL_DEFAULT_USER_ID` nor `SIGNAL_USER_IDS` is set — the worker returns `skippedReason: no_signal_user_ids`.
@@ -72,7 +72,7 @@ Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timefra
 ## Worker: `POST /api/workers/signals-catalog-close`
 
 - **Auth**: `Authorization: Bearer ${CRON_SECRET}` (see `verifyScheduledWorker`).
-- **Body** (JSON): `{ "closeTimeIso": "<ISO>", "timeframe"?: "5m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`.
+- **Body** (JSON): `{ "closeTimeIso": "<ISO>", "timeframe"?: "15m", "quote"?: "EUR", "marketOffset"?: number, "marketBatchSize"?: number, "candleSyncRunId"?: string }`.
 - **Behaviour**: records `automation.sync_runs` with job key `signals_catalog_close`, then loads enabled rows from `trading.signal_agents` and runs `runSignalsCatalogCloseDrain` — all Bitvavo EUR markets in **in-process** batches (RPC `bitvavo_markets_for_candle_sync_slice`), upserts signals. After candles, `enqueueSignalsCatalogCloseAfterIncremental` calls the same orchestration.
 
 Implementation entry points:
@@ -84,13 +84,13 @@ Implementation entry points:
 
 ---
 
-## Built-in agent: `ma-cross-5m-v1`
+## Built-in agent: `ma-cross-15m-v1`
 
 - **Type**: rule-based — simple moving averages on **closes**; **ENTER** on bullish crossover at the target bar, else **HOLD**.
 - **Config** (`trading.signal_agents.config` JSON): `fastPeriod` (default `9`), `slowPeriod` (default `21`).
 - **Code**: [`apps/web/src/lib/signals/ma-cross-eval.ts`](../apps/web/src/lib/signals/ma-cross-eval.ts) (pure functions + unit tests).
 
-To add another `agent_id`, implement an evaluator, register the row in `signal_agents`, and extend the worker’s agent dispatch loop (today only `ma-cross-5m-v1` is wired).
+To add another `agent_id`, implement an evaluator, register the row in `signal_agents`, and extend the worker’s agent dispatch loop (today only `ma-cross-15m-v1` is wired).
 
 ---
 
@@ -105,7 +105,7 @@ See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table.
 
 ## Troubleshooting
 
-- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm EUR `5m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-5m-v1`.
+- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm EUR `15m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-15m-v1`.
 - **Upsert errors on unique**: ensure migrations through `20260527100000_signals_signal_agent_uuid_fk.sql` are applied; `onConflict` must match `(user_id, signal_agent_id, market_id, timeframe, close_time)`.
 - **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or raise `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` / related env caps.
 

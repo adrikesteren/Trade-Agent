@@ -1,5 +1,5 @@
 /** Interval Bitvavo catalog sync writes to `candles`; chart API + Realtime filter must stay in sync. */
-export const CATALOG_STORAGE_TIMEFRAME = "5m" as const;
+export const CATALOG_STORAGE_TIMEFRAME = "15m" as const;
 
 /** Rows safe to pass from server → client (JSON-serializable). */
 export type CandleRowJson = {
@@ -12,7 +12,7 @@ export type CandleRowJson = {
   volume: number;
 };
 
-export const CHART_TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"] as const;
+export const CHART_TIMEFRAMES = ["15m", "1h", "4h", "1d"] as const;
 export type ChartTimeframe = (typeof CHART_TIMEFRAMES)[number];
 
 export function isChartTimeframe(s: string): s is ChartTimeframe {

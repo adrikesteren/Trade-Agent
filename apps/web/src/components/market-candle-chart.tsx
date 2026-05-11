@@ -248,6 +248,7 @@ export function MarketCandleChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hoverOhlcv, setHoverOhlcv] = useState<HoverOhlcv | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const timeframeRef = useRef(timeframe);
   const candlesRef = useRef(candles);
@@ -386,9 +387,13 @@ export function MarketCandleChart({
     chart.subscribeCrosshairMove(onCrosshairMove);
 
     const ro = new ResizeObserver(() => {
-      if (!containerRef.current || !chartRef.current) return;
-      chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-      chartRef.current.timeScale().fitContent();
+      const cur = containerRef.current;
+      const ch = chartRef.current;
+      if (!cur || !ch) return;
+      ch.applyOptions({
+        width: cur.clientWidth,
+        height: cur.clientHeight > 0 ? cur.clientHeight : 420,
+      });
     });
     ro.observe(el);
 
@@ -408,6 +413,20 @@ export function MarketCandleChart({
   useEffect(() => {
     pushSeriesData(candles);
   }, [candles, pushSeriesData]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [expanded]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -503,15 +522,28 @@ export function MarketCandleChart({
   );
 
   return (
-    <Card>
-      <CardBody>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <>
+      {expanded ? (
+        <div
+          onClick={() => setExpanded(false)}
+          aria-hidden="true"
+          className="fixed inset-0 z-[100] bg-black/45"
+        />
+      ) : null}
+      <Card
+        role={expanded ? "dialog" : undefined}
+        aria-modal={expanded ? true : undefined}
+        aria-label={expanded ? "Price chart fullscreen" : undefined}
+        className={expanded ? "fixed inset-4 z-[101] flex flex-col overflow-hidden" : undefined}
+      >
+        <CardBody className={expanded ? "flex h-full min-h-0 flex-1 flex-col" : undefined}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="bk-form-label" style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>
               Price chart
             </h2>
             <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-              Candlesticks + volume · OHLCV + bar close time in tooltip · auto fit
+              Candlesticks + volume · OHLCV + bar close time in tooltip
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -527,6 +559,17 @@ export function MarketCandleChart({
                 {tf}
               </Button>
             ))}
+            <Button
+              type="button"
+              variant="neutral"
+              size="sm"
+              onClick={() => setExpanded((v) => !v)}
+              aria-pressed={expanded}
+              aria-label={expanded ? "Collapse price chart" : "Expand price chart"}
+              title={expanded ? "Collapse (Esc)" : "Expand"}
+            >
+              {expanded ? "Collapse" : "Expand"}
+            </Button>
           </div>
         </div>
 
@@ -559,8 +602,17 @@ export function MarketCandleChart({
           ) : null}
         </div>
 
-        <div className="relative mt-2 min-h-[420px] w-full min-w-0">
-          <div ref={containerRef} className="h-[420px] w-full min-w-0" />
+        <div
+          className={
+            expanded
+              ? "relative mt-2 w-full min-w-0 flex-1 min-h-0"
+              : "relative mt-2 min-h-[420px] w-full min-w-0"
+          }
+        >
+          <div
+            ref={containerRef}
+            className={expanded ? "h-full w-full min-w-0" : "h-[420px] w-full min-w-0"}
+          />
           {hoverOhlcv ? (
             <div
               className="bk-chart-tooltip"
@@ -609,26 +661,29 @@ export function MarketCandleChart({
           ) : null}
         </div>
 
-        <p className="bk-text-muted mt-2" style={{ fontSize: "0.75rem" }}>
-          Axis, crosshair, and hover labels use <strong className="font-mono">{chartDisplayIana}</strong>
-          {envOverride ? (
-            <>
-              {" "}
-              (<code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code> overrides your saved timezone for this
-              chart only).
-            </>
-          ) : (
-            <> (from your display settings).</>
-          )}{" "}
-          Bars stay the same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
-          <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
-          <Link href="/dashboard/markets" className="bk-link">
-            Markets
-          </Link>
-          . Gaps usually mean no row for that 5m slot; in the SQL editor, compare consecutive{" "}
-          <code className="bk-code">close_time</code> values (difference{">"} 6 minutes) to find missing bars.
-        </p>
-      </CardBody>
-    </Card>
+        {expanded ? null : (
+          <p className="bk-text-muted mt-2" style={{ fontSize: "0.75rem" }}>
+            Axis, crosshair, and hover labels use <strong className="font-mono">{chartDisplayIana}</strong>
+            {envOverride ? (
+              <>
+                {" "}
+                (<code className="bk-code">NEXT_PUBLIC_CHART_DISPLAY_TIMEZONE</code> overrides your saved timezone for this
+                chart only).
+              </>
+            ) : (
+              <> (from your display settings).</>
+            )}{" "}
+            Bars stay the same UTC instants as Supabase <code className="bk-code">open_time</code> /{" "}
+            <code className="bk-code">close_time</code>. If the chart is empty, refresh listings from{" "}
+            <Link href="/markets" className="bk-link">
+              Markets
+            </Link>
+            . Gaps usually mean no row for that 15m slot; in the SQL editor, compare consecutive{" "}
+            <code className="bk-code">close_time</code> values (difference{">"} 16 minutes) to find missing bars.
+          </p>
+        )}
+        </CardBody>
+      </Card>
+    </>
   );
 }

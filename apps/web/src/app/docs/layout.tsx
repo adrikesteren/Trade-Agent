@@ -1,5 +1,5 @@
-import { DashboardHeaderActions } from "@/components/dashboard-header-actions";
-import { DashboardSchemaNav } from "@/components/dashboard-schema-nav";
+import { AppHeaderActions } from "@/components/app-header-actions";
+import { AppSchemaNav } from "@/components/app-schema-nav";
 import { getDashboardSession } from "@/lib/supabase/dashboard-session";
 import { AppHeader, AppMain, AppShell } from "@repo/blocks";
 import Link from "next/link";
@@ -17,12 +17,12 @@ export default async function DocsLayout({ children }: { children: React.ReactNo
       <AppShell className="min-h-0 flex-1 overflow-hidden">
         <AppHeader
           brand={
-            <Link href="/dashboard" className="bk-app-header_brand">
+            <Link href="/overview" className="bk-app-header_brand">
               Trade Agent
             </Link>
           }
-          nav={<DashboardSchemaNav />}
-          actions={<DashboardHeaderActions />}
+          nav={<AppSchemaNav />}
+          actions={<AppHeaderActions />}
         />
         <AppMain>{children}</AppMain>
       </AppShell>

@@ -89,15 +89,14 @@ Geen strategie, geen risk-beslissing — alleen **betrouwbare uitvoering**.
 
 ---
 
-### 5. Ops / scheduler (workers, jobs, Redis)
+### 5. Ops / scheduler (workers, jobs)
 
 **Taak:** Betrouwbaarheid op de achtergrond.
 
 - Geplande jobs (candle checks, reconciliatie, dagelijkse risk reset).
-- **Redis:** locks, idempotency (“deze candle al verwerkt”), rate limits.
 - Alerts bij fouten of kill switch.
 
-**Implementatie in deze repo:** zie [ops-developer.md](./ops-developer.md) (worker routes met `CRON_SECRET`, `risk-daily-reset`, `bitvavo-reconcile`, Redis-lock op reconcile, optionele `OPS_ALERT_WEBHOOK_URL`).
+**Implementatie in deze repo:** zie [ops-developer.md](./ops-developer.md) (worker routes met `CRON_SECRET`, `risk-daily-reset`, `bitvavo-reconcile`, optionele `OPS_ALERT_WEBHOOK_URL`).
 
 ---
 
@@ -171,7 +170,7 @@ Die policy hoort **versieerbaar** en **getest** (paper/backtest) te zijn.
 
 ## `CANDLE_CLOSED` en live charts (concreet in deze repo)
 
-- **Betekenis:** het moment dat een **nieuwe gesloten OHLCV-rij** voor een markt in de catalogus staat — technisch een `**INSERT` of `UPDATE`** op `catalog.candles` (interval gelijk aan `CATALOG_STORAGE_TIMEFRAME` in `[apps/web/src/lib/markets/chart-types.ts](../apps/web/src/lib/markets/chart-types.ts)`).
+- **Betekenis:** het moment dat een **nieuwe gesloten OHLCV-rij** voor een markt in de catalogus staat — technisch een `**INSERT` of `UPDATE`** op `catalog.candles` (15m, gelijk aan `CATALOG_STORAGE_TIMEFRAME` in `[apps/web/src/lib/markets/chart-types.ts](../apps/web/src/lib/markets/chart-types.ts)`).
 - **Geen aparte message-bus voor de dashboard-grafiek:** Realtime volgt de database. Migratie `20250512120000_enable_realtime_candles.sql` voegt `candles` toe aan de publicatie `supabase_realtime`. RLS blijft gelden (`candles_select_all` voor `authenticated`).
 - **Market detail:** `[MarketCandleChart](../apps/web/src/components/market-candle-chart.tsx)` opent een Supabase-kanaal met filter `market_id=eq.{uuid}` en vernieuwt na een korte debounce de data via `GET /api/markets/candles` (zodat aggregatie naar hogere timeframes op de server blijft).
 - **Server-side signal pipeline:** draait na candle-write als onderdeel van dezelfde serverflow of via je eigen scheduler; niet nodig voor de live chart zelf.
@@ -238,7 +237,7 @@ Concreet: wijs aan **één** `agent_id` (bv. `fundamentals-llm`) een duurder mod
 - `[signal-agents-developer.md](./signal-agents-developer.md)` — taken, grenzen, triggers en DB-contract voor **Signal agents** (implementatie + AI-agent-instructies).
 - `[mediator-developer.md](./mediator-developer.md)` — taken, grenzen, triggers en gebruik van de **Trade Mediator** (beslissingen in `trade_decisions`).
 - `[executor-developer.md](./executor-developer.md)` — **Trade Executor**: orders/fills, paper/live, Bitvavo private API.
-- `[ops-developer.md](./ops-developer.md)` — **Ops / scheduler (stap 5 in de rollenlijst)**: worker jobs, Redis, reconcile, risk-daily-reset, alerts.
+- `[ops-developer.md](./ops-developer.md)` — **Ops / scheduler (stap 5 in de rollenlijst)**: worker jobs, reconcile, risk-daily-reset, alerts.
 
 ---
 

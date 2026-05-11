@@ -29,7 +29,7 @@ export function SignalsToPositionArticle() {
         <ul className="bk-text-muted list-inside list-disc space-y-2">
           <li>
             OHLCV staat in <code className="bk-code">catalog.candles</code> (opslag-timeframe typisch{" "}
-            <code className="bk-code">5m</code>), met <code className="bk-code">close_time</code> per bar.
+            <code className="bk-code">15m</code>), met <code className="bk-code">close_time</code> per bar.
           </li>
           <li>
             Workers draaien rond <strong>candle close</strong> (externe scheduler met{" "}
@@ -48,12 +48,12 @@ export function SignalsToPositionArticle() {
             redenen). Ze plaatsen <strong>geen</strong> orders.
           </li>
           <li>
-            In het dashboard:{" "}
-            <Link href="/dashboard/signal-agents" className="bk-link">
+            In de app:{" "}
+            <Link href="/signal-agents" className="bk-link">
               Signal Agents
             </Link>
             ,{" "}
-            <Link href="/dashboard/signals" className="bk-link">
+            <Link href="/signals" className="bk-link">
               Signals
             </Link>
             .
@@ -95,16 +95,16 @@ export function SignalsToPositionArticle() {
             bij approve voor koop-intents).
           </li>
           <li>
-            Dashboard:{" "}
-            <Link href="/dashboard/trade-decisions" className="bk-link">
+            App:{" "}
+            <Link href="/trade-decisions" className="bk-link">
               Trade Decisions
             </Link>
             ,{" "}
-            <Link href="/dashboard/executors" className="bk-link">
+            <Link href="/executors" className="bk-link">
               Executors
             </Link>
             ,{" "}
-            <Link href="/dashboard/risk-state" className="bk-link">
+            <Link href="/risk-state" className="bk-link">
               Risk State
             </Link>
             .
@@ -152,16 +152,16 @@ export function SignalsToPositionArticle() {
             <code className="bk-code">market_id</code>).
           </li>
           <li>
-            Dashboard:{" "}
-            <Link href="/dashboard/orders" className="bk-link">
+            App:{" "}
+            <Link href="/orders" className="bk-link">
               Orders
             </Link>
             ,{" "}
-            <Link href="/dashboard/fills" className="bk-link">
+            <Link href="/fills" className="bk-link">
               Fills
             </Link>
             ,{" "}
-            <Link href="/dashboard/positions" className="bk-link">
+            <Link href="/positions" className="bk-link">
               Positions
             </Link>
             .

@@ -1,13 +1,20 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { PublishRequest } from "@upstash/qstash";
 
+import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
-import { createQstashClient, getAppBaseUrl } from "@/lib/qstash/qstash-client";
 import { escapeIlikeExactPattern } from "@/lib/markets/resolve-primary-market-by-codes";
-import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
-import { SYSTEM_SETTING_NUMERIC_KEYS } from "@/lib/system-settings/registry";
+import {
+  RELAY_MESSAGE_GROUP_MAX_URLS,
+  buildSymbolClosePipelineUrl,
+  downstreamWorkerHeaders,
+  normalizeRelayBaseUrl,
+  postRelayMessageGroup,
+  postRelaySingleMessage,
+  relayMaxRetries,
+  waitForRelayMessageTerminal,
+} from "@/lib/relay/relay-symbol-close-pipeline-client";
 
 export type RunExchangeClosePipelineOptions = {
   exchangeCode: string;
@@ -22,32 +29,15 @@ export type RunExchangeClosePipelineResult = {
   exchangeCode: string;
   quote: string;
   distinctAssetCodes: string[];
+  /** Successfully enqueued worker jobs (same as distinct count when `ok`). */
   published: number;
   failures: ExchangeClosePublishFailure[];
   error?: string;
-  /** Effective stagger in seconds (`public.system_settings` → env → default) when this run started. */
-  appliedStaggerSec: number;
-  /** First few `Upstash-Delay` values sent to QStash (debug: compare with terminal spacing). */
-  staggerDelaySamples?: string[];
-  /** Parallel `publish` calls per wave (same resolution order as `appliedStaggerSec`). */
-  qstashPublishConcurrency?: number;
+  /** Relay message UUIDs created (single-message and group members, in enqueue order). */
+  relayMessageIds?: string[];
+  /** Relay message_group UUIDs when `message-group` was used (may be multiple if more than 100 assets). */
+  relayMessageGroupIds?: string[];
 };
-
-/** QStash `Upstash-Delay` duration string; numeric `delay` in the SDK is rounded to whole seconds. */
-function qstashDelayHeaderFromSeconds(totalSec: number): PublishRequest["delay"] {
-  if (!Number.isFinite(totalSec) || totalSec <= 0) {
-    return "0s";
-  }
-  const capped = Math.min(totalSec, 604_800); // 7d doc limit; keeps header sane
-  const rounded = Math.round(capped * 10_000) / 10_000;
-  if (rounded === Math.floor(rounded)) {
-    return `${Math.floor(rounded)}s` as PublishRequest["delay"];
-  }
-  return `${rounded}s` as PublishRequest["delay"];
-}
-
-/** PostgREST `.in()` is encoded in the query string; large exchanges exceed HTTP URI limits in one call. */
-const ASSET_ID_IN_CHUNK = 120;
 
 type MarketRowForMcap = {
   asset_id: string;
@@ -66,6 +56,9 @@ function coingeckoMarketCapUsdDescKey(row: MarketRowForMcap): number {
   if (Number.isFinite(n)) return n;
   return Number.NEGATIVE_INFINITY;
 }
+
+/** PostgREST `.in()` is encoded in the query string; large exchanges exceed HTTP URI limits in one call. */
+const ASSET_ID_IN_CHUNK = 120;
 
 async function fetchAssetIdToCodeMap(
   admin: SupabaseClient,
@@ -96,11 +89,6 @@ export async function runExchangeClosePipeline(
   opts: RunExchangeClosePipelineOptions,
 ): Promise<RunExchangeClosePipelineResult> {
   loadMonorepoDotenvOnce();
-  /** Read once per HTTP run from DB (then env, then defaults) so edits apply without restarting Node. */
-  const [appliedStaggerSec, qstashPublishConcurrency] = await Promise.all([
-    getNumericSystemSetting(admin, SYSTEM_SETTING_NUMERIC_KEYS.EXCHANGE_CLOSE_QSTASH_STAGGER_SEC),
-    getNumericSystemSetting(admin, SYSTEM_SETTING_NUMERIC_KEYS.EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY),
-  ]);
 
   const exchangeIn = opts.exchangeCode.trim();
   if (!exchangeIn) {
@@ -112,7 +100,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: "exchangeCode is required",
-      appliedStaggerSec,
     };
   }
 
@@ -134,7 +121,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: exErr.message,
-      appliedStaggerSec,
     };
   }
 
@@ -148,7 +134,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: "unknown_exchange_code",
-      appliedStaggerSec,
     };
   }
   if (exchanges.length > 1) {
@@ -160,7 +145,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: "ambiguous_exchange_code",
-      appliedStaggerSec,
     };
   }
 
@@ -192,7 +176,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: mErr.message,
-      appliedStaggerSec,
     };
   }
 
@@ -222,7 +205,6 @@ export async function runExchangeClosePipeline(
       distinctAssetCodes: [],
       published: 0,
       failures: [],
-      appliedStaggerSec,
     };
   }
 
@@ -236,7 +218,6 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: assetCodesResult.message,
-      appliedStaggerSec,
     };
   }
 
@@ -245,11 +226,15 @@ export async function runExchangeClosePipeline(
     .map((c) => String(c ?? "").trim())
     .filter(Boolean);
 
-  let client;
-  let base: string;
+  let relayBase: string;
+  let appBase: string;
+  let workerHeaders: Record<string, string>;
+  let maxRetries: number;
   try {
-    client = createQstashClient();
-    base = getAppBaseUrl();
+    relayBase = normalizeRelayBaseUrl();
+    appBase = getAppBaseUrl();
+    workerHeaders = downstreamWorkerHeaders();
+    maxRetries = relayMaxRetries();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
@@ -260,69 +245,68 @@ export async function runExchangeClosePipeline(
       published: 0,
       failures: [],
       error: msg,
-      appliedStaggerSec,
     };
   }
 
-  const stagger = appliedStaggerSec;
+  const relayMessageIds: string[] = [];
+  const relayMessageGroupIds: string[] = [];
   const failures: ExchangeClosePublishFailure[] = [];
-  let published = 0;
 
-  const staggerDelaySamples = distinctAssetCodes.slice(0, 5).map((_, i) =>
-    String(qstashDelayHeaderFromSeconds(i * stagger)),
-  );
+  try {
+    for (let start = 0; start < distinctAssetCodes.length; start += RELAY_MESSAGE_GROUP_MAX_URLS) {
+      const chunk = distinctAssetCodes.slice(start, start + RELAY_MESSAGE_GROUP_MAX_URLS);
+      const urls = chunk.map((assetCode) =>
+        buildSymbolClosePipelineUrl(appBase, assetCode, canonicalExchangeCode, quote),
+      );
+
+      if (urls.length === 1) {
+        const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
+        relayMessageIds.push(id);
+      } else {
+        const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
+        relayMessageGroupIds.push(groupId);
+        relayMessageIds.push(...messageIds);
+      }
+
+      const isLastChunk = start + chunk.length >= distinctAssetCodes.length;
+      if (!isLastChunk) {
+        const tailId = relayMessageIds[relayMessageIds.length - 1]!;
+        await waitForRelayMessageTerminal(relayBase, tailId);
+      }
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      exchangeCode: canonicalExchangeCode,
+      quote,
+      distinctAssetCodes,
+      published: 0,
+      failures: [{ assetCode: "_relay", message: msg }],
+      error: msg,
+      relayMessageIds: relayMessageIds.length ? relayMessageIds : undefined,
+      relayMessageGroupIds: relayMessageGroupIds.length ? relayMessageGroupIds : undefined,
+    };
+  }
+
+  const published = distinctAssetCodes.length;
 
   if (process.env.NODE_ENV === "development") {
-    console.info("[exchange-close-pipeline] QStash stagger", {
-      appliedStaggerSec: stagger,
-      delayHeadersFirst5: staggerDelaySamples,
-      qstashPublishConcurrency,
+    console.info("[exchange-close-pipeline] Relay enqueue", {
+      published,
+      relayMessageGroupIds,
+      relayMessageCount: relayMessageIds.length,
     });
   }
 
-  for (let i = 0; i < distinctAssetCodes.length; i += qstashPublishConcurrency) {
-    const batch = distinctAssetCodes.slice(i, i + qstashPublishConcurrency);
-    const settled = await Promise.allSettled(
-      batch.map((assetCode, j) => {
-        const idx = i + j;
-        const u = new URL(`${base}/api/workers/asset-close-pipeline`);
-        u.searchParams.set("assetCode", assetCode);
-        u.searchParams.set("exchangeCode", canonicalExchangeCode);
-        if (quote !== "EUR") {
-          u.searchParams.set("quote", quote);
-        }
-        return client.publish({
-          url: u.toString(),
-          method: "GET",
-          delay: qstashDelayHeaderFromSeconds(idx * stagger),
-        });
-      }),
-    );
-    for (let k = 0; k < settled.length; k++) {
-      const r = settled[k]!;
-      const assetCode = batch[k]!;
-      if (r.status === "fulfilled") {
-        published += 1;
-      } else {
-        const reason = r.reason;
-        failures.push({
-          assetCode,
-          message: reason instanceof Error ? reason.message : String(reason),
-        });
-      }
-    }
-  }
-
   return {
-    ok: failures.length === 0,
+    ok: true,
     exchangeCode: canonicalExchangeCode,
     quote,
     distinctAssetCodes,
     published,
     failures,
-    appliedStaggerSec: stagger,
-    staggerDelaySamples,
-    qstashPublishConcurrency,
-    ...(failures.length ? { error: "one_or_more_publish_failed" } : {}),
+    relayMessageIds,
+    relayMessageGroupIds: relayMessageGroupIds.length ? relayMessageGroupIds : undefined,
   };
 }

@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const timeframe = body.timeframe ?? "5m";
+  const timeframe = body.timeframe ?? "15m";
   const retentionCap = barsForRetention(timeframe);
   const barsRequested = body.barsPerMarket ?? retentionCap;
   const barsPerMarket = Math.min(Math.max(barsRequested, 1), retentionCap);
@@ -278,7 +278,7 @@ export async function POST(request: Request) {
         retentionMaxBars: result.retentionMaxBars,
         hint:
           `Non-window / incremental bar counts use CANDLE_RETENTION_HOURS (${CANDLE_RETENTION_HOURS}h). ` +
-          `First EUR prepare when candle_timestamps is empty uses ${CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS}h (~1440 x 5m bars). ` +
+          `First EUR prepare when candle_timestamps is empty uses ${CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS}h (~480 x 15m bars). ` +
           `After each chunk, timestamps older than ${CANDLE_TIMESTAMP_TTL_HOURS}h (~365d) are deleted (candles cascade).`,
       },
     });

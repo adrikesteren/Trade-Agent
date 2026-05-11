@@ -10,7 +10,7 @@ import { nextLocalWallClockBoundaryAfter } from "@/lib/markets/sync-schedule";
  * Starts at most one interval per Node process (HMR / double import safe).
  *
  * Ticks align to the same local wall-clock grid as the Assets page “Next … mark” hint
- * (`nextLocalWallClockBoundaryAfter`), not to “every 5m since server boot” — avoids :39/:44/:49 drift.
+ * (`nextLocalWallClockBoundaryAfter`), not to “every 15m since server boot” — avoids drift.
  */
 function startLocalCandleSyncScheduler(): void {
   if (process.env.NODE_ENV !== "development") return;
@@ -20,8 +20,8 @@ function startLocalCandleSyncScheduler(): void {
   if (g.__tradeAgentLocalCandleSync) return;
   g.__tradeAgentLocalCandleSync = true;
 
-  const intervalMs = Number(process.env.LOCAL_CANDLE_SYNC_INTERVAL_MS ?? 300_000);
-  const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : 300_000;
+  const intervalMs = Number(process.env.LOCAL_CANDLE_SYNC_INTERVAL_MS ?? 900_000);
+  const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : 900_000;
 
   let inFlight = false;
 

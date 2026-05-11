@@ -2,6 +2,7 @@ import "server-only";
 
 import { evaluateTradeDecision, type SignalIntent } from "@repo/trading";
 import type { RiskStateSnapshot } from "@repo/risk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
@@ -97,10 +98,71 @@ type SignalRow = {
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
 
+type CandleRow = {
+  close: string | number;
+  candle_timestamps: { close_time: string; open_time: string } | { close_time: string; open_time: string }[] | null;
+};
+
+type MovingFloorStateRow = {
+  peak_price_since_entry: string | number;
+  floor_price: string | number;
+  activated_at: string | null;
+};
+
 function agentSlugFromRow(row: SignalRow): string {
   const raw = row.signal_agents as unknown;
   const one = (Array.isArray(raw) ? raw[0] : raw) as { agent_id?: string } | null | undefined;
   return one?.agent_id ?? "unknown";
+}
+
+function mapCloseRows(rows: CandleRow[]): { close: number; closeTimeIso: string }[] {
+  const mapped = (rows ?? [])
+    .map((r) => {
+      const rawTs = r.candle_timestamps as unknown;
+      const ts = (Array.isArray(rawTs) ? rawTs[0] : rawTs) as { close_time?: string } | null | undefined;
+      const closeTime = ts?.close_time;
+      if (!closeTime) return null;
+      return { close: Number(r.close), closeTimeIso: closeTime };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
+  mapped.sort((a, b) => Date.parse(a.closeTimeIso) - Date.parse(b.closeTimeIso));
+  return mapped;
+}
+
+async function findClosePriceForBar(
+  admin: SupabaseClient,
+  args: { marketId: string; timeframe: string; closeTimeIso: string },
+): Promise<number | null> {
+  const { data, error } = await admin
+    .schema("catalog")
+    .from("candles")
+    .select("close, candle_timestamps ( open_time, close_time )")
+    .eq("market_id", args.marketId)
+    .eq("timeframe", args.timeframe)
+    .limit(500);
+  if (error) throw new Error(error.message);
+  const rows = mapCloseRows((data ?? []) as CandleRow[]);
+  const hit = rows.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
+  if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
+  return hit.close;
+}
+
+function computeMovingFloorDecision(args: {
+  avgPrice: number;
+  closePrice: number;
+  prevPeak: number;
+  prevFloor: number;
+  wasActivated: boolean;
+  trailPct: number;
+  activationProfitPct: number;
+}) {
+  const activationPrice = args.avgPrice * (1 + args.activationProfitPct);
+  const activated = args.wasActivated || args.closePrice >= activationPrice;
+  const peak = Math.max(args.prevPeak, args.closePrice);
+  const computedFloor = peak * (1 - args.trailPct);
+  const floor = activated ? Math.max(args.prevFloor, computedFloor) : args.prevFloor;
+  const triggerExit = activated && args.closePrice <= floor;
+  return { peak, floor, activated, triggerExit };
 }
 
 export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): Promise<RunMediatorCatalogCloseResult> {
@@ -262,6 +324,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
       for (const ex of executors) {
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
+        if (String(ex.exchange_id) !== exchangeId) continue;
 
         const { data: riskEx, error: riskExErr } = await admin
           .schema("trading")
@@ -279,14 +342,80 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         const { data: posRow, error: posErr } = await admin
           .schema("trading")
           .from("positions")
-          .select("quantity")
+          .select("quantity, avg_price")
           .eq("user_id", userId)
           .eq("executor_id", ex.id)
           .eq("market_id", marketId)
           .maybeSingle();
 
         if (posErr) throw new Error(posErr.message);
-        const inPosition = Number(posRow?.quantity ?? 0) > 0;
+        const positionQty = Number(posRow?.quantity ?? 0);
+        const avgPrice = Number(posRow?.avg_price ?? 0);
+        const inPosition = positionQty > 0;
+        const closePrice = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+
+        let forceExit = false;
+        let movingFloorSnapshot: Record<string, unknown> | null = null;
+        if (inPosition) {
+          const { data: floorRow, error: floorErr } = await admin
+            .schema("trading")
+            .from("executor_moving_floors")
+            .select("peak_price_since_entry, floor_price, activated_at")
+            .eq("user_id", userId)
+            .eq("executor_id", ex.id)
+            .eq("market_id", marketId)
+            .maybeSingle();
+          if (floorErr) throw new Error(floorErr.message);
+          if (closePrice != null && Number.isFinite(avgPrice) && avgPrice > 0 && rails.profitTakingEnabled) {
+            const trailPct = Number(rails.movingFloorTrailPct ?? 0.15);
+            const activationProfitPct = Number(rails.movingFloorActivationProfitPct ?? 0.05);
+            const prevPeak = Math.max(Number(floorRow?.peak_price_since_entry ?? avgPrice), avgPrice);
+            const prevFloor = Math.max(Number(floorRow?.floor_price ?? avgPrice), 0);
+            const wasActivated = Boolean(floorRow?.activated_at);
+            const next = computeMovingFloorDecision({
+              avgPrice,
+              closePrice,
+              prevPeak,
+              prevFloor,
+              wasActivated,
+              trailPct,
+              activationProfitPct,
+            });
+            const { error: upFloorErr } = await admin.schema("trading").from("executor_moving_floors").upsert(
+              {
+                user_id: userId,
+                executor_id: ex.id,
+                market_id: marketId,
+                peak_price_since_entry: next.peak,
+                floor_price: next.floor,
+                activated_at: next.activated ? (floorRow?.activated_at ?? new Date().toISOString()) : null,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "user_id,executor_id,market_id" },
+            );
+            if (upFloorErr) throw new Error(upFloorErr.message);
+            forceExit = next.triggerExit;
+            movingFloorSnapshot = {
+              avgPrice,
+              closePrice,
+              peakPriceSinceEntry: next.peak,
+              floorPrice: next.floor,
+              activated: next.activated,
+              trailPct,
+              activationProfitPct,
+              triggerExit: next.triggerExit,
+            };
+          }
+        } else {
+          const { error: delFloorErr } = await admin
+            .schema("trading")
+            .from("executor_moving_floors")
+            .delete()
+            .eq("user_id", userId)
+            .eq("executor_id", ex.id)
+            .eq("market_id", marketId);
+          if (delFloorErr) throw new Error(delFloorErr.message);
+        }
 
         const intents = matched.map((r) => r.intent as SignalIntent);
         const decision = evaluateTradeDecision({
@@ -295,6 +424,9 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           marketSymbol,
           signalIntents: intents,
           inPosition,
+          positionQuantity: positionQty,
+          marketPriceEur: closePrice ?? undefined,
+          forceExit,
           notionalEurSuggested: notionalSuggested,
         });
 
@@ -326,6 +458,8 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             market_symbol: marketSymbol,
             executorId: ex.id,
             executorName: ex.name,
+            exchangeId: ex.exchange_id,
+            movingFloor: movingFloorSnapshot,
             ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
             ...(body.signalsSyncRunId ? { signalsSyncRunId: body.signalsSyncRunId } : {}),
             ...(body.mediatorPipelineSyncRunId ? { mediatorSyncRunId: body.mediatorPipelineSyncRunId } : {}),

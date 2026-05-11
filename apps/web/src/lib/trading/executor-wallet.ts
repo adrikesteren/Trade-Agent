@@ -30,6 +30,14 @@ export function tradeBuyDebitEur(notionalEur: number, feeEur: number): number {
   return nn + ff;
 }
 
+export function tradeSellCreditEur(notionalEur: number, feeEur: number): number {
+  const n = Number(notionalEur);
+  const f = Number(feeEur);
+  const nn = Number.isFinite(n) ? n : 0;
+  const ff = Number.isFinite(f) ? f : 0;
+  return Math.max(0, nn - ff);
+}
+
 /** Service role: idempotent ledger + equity debit for a filled buy order. */
 export async function applyExecutorTradeBuyDebit(
   admin: SupabaseClient,
@@ -44,6 +52,23 @@ export async function applyExecutorTradeBuyDebit(
   if (error) throw new Error(error.message);
   const newEquityEur = typeof data === "number" ? data : Number(data);
   if (!Number.isFinite(newEquityEur)) throw new Error("apply_executor_trade_buy_debit: invalid return");
+  return { newEquityEur };
+}
+
+/** Service role: idempotent ledger + equity credit for a filled sell order. */
+export async function applyExecutorTradeSellCredit(
+  admin: SupabaseClient,
+  args: { userId: string; executorId: string; orderId: string; creditEur: number },
+): Promise<{ newEquityEur: number }> {
+  const { data, error } = await admin.schema("trading").rpc("apply_executor_trade_sell_credit", {
+    p_user_id: args.userId,
+    p_executor_id: args.executorId,
+    p_order_id: args.orderId,
+    p_credit_eur: args.creditEur,
+  });
+  if (error) throw new Error(error.message);
+  const newEquityEur = typeof data === "number" ? data : Number(data);
+  if (!Number.isFinite(newEquityEur)) throw new Error("apply_executor_trade_sell_credit: invalid return");
   return { newEquityEur };
 }
 

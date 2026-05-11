@@ -6,7 +6,7 @@ import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 /**
  * POST: `Authorization: Bearer CRON_SECRET`.
- * Syncs non-terminal live Bitvavo orders with the exchange (Redis lock when configured).
+ * Syncs non-terminal live Bitvavo orders with the exchange.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

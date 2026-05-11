@@ -44,7 +44,7 @@ export function evaluateMaCrossAtClose(params: {
   slowPeriod: number;
 }): MaCrossEvalResult {
   const { barsAsc, targetCloseTimeIso, fastPeriod, slowPeriod } = params;
-  const rule = "ma-cross-5m-v1";
+  const rule = "ma-cross-15m-v1";
 
   if (fastPeriod < 1 || slowPeriod < 2 || fastPeriod >= slowPeriod) {
     return {

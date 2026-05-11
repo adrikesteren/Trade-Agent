@@ -22,7 +22,6 @@ import { runExecutorCatalogCloseDrain } from "@/lib/executor/run-executor-catalo
 import { runMediatorCatalogCloseDrain } from "@/lib/mediator/run-mediator-catalog-close";
 import { resolveLatestCatalogCandleCloseIso } from "@/lib/signals/resolve-latest-catalog-close-for-signals";
 import { runSignalsCatalogCloseDrain } from "@/lib/signals/run-signals-catalog-close";
-import { acquireLock, createRedis, releaseLock, type LockHandle } from "@repo/redis";
 
 export type SymbolClosePipelineOptions = {
   assetCode: string;
@@ -117,34 +116,6 @@ export async function runSymbolClosePipeline(
     quoteCode: resolved.quoteCode,
   };
 
-  const redisEnabled = process.env.SYMBOL_CLOSE_PIPELINE_REDIS_LOCK === "1";
-  const redis = redisEnabled ? createRedis() : null;
-  let lockHandle: LockHandle | null = null;
-  if (redis) {
-    lockHandle = await acquireLock(
-      redis,
-      `symbol-close:${resolved.exchangeCode}:${resolved.assetCode}`,
-      180_000,
-    );
-    if (!lockHandle) {
-      return {
-        ok: false,
-        syncRunId: null,
-        resolved: resolvedOut,
-        steps: {
-          coingecko: errStep("lock_not_acquired", "Another run holds the Redis lock for this exchange/asset."),
-          candles: errStep("skipped", "redis lock not acquired"),
-          closeTime: errStep("skipped", "redis lock not acquired"),
-          signals: errStep("skipped", "redis lock not acquired"),
-          mediator: errStep("skipped", "redis lock not acquired"),
-          executor: errStep("skipped", "redis lock not acquired"),
-        },
-        error: "lock_not_acquired",
-      };
-    }
-  }
-
-  try {
   let begun: Awaited<ReturnType<typeof beginBitvavoSyncRun>>;
   try {
     begun = await beginBitvavoSyncRun(admin, SYMBOL_CLOSE_PIPELINE_JOB_KEY, "manual", {
@@ -392,10 +363,5 @@ export async function runSymbolClosePipeline(
       steps,
       error: msg,
     };
-  }
-  } finally {
-    if (redis && lockHandle) {
-      await releaseLock(redis, lockHandle);
-    }
   }
 }

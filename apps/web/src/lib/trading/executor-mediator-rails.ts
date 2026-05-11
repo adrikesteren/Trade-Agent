@@ -47,6 +47,9 @@ export function executorToMediatorRails(ex: ExecutorRow): MediatorRailsConfig {
     maxDrawdownEur: Number(ex.max_drawdown_eur),
     cooldownAfterLosses: Math.floor(Number(ex.cooldown_after_losses)),
     allowAdd: Boolean(ex.allow_add),
+    profitTakingEnabled: Boolean(ex.profit_taking_enabled),
+    movingFloorTrailPct: Number(ex.moving_floor_trail_pct),
+    movingFloorActivationProfitPct: Number(ex.moving_floor_activation_profit_pct),
   };
 
   const raw = asExtra(ex.mediator_rails_extra);
@@ -63,6 +66,13 @@ export function executorToMediatorRails(ex: ExecutorRow): MediatorRailsConfig {
     maxDrawdownEur: num(raw.maxDrawdownEur, base.maxDrawdownEur),
     cooldownAfterLosses: int(raw.cooldownAfterLosses, base.cooldownAfterLosses),
     allowAdd: raw.allowAdd !== undefined ? bool(raw.allowAdd, false) : base.allowAdd,
+    profitTakingEnabled:
+      raw.profitTakingEnabled !== undefined ? bool(raw.profitTakingEnabled, false) : base.profitTakingEnabled,
+    movingFloorTrailPct: num(raw.movingFloorTrailPct, base.movingFloorTrailPct ?? 0.15),
+    movingFloorActivationProfitPct: num(
+      raw.movingFloorActivationProfitPct,
+      base.movingFloorActivationProfitPct ?? 0.05,
+    ),
   };
 }
 

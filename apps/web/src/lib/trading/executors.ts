@@ -10,6 +10,7 @@ export { executorAllowsMarketAsset };
 export type ExecutorRow = {
   id: string;
   user_id: string;
+  exchange_id: string;
   name: string;
   enabled: boolean;
   execution_mode: ExecutionMode;
@@ -26,6 +27,10 @@ export type ExecutorRow = {
   cooldown_after_losses: string | number;
   allow_add: boolean;
   mediator_rails_extra: Record<string, unknown> | null;
+  profit_taking_enabled: boolean;
+  moving_floor_trail_pct: string | number;
+  moving_floor_activation_profit_pct: string | number;
+  moving_floor_timeframe: string;
 };
 
 /** Prefer "Default" by name, then oldest created. */
@@ -47,11 +52,22 @@ export async function fetchExecutorsForUsers(
     .schema("trading")
     .from("executors")
     .select(
-      "id, user_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra",
+      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe",
     )
     .in("user_id", userIds);
   if (error) throw new Error(error.message);
   return (data ?? []) as ExecutorRow[];
+}
+
+export async function fetchExchangeIdByCode(admin: SupabaseClient, code: string): Promise<string> {
+  const { data, error } = await admin
+    .schema("catalog")
+    .from("exchanges")
+    .select("id")
+    .eq("code", code)
+    .single();
+  if (error || !data?.id) throw new Error(`${code} exchange not found`);
+  return data.id as string;
 }
 
 /** Idempotent: one `risk_state` row per executor (paper defaults). */
@@ -93,8 +109,11 @@ export async function ensureDefaultExecutorsForUsers(
   const missing = userIds.filter((id) => !has.has(id));
   if (!missing.length) return;
 
+  const bitvavoExchangeId = await fetchExchangeIdByCode(admin, "bitvavo");
+
   const rows = missing.map((user_id) => ({
     user_id,
+    exchange_id: bitvavoExchangeId,
     name: "Default",
     enabled: true,
     execution_mode: "paper" as const,
@@ -160,6 +179,7 @@ export async function ensureUserExecutorExists(
       name: "Default",
       enabled: true,
       execution_mode: "paper",
+      exchange_id: await fetchExchangeIdByCode(supabase, "bitvavo"),
       asset_filter_mode: "all",
       filter_asset_ids: [],
       updated_at: new Date().toISOString(),

@@ -104,7 +104,7 @@ function emptySnapshotOutputs(coinIdDisplay: string) {
           <span className="bk-text-muted">
             No snapshot yet. Run{" "}
             <strong className="text-inherit">Asset fundamentals (USD)</strong> from{" "}
-            <Link href="/dashboard/sync-runs" className="bk-link">
+            <Link href="/sync-runs" className="bk-link">
               Sync runs
             </Link>
             .

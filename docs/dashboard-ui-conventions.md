@@ -1,6 +1,6 @@
 # Dashboard UI conventions (Salesforce-inspired)
 
-List and detail screens under `apps/web/src/app/dashboard/**` follow **Salesforce Lightning-style** patterns implemented in `@repo/blocks`. New or refactored pages should stay consistent so the product feels coherent.
+List and detail screens under `apps/web/src/app/(app)/**` follow **Salesforce Lightning-style** patterns implemented in `@repo/blocks`. New or refactored pages should stay consistent so the product feels coherent.
 
 ## List views (object list / grid)
 
@@ -18,16 +18,16 @@ Treat each index route as a **Lightning list view**: chrome around the header, o
 | Toolbar | `toolbar={<ListViewPlaceholderToolbar />}` or custom `ListViewToolbar` | Search field + icon row (settings, grid, refresh, …). |
 | Row actions | `listViewOutlineActionClass` on `Link` | “New / Import” style outline actions, not only muted links. |
 
-Shared helper (optional): `apps/web/src/components/dashboard-list-view-header.tsx` wraps the common list header for simple JSON/debug lists.
+Shared helper (optional): `apps/web/src/components/object-list-view-header.tsx` wraps the common list header for simple JSON/debug lists.
 
 ### Reference implementations
 
-- Rich list: `apps/web/src/app/dashboard/markets/page.tsx`
+- Rich list: `apps/web/src/app/(app)/markets/page.tsx`
 - Catalog lists: `assets/page.tsx`, `exchanges/page.tsx`
 - Automation: `sync-runs/page.tsx`
 - System settings (top-level nav): `system-settings/page.tsx` (list for `public.system_settings`)
 - Account locale: `me/preferences/page.tsx` (display formats; not “system settings”)
-- Trading/automation stubs: pages using `DashboardListViewHeader`
+- Trading/automation stubs: pages using `ObjectListViewHeader`
 
 Do **not** revert list pages to a bare `PageHeader` without `variant="list"` unless the route is intentionally not a list screen.
 
@@ -43,7 +43,7 @@ Wrap the whole screen in **`DetailPageLayout`** from `@repo/blocks`. It composes
 
 | Slot | Role |
 |------|--------|
-| `header` | Full width: typically `PageHeader` with `variant="detail"` (or another top chrome such as `DashboardListViewHeader` where that route still uses list-style chrome). |
+| `header` | Full width: typically `PageHeader` with `variant="detail"` (or another top chrome such as `ObjectListViewHeader` where that route still uses list-style chrome). |
 | `content` | Main column: cards, charts, tables, alerts that belong below the header. |
 | `sidebar` | Optional. From **48rem** viewport width, the row under the header is always **60%** main / **40%** sidebar (`3fr` / `2fr`). Below that width, main and sidebar **stack** (main first). If `sidebar` is omitted or `null`, the right column is still reserved on wide screens as a dashed placeholder; on narrow screens it is hidden so you do not get a blank block under the content. |
 
@@ -57,7 +57,7 @@ Pass horizontal padding on `DetailPageLayout` itself (e.g. `className="bk-contai
 | Primary card | `RecordDetailCard` | White card; put sections inside. |
 | Sections | `RecordDetailSection` | Uppercase section title (SF-style band). |
 | Field grid | `RecordDetailGrid` + `Output` | Two columns from `sm` up; use `span="full"` for long values (IDs, JSON). |
-| FK / related record | `Output` with `lookup={{ href, name }}` or `record={{ pathPrefix, id, name }}` | `pathPrefix` is the app path without trailing slash, e.g. `/dashboard/assets`. |
+| FK / related record | `Output` with `lookup={{ href, name }}` or `record={{ pathPrefix, id, name }}` | `pathPrefix` is the app path without trailing slash, e.g. `/assets`. |
 | Related list (child records) | `RecordRelatedList` | Pass `items`, `getKey`, `renderRow`, optional `totalCount` from `count: "exact"`, `previewLimit` (default 10), and `viewAllHref` for the full list. Renders a section header with outline **View all** when `totalCount > previewLimit`. |
 
 `RecordDetailLayout` remains exported for edge cases; **new detail routes should use `DetailPageLayout`** so header / 60–40 behavior stays consistent.
@@ -70,13 +70,13 @@ Record IDs, tickers, exchange codes, job keys, etc. are **normal fields** → us
 
 ### Reference implementations
 
-- `apps/web/src/app/dashboard/assets/[assetId]/page.tsx`
-- `apps/web/src/app/dashboard/exchanges/[exchangeId]/page.tsx`
-- `apps/web/src/app/dashboard/markets/[marketId]/page.tsx`
-- `apps/web/src/app/dashboard/sync-runs/[id]/page.tsx`
-- `apps/web/src/app/dashboard/system-settings/[key]/page.tsx`
-- `apps/web/src/app/dashboard/signal-agents/[signalAgentId]/page.tsx`
-- `apps/web/src/app/dashboard/executors/[id]/page.tsx`
+- `apps/web/src/app/(app)/assets/[id]/page.tsx`
+- `apps/web/src/app/(app)/exchanges/[id]/page.tsx`
+- `apps/web/src/app/(app)/markets/[id]/page.tsx`
+- `apps/web/src/app/(app)/sync-runs/[id]/page.tsx`
+- `apps/web/src/app/(app)/system-settings/[key]/page.tsx`
+- `apps/web/src/app/(app)/signal-agents/[id]/page.tsx`
+- `apps/web/src/app/(app)/executors/[id]/page.tsx`
 
 Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listview`, `bk-record-detail`, `bk-detail-page-layout`, `bk-output`).
 
@@ -86,8 +86,8 @@ Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listvie
 
 When adding or editing dashboard routes:
 
-1. **List route** → apply the list view checklist above; reuse `DashboardListViewHeader` when the page is a simple data dump.
+1. **List route** → apply the list view checklist above; reuse `ObjectListViewHeader` when the page is a simple data dump.
 2. **Detail route** → wrap with `DetailPageLayout` (`header` / `content` / optional `sidebar`); apply the detail checklist; use `Output` + `record`/`lookup` for every foreign key that has a detail URL in this app.
 3. Prefer extending `@repo/blocks` over one-off Tailwind in pages when the pattern is reusable.
 
-Point agents at this file when working under `apps/web/src/app/dashboard/**` or `packages/blocks/**`.
+Point agents at this file when working under `apps/web/src/app/(app)/**` or `packages/blocks/**`.

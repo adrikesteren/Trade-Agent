@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { runExchangeClosePipeline } from "@/lib/markets/run-exchange-close-pipeline";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { verifyWorkerAuth } from "@/lib/workers/verify-worker-auth";
+import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function readQuery(url: URL): { exchangeCode: string | null; quote: string | undefined } {
   const exchangeCode = url.searchParams.get("exchangeCode")?.trim() ?? null;
@@ -12,11 +12,11 @@ function readQuery(url: URL): { exchangeCode: string | null; quote: string | und
 }
 
 async function handle(request: Request, rawBody: string): Promise<Response> {
-  if (!(await verifyWorkerAuth(request, rawBody))) {
+  if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or call via QStash with signing keys set."
-        : "Invalid or missing worker auth (Bearer CRON_SECRET or QStash signature).";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing worker auth (Bearer CRON_SECRET).";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 

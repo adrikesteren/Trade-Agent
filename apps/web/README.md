@@ -41,7 +41,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Signal agents (env)
 
-After a successful Bitvavo EUR catalog candle sweep (`5m`) with new candle rows, the app runs the signals pipeline (including `POST /api/workers/signals-catalog-close` logic inline) so rule-based agents write rows to `trading.signals` (FK `signal_agent_id` → `trading.signal_agents`). See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
+After a successful Bitvavo EUR catalog candle sweep (`15m`) with new candle rows, the app runs the signals pipeline (including `POST /api/workers/signals-catalog-close` logic inline) so rule-based agents write rows to `trading.signals` (FK `signal_agent_id` → `trading.signal_agents`). See [docs/signal-agents-developer.md](../../docs/signal-agents-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 | `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
 
-**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/dashboard/executors`): paper/live per executor, **Add/remove balance** (assigned EUR), enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/dashboard/settings` and `/dashboard/settings/execution` redirect to `/dashboard/me/preferences` (and execution stub → Executors).
+**Executors (UI):** logged-in users manage portfolios under Dashboard → Trading → **Executors** (`/executors`): paper/live per executor, **Add/remove balance** (assigned EUR), enable/disable, and mutually exclusive asset filter (`all` / whitelist / blacklist). Legacy `/settings` and `/settings/execution` redirect to `/me/preferences` (and execution stub → Executors).
 
 Manual worker call (dev):
 
@@ -107,32 +107,28 @@ curl -sS -X POST "http://localhost:3000/api/workers/executor-catalog-close" ^
   -d "{\"closeTimeIso\":\"2026-05-09T12:00:00.000Z\"}"
 ```
 
-## Ops / scheduler (Redis, alerts)
+## Ops / scheduler (alerts)
 
-Background jobs for **daily risk reset** and **live order reconciliation**, plus optional **Upstash Redis** and a **failure webhook**. Schedule them with any cron hitting the worker URLs (Bearer `CRON_SECRET`). See [docs/ops-developer.md](../../docs/ops-developer.md).
+Background jobs for **daily risk reset** and **live order reconciliation**, plus an optional **failure webhook**. Schedule them with any cron hitting the worker URLs (Bearer `CRON_SECRET`). See [docs/ops-developer.md](../../docs/ops-developer.md).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `CRON_SECRET` | Recommended | Bearer secret for `GET`/`POST /api/workers/*`. |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional | Distributed lock for `bitvavo-reconcile` (`@repo/redis`). If unset, reconcile still runs without a lock. |
 | `OPS_ALERT_WEBHOOK_URL` | Optional | `POST` JSON on hard failures (e.g. candle/markets sync throws, risk reset throws, reconcile throws). |
 | `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts a compact **BUY/SELL — asset — signal agent** notification (colored attachment bar) when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
 | `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
-| `BITVAVO_RECONCILE_LOCK_TTL_MS` | Optional | Redis lock TTL for reconcile (default 9 minutes). |
 
-## QStash (optional)
+## Relay (optional)
 
-When `QSTASH_TOKEN` and `APP_URL` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues one **`asset-close-pipeline`** HTTP call per distinct catalog asset (no per-asset CoinGecko ingest — faster than `symbol-close-pipeline`; see [docs/ops-developer.md](../../docs/ops-developer.md)). Signing keys (`QSTASH_CURRENT_SIGNING_KEY`, …) let QStash call workers without putting `CRON_SECRET` in the Upstash destination. The dashboard **Schedules** page lists QStash cron schedules when `QSTASH_TOKEN` is configured. **System settings** (`/dashboard/system-settings`, dashboard → Automation) stores QStash stagger / publish concurrency in `public.system_settings` so you can tune them without restarting the dev server; env vars remain fallbacks (see ops-developer.md).
+When `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues an ordered **`symbol-close-pipeline`** job per distinct catalog asset (mcap descending) on your **Relay** instance via `POST /api/v1/message-group` (or `/api/v1/messages` when there is only one asset). See the Relay repository’s `AGENTS.md` for ingress auth and payload shape. Relay’s **dispatcher** must run periodically (`GET` or `POST` `{RELAY_APP_URL}/api/internal/dispatch` with dispatcher auth, or Relay’s bundled worker); otherwise jobs stay pending. Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`) is passed through as `maxRetries`.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `QSTASH_TOKEN` | For QStash features | Publish + schedules API (server-only). |
-| `QSTASH_URL` | Optional | Override QStash API base (default cloud). |
-| `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` | Recommended with QStash | Verify `Upstash-Signature` on worker routes. |
-| `APP_URL` | For publish URLs | Public origin of this app (e.g. `https://…` or tunneled `https://…` for local QStash). |
-| `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` | Optional | Fallback when no DB row: delay between queued asset-close jobs in seconds (default `2`; decimals e.g. `0.1`). Prefer **Dashboard → System settings** (`/dashboard/system-settings`, table `public.system_settings`). |
-| `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` | Optional | Fallback when no DB row: parallel QStash `publish` calls per batch (default `32`, max `128`). Prefer **Dashboard → System settings** (`/dashboard/system-settings`, table `public.system_settings`). |
-| `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK` | Optional | Set `1` to serialize overlapping **asset/symbol-close** runs per asset when Redis is configured (extra latency; leave unset for throughput). |
+| `RELAY_APP_URL` | For Relay fan-out | Relay app origin, e.g. `http://localhost:1337` (no trailing slash). |
+| `RELAY_APP_SECRET` | For Relay fan-out | Bearer for Relay `POST /api/v1/messages` and `/api/v1/message-group` (server-only). |
+| `APP_URL` | For Relay fan-out | Public origin of **this** Next app; worker URLs in Relay jobs point here (e.g. `http://localhost:3000`). |
+| `CRON_SECRET` | For Relay fan-out | Same Bearer workers already use; included in Relay job `headers` so each `symbol-close-pipeline` call is authorized. |
+| `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` | Optional | Per-job `maxRetries` for Relay (default `2`, max `100`). |
 
 Manual worker calls (dev):
 

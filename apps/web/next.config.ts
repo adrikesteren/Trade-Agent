@@ -22,7 +22,13 @@ const nextPublicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? ""
 const nextPublicSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@repo/blocks", "@repo/exchange", "@repo/redis", "@repo/risk", "@repo/trading"],
+  async redirects() {
+    return [
+      { source: "/dashboard", destination: "/overview", permanent: true },
+      { source: "/dashboard/:path*", destination: "/:path*", permanent: true },
+    ];
+  },
+  transpilePackages: ["@repo/blocks", "@repo/exchange", "@repo/risk", "@repo/trading"],
   /**
    * Inlines into Edge middleware and the browser bundle. `loadMonorepoDotenvOnce()` must run above
    * so these are non-empty when values only exist in the monorepo root `.env`.

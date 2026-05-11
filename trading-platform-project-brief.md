@@ -49,7 +49,7 @@ Build a **trading automation platform** (starting with **paper trading**) where 
 | Web app                     | **Next.js**        | Marketing, dashboard, settings, logs, manual controls                                       |
 | Mobile (optional phase)     | **Expo**           | Companion app: alerts, approvals, read-only portfolio                                       |
 | Database / auth / realtime  | **Supabase**       | Postgres schema, RLS where appropriate, auth if needed, optional realtime for UI            |
-| Cache / rate limits / locks | **Upstash Redis**  | Idempotency keys, distributed locks, short-lived state, rate limit counters                 |
+| Cache / rate limits / locks | *(none in v1)*     | Idempotency via DB uniqueness; add Redis or similar later if needed                      |
 | Jobs / schedules / webhooks | **HTTP workers + host cron** | Same-process or OS-scheduled `GET`/`POST /api/workers/*` with `CRON_SECRET` (candle jobs, reconciliation, nightly rollups) |
 
 
@@ -76,9 +76,9 @@ Conceptual entities (names can vary):
 2. **Signal worker(s)** — compute indicators / LLM-assisted research optional later; write `signals`.
 3. **Mediator worker** — read latest signals + risk; write `trade_decisions`.
 4. **Executor worker** — place paper or live orders via Bitvavo adapter; update `orders`/`fills`.
-5. **Reconciliation job** — periodic sync with exchange truth (scheduled worker + Redis lock).
+5. **Reconciliation job** — periodic sync with exchange truth (scheduled worker).
 
-Use **Redis** for: locks (`mediator:symbol:timeframe`), dedupe keys, rate limits. Use **your scheduler** for: periodic worker ticks; workers run inline in Next unless you wrap them externally.
+Use **your scheduler** for: periodic worker ticks; workers run inline in Next unless you wrap them externally. Add external locks or queues only if you outgrow single-host cron + DB idempotency.
 
 ---
 

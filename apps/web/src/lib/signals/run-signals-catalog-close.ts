@@ -10,6 +10,8 @@ import { enqueueMediatorCatalogCloseAfterSignals } from "@/lib/mediator/enqueue-
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval";
+import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval";
+import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval";
 import { filterSignalUserIdsToExistingAuthUsers, parseSignalUserIdsFromEnv } from "./signal-user-ids";
 
 export type SignalsCatalogCloseBody = {
@@ -60,7 +62,7 @@ type CandleRow = {
   candle_timestamps: { close_time: string; open_time: string } | { close_time: string; open_time: string }[] | null;
 };
 
-function mapCandleRows(rows: CandleRow[]): { id: string; close: number; closeTimeIso: string }[] {
+function mapCandleRows(rows: CandleRow[]): { id: string; high: number; low: number; close: number; closeTimeIso: string }[] {
   const mapped = (rows ?? [])
     .map((r) => {
       const rawTs = r.candle_timestamps as unknown;
@@ -69,6 +71,8 @@ function mapCandleRows(rows: CandleRow[]): { id: string; close: number; closeTim
       if (!closeTime) return null;
       return {
         id: r.id,
+        high: Number(r.high),
+        low: Number(r.low),
         close: Number(r.close),
         closeTimeIso: closeTime,
       };
@@ -248,18 +252,48 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       const closeTimeForRow = targetRow?.closeTimeIso ?? closeTimeIso;
 
       for (const agent of activeAgents) {
-        if (agent.agent_id !== "ma-cross-5m-v1") continue;
-
-        const cfg = (agent.config ?? {}) as { fastPeriod?: number; slowPeriod?: number };
-        const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
-        const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
-
-        const ev = evaluateMaCrossAtClose({
-          barsAsc,
-          targetCloseTimeIso: closeTimeIso,
-          fastPeriod,
-          slowPeriod,
-        });
+        const cfg = (agent.config ?? {}) as Record<string, unknown>;
+        let ev:
+          | ReturnType<typeof evaluateMaCrossAtClose>
+          | ReturnType<typeof evaluateRsiReversionAtClose>
+          | ReturnType<typeof evaluateBreakoutAtrAtClose>;
+        if (agent.agent_id === "ma-cross-15m-v1") {
+          const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
+          const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
+          ev = evaluateMaCrossAtClose({
+            barsAsc,
+            targetCloseTimeIso: closeTimeIso,
+            fastPeriod,
+            slowPeriod,
+          });
+        } else if (agent.agent_id === "rsi-reversion-15m-v1") {
+          const rsiPeriod = Math.floor(Number(cfg.rsiPeriod ?? 14));
+          const oversold = Number(cfg.oversold ?? 30);
+          ev = evaluateRsiReversionAtClose({
+            barsAsc,
+            targetCloseTimeIso: closeTimeIso,
+            rsiPeriod,
+            oversold,
+          });
+        } else if (agent.agent_id === "breakout-atr-15m-v1") {
+          const lookbackBars = Math.floor(Number(cfg.lookbackBars ?? 20));
+          const atrPeriod = Math.floor(Number(cfg.atrPeriod ?? 14));
+          const atrMultiplier = Number(cfg.atrMultiplier ?? 1.2);
+          ev = evaluateBreakoutAtrAtClose({
+            barsAsc: sorted.map((r) => ({
+              high: r.high,
+              low: r.low,
+              close: r.close,
+              closeTimeIso: r.closeTimeIso,
+            })),
+            targetCloseTimeIso: closeTimeIso,
+            lookbackBars,
+            atrPeriod,
+            atrMultiplier,
+          });
+        } else {
+          continue;
+        }
 
         for (const userId of signalUserIds) {
           const row = {

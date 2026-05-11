@@ -15,7 +15,7 @@ export function getMarketsSyncIntervalMs(): number {
 }
 
 export function getCandlesSyncIntervalMs(): number {
-  return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_CANDLES_SYNC_INTERVAL_MS, 300_000);
+  return parseIntervalMs(process.env.NEXT_PUBLIC_BITVAVO_CANDLES_SYNC_INTERVAL_MS, 900_000);
 }
 
 /** Display grid for CoinGecko worker (default 5m). Set to 0 to hide “next tick” on the sync dashboard. */

@@ -3,7 +3,6 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
 
 const MINUTES: Record<ChartTimeframe, number> = {
-  "5m": 5,
   "15m": 15,
   "1h": 60,
   "4h": 240,

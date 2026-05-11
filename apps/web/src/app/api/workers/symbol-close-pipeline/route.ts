@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/markets/run-symbol-close-pipeline";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { verifyWorkerAuth } from "@/lib/workers/verify-worker-auth";
+import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parsePipelineBody(raw: string): Partial<SymbolClosePipelineOptions> {
   if (!raw.trim()) return {};
@@ -29,11 +29,11 @@ function readQueryParams(url: URL): { assetCode: string | null; exchangeCode: st
 }
 
 async function handle(request: Request, rawBody: string): Promise<Response> {
-  if (!(await verifyWorkerAuth(request, rawBody))) {
+  if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash with signing keys set."
-        : "Invalid or missing worker auth (Bearer CRON_SECRET or QStash signature).";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing worker auth (Bearer CRON_SECRET).";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
@@ -56,12 +56,6 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
   });
 
   if (!result.ok && result.syncRunId == null) {
-    if (result.error === "lock_not_acquired") {
-      return NextResponse.json(result, {
-        status: 429,
-        headers: { "Retry-After": "15" },
-      });
-    }
     const beginLock =
       result.resolved.marketId !== "" && result.error?.toLowerCase().includes("another sync");
     return NextResponse.json(result, { status: beginLock ? 409 : 400 });
@@ -75,14 +69,14 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
 }
 
 /**
- * GET: Bearer CRON_SECRET or QStash signature (when signing keys set); same as POST with empty body; query params `assetCode`, `exchangeCode`, optional `quote`.
+ * GET: Bearer CRON_SECRET; same as POST with empty body; query params `assetCode`, `exchangeCode`, optional `quote`.
  */
 export async function GET(request: Request) {
   return handle(request, "");
 }
 
 /**
- * POST: Bearer CRON_SECRET or QStash signature (when signing keys set). Optional JSON body: `skipCoingecko`, `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (all booleans, default false).
+ * POST: Bearer CRON_SECRET. Optional JSON body: `skipCoingecko`, `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (all booleans, default false).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

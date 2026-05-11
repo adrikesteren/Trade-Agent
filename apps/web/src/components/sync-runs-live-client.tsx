@@ -213,7 +213,7 @@ export function SyncRunsLiveClient({
                   <tr key={r.id}>
                     <Td className="py-1.5 pr-2">
                       <Link
-                        href={`/dashboard/sync-runs/${r.id}`}
+                        href={`/sync-runs/${r.id}`}
                         className="bk-link font-mono"
                         prefetch={false}
                       >

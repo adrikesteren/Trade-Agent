@@ -1267,6 +1267,14 @@
   background: var(--bk-color-page);
 }
 
+/* List views: same shell as record detail background */
+.bk-list-view-layout {
+  padding: 1rem 1rem 1.5rem;
+  margin-bottom: 0.25rem;
+  border-radius: var(--bk-radius-md);
+  background: var(--bk-color-page);
+}
+
 /* Detail page: header 100%, then 60/40 (3fr / 2fr) from 48rem; stacked below that */
 .bk-detail-page-layout_inner {
   width: 100%;

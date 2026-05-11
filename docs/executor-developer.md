@@ -12,7 +12,7 @@ Audience: human developers and automation agents editing this repo.
 2. Signal agents → `trading.signals`  
 3. Trade Mediator → `trading.trade_decisions` (one row per **enabled executor** per market/bar; mode-agnostic — paper vs live is only `trading.executors.execution_mode` at order time)  
 4. **Executor** (this document) → `trading.orders` (+ `fills`, `positions`) keyed by `executor_id`  
-5. **Ops / scheduler** — external cron hitting worker routes with `CRON_SECRET`, optional Redis, live **reconcile** vs Bitvavo, daily risk reset, optional alerts. See [ops-developer.md](./ops-developer.md). (In [how-we-use-agents.md](./how-we-use-agents.md) FAQ table, “stap 5” means executor; the **Rollen** list uses step 5 for Ops — both docs now cross-link.)
+5. **Ops / scheduler** — external cron hitting worker routes with `CRON_SECRET`, live **reconcile** vs Bitvavo, daily risk reset, optional alerts. See [ops-developer.md](./ops-developer.md). (In [how-we-use-agents.md](./how-we-use-agents.md) FAQ table, “stap 5” means executor; the **Rollen** list uses step 5 for Ops — both docs now cross-link.)
 
 The executor **does not** re-run risk logic; it only executes what the mediator already approved (`approved = true` and a `proposedOrder` in `decision_payload`).
 
@@ -21,7 +21,7 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 ## Executors (portfolios, Paper / Live, asset filter)
 
 - **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live`), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array. **Mediator policy** on the same row: `default_notional_eur`, risk rail columns (`max_risk_per_trade`, `max_open_positions`, …, `allow_add`), and optional **`mediator_rails_extra`** jsonb — see [mediator-developer.md](./mediator-developer.md). (Legacy column **`budget_eur`** may still exist in the database but is no longer used by the app; spending is limited by **assigned balance** in `risk_state.equity_eur`.)  
-- Dashboard: **Trading → Executors** → [`/dashboard/executors`](../apps/web/src/app/dashboard/executors/page.tsx) (detail + PnL snapshot per executor). Legacy **`/dashboard/settings/execution`** redirects to **`/dashboard/me/preferences/execution`**, then to Executors.  
+- **Trading → Executors** → [`/executors`](../apps/web/src/app/(app)/executors/page.tsx) (detail + PnL snapshot per executor). Legacy **`/settings/execution`** redirects to **`/me/preferences/execution`**, then to Executors.  
 - The **mediator** loads **enabled** executors per `SIGNAL_*` user, skips markets outside the executor’s asset filter (via `catalog.markets.asset_id`), reads **`positions`** for `(user_id, executor_id, market_id)`, and writes **mode-agnostic** decisions (`trade_decisions` has no `paper` column).  
 - **Live Bitvavo keys** are **not** in the database: use server env `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` (and optional `BITVAVO_OPERATOR_ID`, default `1`). See [apps/web/README.md](../apps/web/README.md).
 
@@ -31,7 +31,7 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 - **`trading.risk_state.equity_eur`** (per `executor_id`) is the **only in-app spendable balance** for that executor: it starts at **0** when `risk_state` is created; users add or remove EUR on the executor detail page (**Add balance** / **Remove balance**), which calls `trading.apply_executor_balance_change` and appends rows to **`trading.executor_balance_ledger`**.
 - **Buys** debit **`notional_eur + fill fee`** from `equity_eur` and append a **`trade_buy`** ledger row (idempotent per `orders.id` via `trading.apply_executor_trade_buy_debit`, **service_role** only). The executor worker **skips** a paper buy (or inserts a **rejected** live stub without calling Bitvavo) when `equity_eur` is below that debit. This balance is **not** your Bitvavo account total — it is only what you assign inside Trade Agent.
-- **New executors** created from the dashboard default to **`enabled = false`** until the user turns them on (DB default on `executors.enabled` is also `false` after the balance migration).
+- **New executors** created from the app default to **`enabled = false`** until the user turns them on (DB default on `executors.enabled` is also `false` after the balance migration).
 
 ---
 
@@ -67,7 +67,7 @@ Entry points:
 
 - **No** new trading decisions from the executor.  
 - **No** unsigned `user_id` — workers use env-configured users only.  
-- **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled + Redis lock) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). When a **filled** buy gets its first `fills` row here, the same **`apply_executor_trade_buy_debit`** runs so balance stays in sync for late-filled live orders.
+- **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). When a **filled** buy gets its first `fills` row here, the same **`apply_executor_trade_buy_debit`** runs so balance stays in sync for late-filled live orders.
 
 ---
 

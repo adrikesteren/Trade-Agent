@@ -6,7 +6,7 @@ import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/c
 export type CandleSyncMode = "full" | "incremental" | "window";
 
 export type SyncCandlesChunkOptions = {
-  /** Bitvavo interval, e.g. 1h, 5m */
+  /** Bitvavo interval, e.g. 1h, 15m */
   timeframe: string;
   /** Bars per market (Bitvavo max 1440 per request). Ignored when incremental or window. */
   barsPerMarket: number;

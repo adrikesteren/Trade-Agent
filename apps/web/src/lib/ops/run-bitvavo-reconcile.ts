@@ -1,6 +1,5 @@
 import "server-only";
 
-import { acquireLock, createRedis, releaseLock, type LockHandle } from "@repo/redis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
@@ -25,19 +24,13 @@ function batchSize(): number {
   return Math.min(Math.max(Math.floor(n), 1), 120);
 }
 
-function lockTtlMs(): number {
-  const n = Number(process.env.BITVAVO_RECONCILE_LOCK_TTL_MS ?? 9 * 60 * 1000);
-  if (!Number.isFinite(n) || n < 10_000) return 9 * 60 * 1000;
-  return Math.min(Math.floor(n), 30 * 60 * 1000);
-}
-
 export type RunBitvavoReconcileResult = {
   ok: true;
   examined: number;
   updated: number;
   fillsInserted: number;
   errors: string[];
-  skipped?: "lock_not_acquired" | "no_bitvavo_keys";
+  skipped?: "no_bitvavo_keys";
 };
 
 type OrderRow = {
@@ -110,17 +103,7 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     return { ok: true, examined: 0, updated: 0, fillsInserted: 0, errors, skipped: "no_bitvavo_keys" };
   }
 
-  const redis = createRedis();
-  let lock: LockHandle | null = null;
-  if (redis) {
-    lock = await acquireLock(redis, "bitvavo-reconcile", lockTtlMs());
-    if (!lock) {
-      return { ok: true, examined: 0, updated: 0, fillsInserted: 0, errors, skipped: "lock_not_acquired" };
-    }
-  }
-
-  try {
-    const admin = createServiceRoleClient();
+  const admin = createServiceRoleClient();
     const lim = batchSize();
 
     const { data: ordRows, error: ordErr } = await admin
@@ -318,8 +301,5 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
       }
     }
 
-    return { ok: true, examined, updated, fillsInserted, errors };
-  } finally {
-    if (redis && lock) await releaseLock(redis, lock);
-  }
+  return { ok: true, examined, updated, fillsInserted, errors };
 }

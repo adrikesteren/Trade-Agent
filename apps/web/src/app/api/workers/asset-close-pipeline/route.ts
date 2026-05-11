@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/markets/run-symbol-close-pipeline";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { verifyWorkerAuth } from "@/lib/workers/verify-worker-auth";
+import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 /** Same optional skips as symbol-close, except CoinGecko is never run (faster fan-out from exchange-close). */
 function parsePipelineBody(raw: string): Partial<SymbolClosePipelineOptions> {
@@ -29,11 +29,11 @@ function readQueryParams(url: URL): { assetCode: string | null; exchangeCode: st
 }
 
 async function handle(request: Request, rawBody: string): Promise<Response> {
-  if (!(await verifyWorkerAuth(request, rawBody))) {
+  if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET, or QStash with signing keys set."
-        : "Invalid or missing worker auth (Bearer CRON_SECRET or QStash signature).";
+        ? "Use Authorization: Bearer CRON_SECRET."
+        : "Invalid or missing worker auth (Bearer CRON_SECRET).";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
@@ -57,12 +57,6 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
   });
 
   if (!result.ok && result.syncRunId == null) {
-    if (result.error === "lock_not_acquired") {
-      return NextResponse.json(result, {
-        status: 429,
-        headers: { "Retry-After": "15" },
-      });
-    }
     const beginLock =
       result.resolved.marketId !== "" && result.error?.toLowerCase().includes("another sync");
     return NextResponse.json(result, { status: beginLock ? 409 : 400 });

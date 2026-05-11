@@ -128,16 +128,19 @@ describe("evaluateTradeDecision", () => {
     expect(d.reasonCodes).toContain("no_position");
   });
 
-  it("denies EXIT with position until executor exists", () => {
+  it("approves EXIT with position as sell proposal", () => {
     const d = evaluateTradeDecision({
       rails,
       risk,
       marketSymbol: "BTC-EUR",
       signalIntents: ["EXIT"],
       inPosition: true,
+      positionQuantity: 2,
+      marketPriceEur: 100,
     });
-    expect(d.approved).toBe(false);
-    expect(d.reasonCodes).toContain("exit_not_implemented");
+    expect(d.approved).toBe(true);
+    expect(d.proposedOrder?.side).toBe("sell");
+    expect(d.proposedOrder?.notionalEur).toBe(200);
   });
 
   it("denies REDUCE with position until executor exists", () => {
@@ -163,5 +166,22 @@ describe("evaluateTradeDecision", () => {
     });
     expect(d.approved).toBe(false);
     expect(d.reasonCodes).toContain("kill_switch");
+  });
+
+  it("approves forced EXIT without signals", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk,
+      marketSymbol: "BTC-EUR",
+      signalIntents: [],
+      inPosition: true,
+      forceExit: true,
+      positionQuantity: 1,
+      marketPriceEur: 120,
+    });
+    expect(d.approved).toBe(true);
+    expect(d.resolvedIntent).toBe("EXIT");
+    expect(d.reasonCodes).toContain("moving_floor_triggered");
+    expect(d.proposedOrder?.side).toBe("sell");
   });
 });

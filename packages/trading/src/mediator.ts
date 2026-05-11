@@ -11,6 +11,12 @@ export type SignalIntent = "ENTER" | "ADD" | "REDUCE" | "EXIT" | "HOLD";
 export type MediatorRailsConfig = RiskRailsConfig & {
   /** When true, ADD with an open position runs the entry risk gate. Default false (v1). */
   allowAdd?: boolean;
+  /** Executor-level profit-taking toggle (moving floor). */
+  profitTakingEnabled?: boolean;
+  /** Trail percent below peak, e.g. 0.15 = floor at 85% of peak. */
+  movingFloorTrailPct?: number;
+  /** Activation threshold over avg entry, e.g. 0.05 = start after +5%. */
+  movingFloorActivationProfitPct?: number;
 };
 
 export type TradeDecisionInput = {
@@ -20,6 +26,9 @@ export type TradeDecisionInput = {
   /** Intents from all agents for this bar (same user, market, timeframe, close). */
   signalIntents: SignalIntent[];
   inPosition: boolean;
+  positionQuantity?: number;
+  marketPriceEur?: number;
+  forceExit?: boolean;
   /** Suggested EUR size before risk clamp (worker/env). */
   notionalEurSuggested?: number;
 };
@@ -65,8 +74,9 @@ export function aggregateSignalIntents(intents: SignalIntent[]): SignalIntent {
 export function evaluateTradeDecision(input: TradeDecisionInput): TradeDecisionOutput {
   const { rails, risk, marketSymbol, signalIntents, inPosition } = input;
   const riskSnapshot = { ...risk };
+  const forcedExit = input.forceExit === true;
 
-  if (signalIntents.length === 0) {
+  if (signalIntents.length === 0 && !forcedExit) {
     return {
       approved: false,
       reasonCodes: ["no_signals"],
@@ -75,7 +85,7 @@ export function evaluateTradeDecision(input: TradeDecisionInput): TradeDecisionO
     };
   }
 
-  const resolvedIntent = aggregateSignalIntents(signalIntents);
+  const resolvedIntent = forcedExit ? "EXIT" : aggregateSignalIntents(signalIntents);
 
   if (resolvedIntent === "HOLD") {
     return {
@@ -90,11 +100,19 @@ export function evaluateTradeDecision(input: TradeDecisionInput): TradeDecisionO
     if (!inPosition) {
       return { approved: false, reasonCodes: ["no_position"], riskSnapshot, resolvedIntent };
     }
+    const qty = Number(input.positionQuantity ?? 0);
+    const px = Number(input.marketPriceEur ?? 0);
+    const notionalEur = qty > 0 && Number.isFinite(px) && px > 0 ? qty * px : 0;
     return {
-      approved: false,
-      reasonCodes: ["exit_not_implemented"],
+      approved: true,
+      reasonCodes: forcedExit ? ["moving_floor_triggered"] : [],
       riskSnapshot,
       resolvedIntent,
+      proposedOrder: {
+        symbol: marketSymbol,
+        side: "sell",
+        notionalEur,
+      },
     };
   }
 

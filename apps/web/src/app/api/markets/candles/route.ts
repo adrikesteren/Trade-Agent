@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const marketId = url.searchParams.get("marketId");
-  const timeframe = url.searchParams.get("timeframe") ?? "5m";
+  const timeframe = url.searchParams.get("timeframe") ?? "15m";
 
   if (!marketId) {
     return NextResponse.json({ error: "missing_marketId" }, { status: 400 });

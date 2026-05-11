@@ -35,6 +35,7 @@ export { ListViewPlaceholderToolbar } from "./components/list-view-placeholder-t
 export { ListViewTitlePickerPlaceholder } from "./components/list-view-title-picker-placeholder";
 export { ListViewSearch, type ListViewSearchProps } from "./components/list-view-search";
 export { ListViewToolbar, type ListViewToolbarProps } from "./components/list-view-toolbar";
+export { ListViewLayout, type ListViewLayoutProps } from "./components/list-view-layout";
 export { listViewOutlineActionClass } from "./list-view-classes";
 export {
   Output,

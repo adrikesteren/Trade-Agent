@@ -3,7 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
-import { placeBitvavoMarketBuyQuote } from "@/lib/bitvavo/place-market-order";
+import { placeBitvavoMarketBuyQuote, placeBitvavoMarketSellAmount } from "@/lib/bitvavo/place-market-order";
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
@@ -17,12 +17,14 @@ import {
   type ExecutorRow,
 } from "@/lib/trading/executors";
 import {
+  applyExecutorTradeSellCredit,
   applyExecutorTradeBuyDebit,
   executorPaperFeeEur,
   fetchExecutorEquityEur,
   fetchExecutorPositionSnapshot,
   restoreExecutorPositionSnapshot,
   tradeBuyDebitEur,
+  tradeSellCreditEur,
 } from "@/lib/trading/executor-wallet";
 import {
   fetchAssetDisplayNameByMarketId,
@@ -121,6 +123,16 @@ function parseProposedBuy(payload: Record<string, unknown> | null): { symbol: st
   return { symbol: sym, notionalEur: n };
 }
 
+function parseProposedSell(payload: Record<string, unknown> | null): { symbol: string } | null {
+  const po = payload?.proposedOrder;
+  if (!po || typeof po !== "object") return null;
+  const o = po as Record<string, unknown>;
+  if (o.side !== "sell") return null;
+  const sym = typeof o.symbol === "string" ? o.symbol.trim() : "";
+  if (!sym) return null;
+  return { symbol: sym };
+}
+
 type DecisionRow = {
   id: string;
   user_id: string;
@@ -190,6 +202,54 @@ async function upsertPositionAfterBuy(
     onConflict: "user_id,executor_id,market_id",
   });
   if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
+}
+
+async function upsertPositionAfterSell(
+  admin: SupabaseClient,
+  args: {
+    userId: string;
+    executorId: string;
+    marketId: string;
+    sellQty: number;
+  },
+): Promise<void> {
+  const { data: pos, error: selErr } = await admin
+    .schema("trading")
+    .from("positions")
+    .select("quantity, avg_price, paper")
+    .eq("user_id", args.userId)
+    .eq("executor_id", args.executorId)
+    .eq("market_id", args.marketId)
+    .maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+
+  const existingQty = Number(pos?.quantity ?? 0);
+  if (!Number.isFinite(existingQty) || existingQty <= 0) return;
+  const nextQty = Math.max(0, existingQty - args.sellQty);
+
+  if (nextQty <= 0) {
+    const { error: delErr } = await admin
+      .schema("trading")
+      .from("positions")
+      .delete()
+      .eq("user_id", args.userId)
+      .eq("executor_id", args.executorId)
+      .eq("market_id", args.marketId);
+    if (delErr) throw new Error(delErr.message);
+    return;
+  }
+
+  const { error: upErr } = await admin
+    .schema("trading")
+    .from("positions")
+    .update({
+      quantity: nextQty,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", args.userId)
+    .eq("executor_id", args.executorId)
+    .eq("market_id", args.marketId);
+  if (upErr) throw new Error(upErr.message);
 }
 
 export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): Promise<RunExecutorCatalogCloseResult> {
@@ -340,6 +400,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
       for (const ex of executors) {
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
+        if (String(ex.exchange_id) !== exchangeId) continue;
 
         const { data: decList, error: decErr } = await admin
           .schema("trading")
@@ -359,8 +420,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         if (!dec) continue;
         if (!dec.approved) continue;
 
-        const proposed = parseProposedBuy(dec.decision_payload);
-        if (!proposed) continue;
+        const proposedBuy = parseProposedBuy(dec.decision_payload);
+        const proposedSell = parseProposedSell(dec.decision_payload);
+        if (!proposedBuy && !proposedSell) continue;
 
         const signalAgentNameForSlack = labelFromSignalAgentMap(
           signalAgentLabelsBySlug,
@@ -377,9 +439,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         if (existingOrder) continue;
 
         const paperExecution = ex.execution_mode !== "live";
-        const notionalEur = proposed.notionalEur;
+        const orderSide = proposedSell ? "sell" : "buy";
+        const notionalEur = proposedBuy?.notionalEur ?? 0;
 
-        if (paperExecution) {
+        if (paperExecution && orderSide === "buy") {
           const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
           if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
 
@@ -461,35 +524,137 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           continue;
         }
 
-        /* Live */
-        try {
-          const estFee = executorPaperFeeEur(notionalEur);
-          const estDebit = tradeBuyDebitEur(notionalEur, estFee);
-          const liveEquity = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
-          if (liveEquity < estDebit) {
-            const { error: skipInsErr } = await admin.schema("trading").from("orders").insert({
+        if (paperExecution && orderSide === "sell") {
+          const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+          if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
+
+          const posSnapshot = await fetchExecutorPositionSnapshot(admin, {
+            userId,
+            executorId: ex.id,
+            marketId,
+          });
+          const sellQty = Number(posSnapshot?.quantity ?? 0);
+          if (!Number.isFinite(sellQty) || sellQty <= 0) continue;
+
+          const grossNotional = sellQty * px.price;
+          const feeEur = executorPaperFeeEur(grossNotional);
+          const creditEur = tradeSellCreditEur(grossNotional, feeEur);
+          if (!Number.isFinite(creditEur) || creditEur <= 0) continue;
+
+          const { data: inserted, error: insOrdErr } = await admin
+            .schema("trading")
+            .from("orders")
+            .insert({
               user_id: userId,
               executor_id: ex.id,
               decision_id: dec.id,
               market_id: marketId,
-              side: "buy",
-              quantity: 0,
-              notional_eur: notionalEur,
-              status: "rejected",
-              paper: false,
+              side: "sell",
+              quantity: sellQty,
+              notional_eur: grossNotional,
+              status: "filled",
+              paper: paperExecution,
               external_id: null,
+            })
+            .select("id")
+            .single();
+          if (insOrdErr) throw new Error(`${marketSymbol}: sell order insert: ${insOrdErr.message}`);
+          const orderId = inserted?.id as string;
+
+          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
+            user_id: userId,
+            order_id: orderId,
+            price: px.price,
+            quantity: sellQty,
+            fee: feeEur,
+          });
+          if (fillErr) throw new Error(`${marketSymbol}: sell fill insert: ${fillErr.message}`);
+
+          try {
+            await upsertPositionAfterSell(admin, {
+              userId,
+              executorId: ex.id,
+              marketId,
+              sellQty,
             });
-            if (skipInsErr && !/duplicate|unique/i.test(skipInsErr.message)) {
-              throw new Error(`${marketSymbol}: insufficient balance reject insert: ${skipInsErr.message}`);
+            await applyExecutorTradeSellCredit(admin, {
+              userId,
+              executorId: ex.id,
+              orderId,
+              creditEur,
+            });
+            await admin
+              .schema("trading")
+              .from("executor_moving_floors")
+              .delete()
+              .eq("user_id", userId)
+              .eq("executor_id", ex.id)
+              .eq("market_id", marketId);
+          } catch (e) {
+            await admin.schema("trading").from("orders").delete().eq("id", orderId);
+            await restoreExecutorPositionSnapshot(admin, {
+              userId,
+              executorId: ex.id,
+              marketId,
+              snapshot: posSnapshot,
+            });
+            throw e;
+          }
+          await sendTradeFillSlack({
+            source: "executor-catalog-close",
+            side: "sell",
+            assetName: assetNameForSlack,
+            signalAgentName: signalAgentNameForSlack,
+          });
+          ordersInserted += 1;
+          continue;
+        }
+
+        /* Live */
+        try {
+          if (orderSide === "buy") {
+            const estFee = executorPaperFeeEur(notionalEur);
+            const estDebit = tradeBuyDebitEur(notionalEur, estFee);
+            const liveEquity = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
+            if (liveEquity < estDebit) {
+              const { error: skipInsErr } = await admin.schema("trading").from("orders").insert({
+                user_id: userId,
+                executor_id: ex.id,
+                decision_id: dec.id,
+                market_id: marketId,
+                side: "buy",
+                quantity: 0,
+                notional_eur: notionalEur,
+                status: "rejected",
+                paper: false,
+                external_id: null,
+              });
+              if (skipInsErr && !/duplicate|unique/i.test(skipInsErr.message)) {
+                throw new Error(`${marketSymbol}: insufficient balance reject insert: ${skipInsErr.message}`);
+              }
+              continue;
             }
-            continue;
           }
 
-          const live = await placeBitvavoMarketBuyQuote({
-            market: marketSymbol,
-            amountQuoteEur: notionalEur,
-            clientOrderId: dec.id,
-          });
+          let sellQtyRequested = 0;
+          if (orderSide === "sell") {
+            const pos = await fetchExecutorPositionSnapshot(admin, { userId, executorId: ex.id, marketId });
+            sellQtyRequested = Number(pos?.quantity ?? 0);
+            if (!Number.isFinite(sellQtyRequested) || sellQtyRequested <= 0) continue;
+          }
+
+          const live =
+            orderSide === "buy"
+              ? await placeBitvavoMarketBuyQuote({
+                  market: marketSymbol,
+                  amountQuoteEur: notionalEur,
+                  clientOrderId: dec.id,
+                })
+              : await placeBitvavoMarketSellAmount({
+                  market: marketSymbol,
+                  amountBase: sellQtyRequested,
+                  clientOrderId: dec.id,
+                });
           const dbStatus = mapBitvavoOrderStatusToDb(live.status);
           const { data: insLive, error: insLiveErr } = await admin
             .schema("trading")
@@ -499,7 +664,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               executor_id: ex.id,
               decision_id: dec.id,
               market_id: marketId,
-              side: "buy",
+              side: orderSide,
               quantity: 0,
               notional_eur: notionalEur,
               status: dbStatus,
@@ -524,7 +689,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             } else {
               fillQty = Number(live.raw.filledAmount ?? Number.NaN);
               fillPrice =
-                Number.isFinite(fillQty) && fillQty > 0
+                orderSide === "buy" && Number.isFinite(fillQty) && fillQty > 0
                   ? notionalEur / fillQty
                   : Number(live.raw.price ?? Number.NaN);
             }
@@ -536,33 +701,60 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                 quantity: fillQty,
                 fee: Number.isFinite(fillFee) ? fillFee : 0,
               });
-              await upsertPositionAfterBuy(admin, {
-                userId,
-                executorId: ex.id,
-                marketId,
-                paper: paperExecution,
-                addQty: fillQty,
-                price: fillPrice,
-              });
+              if (orderSide === "buy") {
+                await upsertPositionAfterBuy(admin, {
+                  userId,
+                  executorId: ex.id,
+                  marketId,
+                  paper: paperExecution,
+                  addQty: fillQty,
+                  price: fillPrice,
+                });
+              } else {
+                await upsertPositionAfterSell(admin, {
+                  userId,
+                  executorId: ex.id,
+                  marketId,
+                  sellQty: fillQty,
+                });
+              }
               await admin
                 .schema("trading")
                 .from("orders")
                 .update({ quantity: fillQty, updated_at: new Date().toISOString() })
                 .eq("id", localOrderId);
-              const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
               try {
-                await applyExecutorTradeBuyDebit(admin, {
-                  userId,
-                  executorId: ex.id,
-                  orderId: localOrderId,
-                  debitEur: debitLive,
-                });
+                if (orderSide === "buy") {
+                  const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
+                  await applyExecutorTradeBuyDebit(admin, {
+                    userId,
+                    executorId: ex.id,
+                    orderId: localOrderId,
+                    debitEur: debitLive,
+                  });
+                } else {
+                  const grossNotional = fillPrice * fillQty;
+                  const creditLive = tradeSellCreditEur(grossNotional, Number.isFinite(fillFee) ? fillFee : 0);
+                  await applyExecutorTradeSellCredit(admin, {
+                    userId,
+                    executorId: ex.id,
+                    orderId: localOrderId,
+                    creditEur: creditLive,
+                  });
+                  await admin
+                    .schema("trading")
+                    .from("executor_moving_floors")
+                    .delete()
+                    .eq("user_id", userId)
+                    .eq("executor_id", ex.id)
+                    .eq("market_id", marketId);
+                }
               } catch (ledgerErr) {
-                console.error(`${marketSymbol}: live fill debit failed`, ledgerErr);
+                console.error(`${marketSymbol}: live fill ledger update failed`, ledgerErr);
               }
               await sendTradeFillSlack({
                 source: "executor-catalog-close",
-                side: "buy",
+                side: orderSide,
                 assetName: assetNameForSlack,
                 signalAgentName: signalAgentNameForSlack,
               });
@@ -576,7 +768,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             executor_id: ex.id,
             decision_id: dec.id,
             market_id: marketId,
-            side: "buy",
+            side: orderSide,
             quantity: 0,
             notional_eur: notionalEur,
             status: "rejected",

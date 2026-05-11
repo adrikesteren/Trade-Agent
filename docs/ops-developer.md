@@ -1,6 +1,6 @@
 # Ops / scheduler — developer guide
 
-This document is **step 5** in the role model from [how-we-use-agents.md](./how-we-use-agents.md): **worker HTTP routes**, optional **Upstash Redis** (locks / idempotency), and **optional alerting**. It complements [executor-developer.md](./executor-developer.md) (execution + idempotency) and the project brief’s worker topology.
+This document is **step 5** in the role model from [how-we-use-agents.md](./how-we-use-agents.md): **worker HTTP routes** and **optional alerting**. It complements [executor-developer.md](./executor-developer.md) (execution + idempotency) and the project brief’s worker topology.
 
 **Numbering note:** In [how-we-use-agents.md](./how-we-use-agents.md) § “Voorbeeld: simpele agents…”, the table uses a **different** step index (there, “stap 5” is the executor). In the main **Rollen** list, step 5 is **Ops** — this file.
 
@@ -16,7 +16,7 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 
 ## System settings (`public.system_settings`) and roles (`public.user_profiles`)
 
-- **Precedence:** for keys that exist in `public.system_settings` (e.g. exchange-close QStash stagger and publish concurrency), the app reads **Postgres first**, then falls back to the matching **`process.env`** variable, then the built-in default. Use the **list** at **Dashboard → System settings** (`/dashboard/system-settings`); open a row for **Edit** (dialog) or **Delete** (confirm). Changes apply on the **next** worker run without restarting `pnpm dev`. Changing only `.env` still requires a **process restart** for variables that are not overridden by a DB row (and monorepo dotenv loads once per Node process anyway).
+- **Precedence:** for keys that exist in `public.system_settings`, the app reads **Postgres first**, then falls back to the matching **`process.env`** variable, then the built-in default (when numeric registry entries exist). Use the **list** at **System settings** (`/system-settings`); open a row for **Edit** (dialog) or **Delete** (confirm). Changes apply on the **next** worker run without restarting `pnpm dev`. Changing only `.env` still requires a **process restart** for variables that are not overridden by a DB row (and monorepo dotenv loads once per Node process anyway).
 - **Who can edit:** only users with `public.user_profiles.role = 'administrator'`. New `auth.users` rows get `user_profiles` with role **`user`** via trigger.
 - **First administrator (SQL, once per project):** after you can sign in, promote your user (replace the email):
 
@@ -47,7 +47,7 @@ where up.user_id = u.id
 | `POST /api/workers/executor-catalog-close` | Executor (`executor_catalog_close`) |
 | `GET` or `POST` `/api/workers/symbol-close-pipeline` | Single-asset pipeline: CoinGecko + Bitvavo candles + scoped signal/mediator/executor (`sync_runs` `symbol_close_pipeline`) |
 | `GET` or `POST` `/api/workers/asset-close-pipeline` | Same scoped pipeline as symbol-close **without CoinGecko** (faster); candles + signal/mediator/executor; same `sync_runs` job key. |
-| `GET` or `POST` `/api/workers/exchange-close-pipeline` | Optional **QStash fan-out**: for an `exchangeCode`, enqueue **`asset-close-pipeline`** once per distinct catalog `asset.code` (default quote EUR). Requires `QSTASH_TOKEN` + `APP_URL`. |
+| `GET` or `POST` `/api/workers/exchange-close-pipeline` | Optional **Relay** ordered fan-out: for an `exchangeCode`, enqueue **`symbol-close-pipeline`** once per distinct catalog `asset.code` in mcap-desc order (default quote EUR). Requires `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET`. |
 | `POST /api/workers/risk-daily-reset` | Reset `trading.risk_state.daily_pnl_eur` (intended once per UTC day) |
 | `POST /api/workers/bitvavo-reconcile` | Live order status sync vs Bitvavo |
 
@@ -57,9 +57,9 @@ where up.user_id = u.id
 
 - **Query (required):** `exchangeCode` (case-insensitive, matches `catalog.exchanges.code`).
 - **Query (optional):** `quote` — defaults to **EUR**; only markets with that quote are considered when collecting distinct base assets.
-- **Env / DB:** `QSTASH_TOKEN`, **`APP_URL`** (public origin of this Next app, no trailing slash). Stagger and publish concurrency are read from **`public.system_settings`** first (editable under **Dashboard → System settings** for administrators); fallback env vars: `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` (seconds between queued jobs, default `2`; decimals like `0.1` allowed) and `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` (parallel `publish` calls per wave, default `32`, max `128`). Response JSON includes `appliedStaggerSec`, `staggerDelaySamples`, and `qstashPublishConcurrency`. Optional `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK=1` adds a Redis lock **per asset-close** (slower when overlapping; leave unset for max throughput).
-- **Auth:** `Authorization: Bearer ${CRON_SECRET}` **or** valid QStash signature when `QSTASH_CURRENT_SIGNING_KEY` is set (same dual-auth pattern as `symbol-close-pipeline`).
-- **Flow:** resolve exchange → list markets for the quote → **distinct base assets ordered by `catalog.assets.coingecko_market_cap_usd` descending** (unknown cap last; tie-break `market_symbol`) → `client.publish` to `{APP_URL}/api/workers/asset-close-pipeline?...` with staggered `delay` to avoid bursting your server. A QStash **Schedule** can `POST` this worker on a cron (optionally forward Bearer or rely on signature-only downstream).
+- **Env:** `RELAY_APP_URL`, `RELAY_APP_SECRET` (Relay ingress Bearer), **`APP_URL`** (this app’s public origin, no trailing slash; used to build worker URLs), **`CRON_SECRET`** (forwarded in Relay job `headers` for each downstream `POST`). Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`).
+- **Auth:** `Authorization: Bearer ${CRON_SECRET}` on this route only (same as other workers).
+- **Flow:** resolve exchange → list markets for the quote → **distinct base assets ordered by `catalog.assets.coingecko_market_cap_usd` descending** (unknown cap last; tie-break `market_symbol`) → `POST` Relay `/api/v1/message-group` with `urls` pointing at `{APP_URL}/api/workers/symbol-close-pipeline?...` (or `/api/v1/messages` when a single asset). Jobs run **strictly in order** within each Relay message group (max 100 URLs per group; larger exchanges enqueue additional groups after the previous group’s tail message reaches a terminal Relay status). Schedule this worker with your own cron hitting it with Bearer `CRON_SECRET`, and ensure Relay’s **dispatcher** runs so queued jobs actually execute (see Relay `AGENTS.md`).
 
 ---
 
@@ -80,7 +80,7 @@ where up.user_id = u.id
 
 ## Workers (auth)
 
-Most worker handlers use [verifyScheduledWorker](../apps/web/src/lib/workers/verify-scheduled-worker.ts) (`Authorization: Bearer ${CRON_SECRET}`). **`symbol-close-pipeline`**, **`asset-close-pipeline`**, and **`exchange-close-pipeline`** also accept a valid **QStash** request signature (`Upstash-Signature`) when `QSTASH_CURRENT_SIGNING_KEY` is set, so QStash need not forward `CRON_SECRET`.
+Worker handlers use [verifyScheduledWorker](../apps/web/src/lib/workers/verify-scheduled-worker.ts) (`Authorization: Bearer ${CRON_SECRET}`).
 
 ### `POST /api/workers/risk-daily-reset`
 
@@ -89,19 +89,10 @@ Most worker handlers use [verifyScheduledWorker](../apps/web/src/lib/workers/ver
 
 ### `POST /api/workers/bitvavo-reconcile`
 
-- **Redis:** If `UPSTASH_REDIS_REST_*` is set, acquires lock `lock:bitvavo-reconcile` (TTL from `BITVAVO_RECONCILE_LOCK_TTL_MS`, default 9 minutes). If the lock is not acquired, returns `200` with `skipped: lock_not_acquired` so an external scheduler does not treat the run as a hard failure.
 - **Scope:** `trading.orders` with `paper = false`, `external_id` set, `status` in (`pending`, `open`), joined to `trading.executors` with `execution_mode = 'live'`.
 - **Behaviour:** `GET /v2/order` on Bitvavo per order (bounded batch per run); updates `orders.status`, `quantity`, `updated_at`; if Bitvavo reports `filled`, inserts `fills` when missing and **upserts** `positions` (same rules as the live branch in the executor). Does not cancel foreign orders.
 
 Requires `BITVAVO_API_KEY` / `BITVAVO_API_SECRET`.
-
----
-
-## Redis (`@repo/redis`)
-
-Package: [packages/redis/src/index.ts](../packages/redis/src/index.ts) — `createRedis()`, `acquireLock`, `releaseLock`, `idempotentOnce`.
-
-If env is missing, `createRedis()` returns `null`; reconcile **skips the lock** and still runs (best-effort). Prefer setting Redis in production so only one reconcile runs at a time.
 
 ---
 
@@ -121,4 +112,4 @@ Optional `SLACK_TRADE_FILLS_WEBHOOK_URL`: Slack Incoming Webhook; `POST` JSON wi
 
 ---
 
-*Last updated: Ops step 5 — workers via CRON_SECRET, symbol-close-pipeline, Redis lock on reconcile, optional webhook alerts.*
+*Last updated: Ops step 5 — workers via CRON_SECRET, symbol-close-pipeline, optional webhook alerts.*

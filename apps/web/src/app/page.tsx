@@ -17,13 +17,13 @@ export default async function Home() {
           </h1>
           <p className="bk-lead">
             Paper-first trading automation: signal agents propose, the mediator enforces risk, workers execute. Stack:
-            Next.js, Supabase, Upstash Redis, Bitvavo (EUR).
+            Next.js, Supabase, Bitvavo (EUR).
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
           {user ? (
             <Button variant="brand" asChild>
-              <Link href="/dashboard">Open dashboard</Link>
+              <Link href="/overview">Open app</Link>
             </Button>
           ) : (
             <div className="flex flex-wrap gap-3">

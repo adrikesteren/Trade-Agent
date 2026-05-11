@@ -5,7 +5,7 @@ export const CANDLE_RETENTION_HOURS = 72; // 3 days — lighter on DB/disk for d
 
 /**
  * When `catalog.candle_timestamps` is empty (or latest row has no close), the EUR sweep seeds
- * this much history on first prepare — 5d at 5m = 1440 bars (Bitvavo max per request).
+ * this much history on first prepare — 5d at 15m = 480 bars.
  */
 export const CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS = 5 * 24;
 
@@ -17,7 +17,6 @@ const BITVAVO_MAX_LIMIT = 1440;
 
 /** Bar length in minutes for supported timeframes (must match @repo/exchange BitvavoAdapter). */
 const TF_MINUTES: Record<string, number> = {
-  "5m": 5,
   "15m": 15,
   "1h": 60,
   "4h": 240,
