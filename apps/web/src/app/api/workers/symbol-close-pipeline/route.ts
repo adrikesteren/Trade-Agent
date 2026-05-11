@@ -9,7 +9,6 @@ function parsePipelineBody(raw: string): Partial<SymbolClosePipelineOptions> {
   try {
     const o = JSON.parse(raw) as Record<string, unknown>;
     return {
-      skipCoingecko: o.skipCoingecko === true,
       skipCandles: o.skipCandles === true,
       skipSignals: o.skipSignals === true,
       skipMediator: o.skipMediator === true,
@@ -76,7 +75,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * POST: Bearer CRON_SECRET. Optional JSON body: `skipCoingecko`, `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (all booleans, default false).
+ * POST: Bearer CRON_SECRET. Optional JSON body: `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (all booleans, default false).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

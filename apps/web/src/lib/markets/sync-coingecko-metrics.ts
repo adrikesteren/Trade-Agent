@@ -92,7 +92,7 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
 
 /**
  * Build `coingecko_coin_id` → `asset.id` only for the given catalog asset ids (crypto rows).
- * Used by symbol-close-pipeline and other scoped CoinGecko refreshes.
+ * For full-catalog metrics sync, use `syncCoingeckoAssetMetricsResolvePhase`; this helper is for scoped subsets.
  */
 export async function buildCoingeckoIdMapForAssetIds(
   supabase: SupabaseClient,

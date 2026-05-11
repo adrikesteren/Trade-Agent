@@ -13,10 +13,6 @@ import {
   ResolvePrimaryMarketError,
   resolvePrimaryMarketByCodes,
 } from "@/lib/markets/resolve-primary-market-by-codes";
-import {
-  buildCoingeckoIdMapForAssetIds,
-  syncCoingeckoAssetMetricsMarketsPhase,
-} from "@/lib/markets/sync-coingecko-metrics";
 import { sweepBitvavoSingleMarketCatalogCandles } from "@/lib/markets/sweep-bitvavo-single-market-catalog-candles";
 import { runExecutorCatalogCloseDrain } from "@/lib/executor/run-executor-catalog-close";
 import { runMediatorCatalogCloseDrain } from "@/lib/mediator/run-mediator-catalog-close";
@@ -28,7 +24,6 @@ export type SymbolClosePipelineOptions = {
   exchangeCode: string;
   /** Default EUR */
   quote?: string;
-  skipCoingecko?: boolean;
   skipCandles?: boolean;
   skipSignals?: boolean;
   skipMediator?: boolean;
@@ -59,7 +54,6 @@ export type RunSymbolClosePipelineResult = {
     quoteCode: string;
   };
   steps: {
-    coingecko: SymbolClosePipelineStepResult;
     candles: SymbolClosePipelineStepResult;
     closeTime: SymbolClosePipelineStepResult;
     signals: SymbolClosePipelineStepResult;
@@ -94,8 +88,7 @@ export async function runSymbolClosePipeline(
           quoteCode: (opts.quote ?? "EUR").trim().toUpperCase() || "EUR",
         },
         steps: {
-          coingecko: errStep(e.code, e.message),
-          candles: errStep("skipped", "resolve failed"),
+          candles: errStep(e.code, e.message),
           closeTime: errStep("skipped", "resolve failed"),
           signals: errStep("skipped", "resolve failed"),
           mediator: errStep("skipped", "resolve failed"),
@@ -134,8 +127,7 @@ export async function runSymbolClosePipeline(
       syncRunId: null,
       resolved: resolvedOut,
       steps: {
-        coingecko: errStep("sync_run_not_started", msg),
-        candles: errStep("skipped", "sync run not started"),
+        candles: errStep("sync_run_not_started", msg),
         closeTime: errStep("skipped", "sync run not started"),
         signals: errStep("skipped", "sync run not started"),
         mediator: errStep("skipped", "sync run not started"),
@@ -151,8 +143,10 @@ export async function runSymbolClosePipeline(
       syncRunId: begun.runId,
       resolved: resolvedOut,
       steps: {
-        coingecko: errStep("skipped_overlap", "Another symbol_close_pipeline run is already in progress for this asset/exchange."),
-        candles: errStep("skipped", "sync run not started"),
+        candles: errStep(
+          "skipped_overlap",
+          "Another symbol_close_pipeline run is already in progress for this asset/exchange.",
+        ),
         closeTime: errStep("skipped", "sync run not started"),
         signals: errStep("skipped", "sync run not started"),
         mediator: errStep("skipped", "sync run not started"),
@@ -164,7 +158,6 @@ export async function runSymbolClosePipeline(
 
   const runId = begun.runId;
   const steps: RunSymbolClosePipelineResult["steps"] = {
-    coingecko: errStep("pending", ""),
     candles: errStep("pending", ""),
     closeTime: errStep("pending", ""),
     signals: errStep("pending", ""),
@@ -175,24 +168,6 @@ export async function runSymbolClosePipeline(
   const isBitvavo = resolved.exchangeCode.toLowerCase() === "bitvavo";
 
   try {
-    if (!opts.skipCoingecko) {
-      try {
-        const { idByCoingecko, stillMissingCoingeckoId } = await buildCoingeckoIdMapForAssetIds(admin, [resolved.assetId]);
-        if (idByCoingecko.size === 0) {
-          steps.coingecko = okStep({ assetsUpdated: 0, stillMissingCoingeckoId });
-        } else {
-          const { assetsUpdated } = await syncCoingeckoAssetMetricsMarketsPhase(admin, idByCoingecko);
-          steps.coingecko = okStep({ assetsUpdated, stillMissingCoingeckoId });
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        steps.coingecko = errStep("coingecko_failed", msg);
-        throw e;
-      }
-    } else {
-      steps.coingecko = okStep({ skipped: true });
-    }
-
     if (!opts.skipCandles) {
       if (!isBitvavo) {
         steps.candles = errStep("unsupported_exchange_for_candles", `Candles not implemented for exchange: ${resolved.exchangeCode}`);

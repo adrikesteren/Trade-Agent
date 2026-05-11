@@ -1,6 +1,6 @@
 import "server-only";
 
-import { bitvavoPrivateGet } from "./signed-request";
+import { bitvavoPrivateGet, type BitvavoExchangeCredentials } from "@/lib/bitvavo/private/signed-request";
 
 export type BitvavoOrderSnapshot = {
   orderId: string;
@@ -17,14 +17,18 @@ function num(v: unknown): number {
 }
 
 /** GET /v2/order for a single open order id. */
-export async function fetchBitvavoOrder(params: { market: string; orderId: string }): Promise<BitvavoOrderSnapshot | null> {
+export async function fetchBitvavoOrder(params: {
+  credentials: BitvavoExchangeCredentials;
+  market: string;
+  orderId: string;
+}): Promise<BitvavoOrderSnapshot | null> {
   const market = params.market.trim().toUpperCase();
   const orderId = params.orderId.trim();
   if (!market || !orderId) return null;
 
   const qs = new URLSearchParams({ market, orderId });
   const requestPath = `/v2/order?${qs.toString()}`;
-  const res = await bitvavoPrivateGet(requestPath);
+  const res = await bitvavoPrivateGet(params.credentials, requestPath);
   const text = await res.text();
   let raw: Record<string, unknown> = {};
   try {

@@ -4,7 +4,7 @@ import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/m
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
-/** Same optional skips as symbol-close, except CoinGecko is never run (faster fan-out from exchange-close). */
+/** Same optional skips as symbol-close (both routes share `runSymbolClosePipeline`; CoinGecko is not part of that orchestration). */
 function parsePipelineBody(raw: string): Partial<SymbolClosePipelineOptions> {
   if (!raw.trim()) return {};
   try {
@@ -53,7 +53,6 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
     exchangeCode,
     quote,
     ...bodyOpts,
-    skipCoingecko: true,
   });
 
   if (!result.ok && result.syncRunId == null) {
@@ -70,14 +69,14 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
 }
 
 /**
- * GET: same auth as symbol-close; query `assetCode`, `exchangeCode`, optional `quote`. **No CoinGecko ingest** (candles + scoped catalog-close only).
+ * GET: same auth as symbol-close; query `assetCode`, `exchangeCode`, optional `quote` (candles + scoped catalog-close only).
  */
 export async function GET(request: Request) {
   return handle(request, "");
 }
 
 /**
- * POST: optional JSON skips `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` only. CoinGecko is always skipped.
+ * POST: optional JSON skips `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` only.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

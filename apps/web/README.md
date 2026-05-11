@@ -92,7 +92,8 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 | --- | --- | --- |
 | `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users whose decisions are executed (trusted env only). |
 | `EXECUTOR_AFTER_MEDIATOR_DISABLE` | Optional | Set to `1` to skip enqueueing the executor after the mediator pass. |
-| `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` | Required for **live** orders | Server-side Bitvavo signing (never commit; not stored in Postgres). |
+| `exchange_api_key` / `exchange_api_secret` (per executor) | Required for **live** orders + reconcile | Set in **Executors → Edit**; used for Bitvavo signed REST (RLS-scoped; never commit). |
+| `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` | Unused by app live paths | Legacy `.env` names only; prefer executor fields. |
 | `BITVAVO_OPERATOR_ID` | Optional | Integer `operatorId` on each Bitvavo order (default `1`). |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as other catalog workers. |
 
@@ -115,18 +116,18 @@ Background jobs for **daily risk reset** and **live order reconciliation**, plus
 | --- | --- | --- |
 | `CRON_SECRET` | Recommended | Bearer secret for `GET`/`POST /api/workers/*`. |
 | `OPS_ALERT_WEBHOOK_URL` | Optional | `POST` JSON on hard failures (e.g. candle/markets sync throws, risk reset throws, reconcile throws). |
-| `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts a compact **BUY/SELL — asset — signal agent** notification (colored attachment bar) when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
+| `SLACK_TRADE_FILLS_WEBHOOK_URL` | Optional | Slack Incoming Webhook URL; posts **`[Executor]: BUY/SELL - asset - exchange`** (colored attachment bar) when an executor fill is persisted (`executor-catalog-close` or `bitvavo-reconcile`). Never committed; see [docs/ops-developer.md](../../docs/ops-developer.md). |
 | `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
 
 ## Relay (optional)
 
-When `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues an ordered **`symbol-close-pipeline`** job per distinct catalog asset (mcap descending) on your **Relay** instance via `POST /api/v1/message-group` (or `/api/v1/messages` when there is only one asset). See the Relay repository’s `AGENTS.md` for ingress auth and payload shape. Relay’s **dispatcher** must run periodically (`GET` or `POST` `{RELAY_APP_URL}/api/internal/dispatch` with dispatcher auth, or Relay’s bundled worker); otherwise jobs stay pending. Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`) is passed through as `maxRetries`.
+When `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues an ordered **`symbol-close-pipeline`** job per distinct catalog asset (mcap descending) on your **Relay** instance via `POST /api/v1/message-group` using `origin` + `paths` (or `/api/v1/messages` using `origin` + `path` when there is only one asset). See the Relay repository’s `AGENTS.md` for ingress auth and payload shape. Relay’s **dispatcher** must run periodically (`GET` or `POST` `{RELAY_APP_URL}/api/internal/dispatch` with dispatcher auth, or Relay’s bundled worker); otherwise jobs stay pending. Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`) is passed through as `maxRetries`.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `RELAY_APP_URL` | For Relay fan-out | Relay app origin, e.g. `http://localhost:1337` (no trailing slash). |
 | `RELAY_APP_SECRET` | For Relay fan-out | Bearer for Relay `POST /api/v1/messages` and `/api/v1/message-group` (server-only). |
-| `APP_URL` | For Relay fan-out | Public origin of **this** Next app; worker URLs in Relay jobs point here (e.g. `http://localhost:3000`). |
+| `APP_URL` | For Relay fan-out | Public origin of **this** Next app; Relay receives this as `origin` and worker endpoints as `path`/`paths` (e.g. `http://localhost:3000`). |
 | `CRON_SECRET` | For Relay fan-out | Same Bearer workers already use; included in Relay job `headers` so each `symbol-close-pipeline` call is authorized. |
 | `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` | Optional | Per-job `maxRetries` for Relay (default `2`, max `100`). |
 

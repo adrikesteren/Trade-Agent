@@ -6,14 +6,12 @@ import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 import { escapeIlikeExactPattern } from "@/lib/markets/resolve-primary-market-by-codes";
 import {
-  RELAY_MESSAGE_GROUP_MAX_URLS,
   buildSymbolClosePipelineUrl,
   downstreamWorkerHeaders,
   normalizeRelayBaseUrl,
   postRelayMessageGroup,
   postRelaySingleMessage,
   relayMaxRetries,
-  waitForRelayMessageTerminal,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 
 export type RunExchangeClosePipelineOptions = {
@@ -35,7 +33,7 @@ export type RunExchangeClosePipelineResult = {
   error?: string;
   /** Relay message UUIDs created (single-message and group members, in enqueue order). */
   relayMessageIds?: string[];
-  /** Relay message_group UUIDs when `message-group` was used (may be multiple if more than 100 assets). */
+  /** Relay message_group UUID when a multi-job `message-group` was used (one group for all assets). */
   relayMessageGroupIds?: string[];
 };
 
@@ -226,6 +224,17 @@ export async function runExchangeClosePipeline(
     .map((c) => String(c ?? "").trim())
     .filter(Boolean);
 
+  if (distinctAssetCodes.length === 0) {
+    return {
+      ok: true,
+      exchangeCode: canonicalExchangeCode,
+      quote,
+      distinctAssetCodes: [],
+      published: 0,
+      failures: [],
+    };
+  }
+
   let relayBase: string;
   let appBase: string;
   let workerHeaders: Record<string, string>;
@@ -252,27 +261,18 @@ export async function runExchangeClosePipeline(
   const relayMessageGroupIds: string[] = [];
   const failures: ExchangeClosePublishFailure[] = [];
 
+  const urls = distinctAssetCodes.map((assetCode) =>
+    buildSymbolClosePipelineUrl(appBase, assetCode, canonicalExchangeCode, quote),
+  );
+
   try {
-    for (let start = 0; start < distinctAssetCodes.length; start += RELAY_MESSAGE_GROUP_MAX_URLS) {
-      const chunk = distinctAssetCodes.slice(start, start + RELAY_MESSAGE_GROUP_MAX_URLS);
-      const urls = chunk.map((assetCode) =>
-        buildSymbolClosePipelineUrl(appBase, assetCode, canonicalExchangeCode, quote),
-      );
-
-      if (urls.length === 1) {
-        const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
-        relayMessageIds.push(id);
-      } else {
-        const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
-        relayMessageGroupIds.push(groupId);
-        relayMessageIds.push(...messageIds);
-      }
-
-      const isLastChunk = start + chunk.length >= distinctAssetCodes.length;
-      if (!isLastChunk) {
-        const tailId = relayMessageIds[relayMessageIds.length - 1]!;
-        await waitForRelayMessageTerminal(relayBase, tailId);
-      }
+    if (urls.length === 1) {
+      const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
+      relayMessageIds.push(id);
+    } else {
+      const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
+      relayMessageGroupIds.push(groupId);
+      relayMessageIds.push(...messageIds);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

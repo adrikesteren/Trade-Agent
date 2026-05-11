@@ -25,6 +25,9 @@ const baseEx: ExecutorRow = {
   moving_floor_activation_profit_pct: 0.05,
   moving_floor_timeframe: "15m",
   mediator_rails_extra: {},
+  slack_trade_notifications_enabled: true,
+  exchange_api_key: "",
+  exchange_api_secret: "",
 };
 
 describe("executorToMediatorRails", () => {

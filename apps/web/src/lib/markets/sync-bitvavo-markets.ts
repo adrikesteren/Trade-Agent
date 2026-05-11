@@ -1,14 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type BitvavoMarketRow = {
-  market: string;
-  status: string;
-  base: string;
-  quote: string;
-  minOrderInQuoteAsset?: string;
-  minOrderInBaseAsset?: string;
-  [key: string]: unknown;
-};
+import { fetchBitvavoMarkets } from "@/lib/bitvavo/public/markets";
+
+export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 
 /**
  * Fetches Bitvavo /v2/markets and upserts `markets` for the Bitvavo exchange.
@@ -19,11 +13,7 @@ export async function syncBitvavoMarkets(
   supabase: SupabaseClient,
   quoteFilter: string | null = "EUR",
 ): Promise<{ upsertedAssets: number; upsertedListings: number }> {
-  const res = await fetch("https://api.bitvavo.com/v2/markets", { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Bitvavo markets HTTP ${res.status}`);
-  }
-  const markets = (await res.json()) as BitvavoMarketRow[];
+  const markets = await fetchBitvavoMarkets();
 
   const { data: ex, error: exErr } = await supabase
     .schema("catalog")

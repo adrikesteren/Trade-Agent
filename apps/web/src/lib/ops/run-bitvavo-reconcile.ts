@@ -3,14 +3,14 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
-import { fetchBitvavoOrder } from "@/lib/bitvavo/fetch-bitvavo-order";
-import { bitvavoPrivateEnv } from "@/lib/bitvavo/signed-request";
+import { fetchBitvavoOrder } from "@/lib/bitvavo/private/fetch-bitvavo-order";
+import {
+  bitvavoCredentialsFromExchangeApiFields,
+  type BitvavoExchangeCredentials,
+} from "@/lib/bitvavo/private/signed-request";
 import { mergeBuyPositionAvg } from "@/lib/executor/paper-fill";
 import {
   fetchAssetDisplayNameByMarketId,
-  fetchTradeFillSignalAgentLabels,
-  labelFromSignalAgentMap,
-  primaryAgentSlugFromDecisionPayload,
   resolveTradeFillAssetDisplayName,
   sendTradeFillSlack,
 } from "@/lib/ops/send-trade-fill-slack";
@@ -30,7 +30,6 @@ export type RunBitvavoReconcileResult = {
   updated: number;
   fillsInserted: number;
   errors: string[];
-  skipped?: "no_bitvavo_keys";
 };
 
 type OrderRow = {
@@ -97,12 +96,6 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   let updated = 0;
   let fillsInserted = 0;
 
-  try {
-    bitvavoPrivateEnv();
-  } catch {
-    return { ok: true, examined: 0, updated: 0, fillsInserted: 0, errors, skipped: "no_bitvavo_keys" };
-  }
-
   const admin = createServiceRoleClient();
     const lim = batchSize();
 
@@ -127,9 +120,60 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     const { data: execRows, error: exErr } = await admin
       .schema("trading")
       .from("executors")
-      .select("id, execution_mode")
+      .select(
+        "id, name, exchange_id, execution_mode, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
+      )
       .in("id", execIds);
     if (exErr) throw new Error(exErr.message);
+
+    const bitvavoCredsByExecutor = new Map<string, BitvavoExchangeCredentials>();
+    for (const e of execRows ?? []) {
+      const id = e.id as string;
+      const creds = bitvavoCredentialsFromExchangeApiFields(
+        (e as { exchange_api_key?: string }).exchange_api_key,
+        (e as { exchange_api_secret?: string }).exchange_api_secret,
+      );
+      if (creds) bitvavoCredsByExecutor.set(id, creds);
+    }
+
+    const slackTradeNotifyByExecutor = new Map<string, boolean>();
+    const executorNameById = new Map<string, string>();
+    for (const e of execRows ?? []) {
+      const id = e.id as string;
+      const raw = (e as { slack_trade_notifications_enabled?: boolean | null }).slack_trade_notifications_enabled;
+      slackTradeNotifyByExecutor.set(id, raw !== false);
+      const nm = String((e as { name?: string | null }).name ?? "").trim();
+      executorNameById.set(id, nm || "—");
+    }
+
+    const catalogExchangeIds = [
+      ...new Set(
+        (execRows ?? [])
+          .map((e) => String((e as { exchange_id?: string | null }).exchange_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const exchangeNameByCatalogId = new Map<string, string>();
+    if (catalogExchangeIds.length) {
+      const { data: cexRows, error: cexErr } = await admin
+        .schema("catalog")
+        .from("exchanges")
+        .select("id, name, code")
+        .in("id", catalogExchangeIds);
+      if (cexErr) throw new Error(cexErr.message);
+      for (const row of cexRows ?? []) {
+        const rid = row.id as string;
+        const nm = String((row as { name?: string | null }).name ?? "").trim();
+        const code = String((row as { code?: string | null }).code ?? "").trim();
+        exchangeNameByCatalogId.set(rid, nm || code || rid);
+      }
+    }
+    const slackExchangeNameByExecutorId = new Map<string, string>();
+    for (const e of execRows ?? []) {
+      const id = e.id as string;
+      const xid = String((e as { exchange_id?: string | null }).exchange_id ?? "").trim();
+      slackExchangeNameByExecutorId.set(id, xid ? (exchangeNameByCatalogId.get(xid) ?? xid) : "—");
+    }
 
     const liveExecutor = new Set(
       (execRows ?? [])
@@ -152,28 +196,8 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
       }
     }
 
-    const decisionIds = [...new Set(liveOrders.map((o) => o.decision_id).filter(Boolean))] as string[];
-    const decisionPayloadById = new Map<string, Record<string, unknown> | null>();
-    if (decisionIds.length) {
-      const { data: decRows, error: decErr } = await admin
-        .schema("trading")
-        .from("trade_decisions")
-        .select("id, decision_payload")
-        .in("id", decisionIds);
-      if (decErr) throw new Error(decErr.message);
-      for (const r of decRows ?? []) {
-        decisionPayloadById.set(
-          r.id as string,
-          (r.decision_payload as Record<string, unknown> | null) ?? null,
-        );
-      }
-    }
-
     const assetIdByMarket = await fetchMarketAssetIds(admin, marketIds);
-    const [signalAgentLabelsBySlug, assetNameByMarketIdRaw] = await Promise.all([
-      fetchTradeFillSignalAgentLabels(admin),
-      fetchAssetDisplayNameByMarketId(admin, assetIdByMarket),
-    ]);
+    const assetNameByMarketIdRaw = await fetchAssetDisplayNameByMarketId(admin, assetIdByMarket);
 
     for (const o of liveOrders) {
       examined += 1;
@@ -184,7 +208,18 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
       }
 
       try {
-        const snap = await fetchBitvavoOrder({ market: marketSymbol, orderId: o.external_id });
+        const creds = bitvavoCredsByExecutor.get(o.executor_id);
+        if (!creds) {
+          errors.push(
+            `order ${o.id}: executor ${o.executor_id} has no exchange_api_key / exchange_api_secret (required for live reconcile)`,
+          );
+          continue;
+        }
+        const snap = await fetchBitvavoOrder({
+          credentials: creds,
+          market: marketSymbol,
+          orderId: o.external_id,
+        });
         if (!snap) {
           errors.push(`order ${o.id}: Bitvavo order not found`);
           continue;
@@ -262,21 +297,19 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
                 );
               }
             }
-            const decPayload = o.decision_id ? decisionPayloadById.get(o.decision_id) : undefined;
-            const signalAgentName = labelFromSignalAgentMap(
-              signalAgentLabelsBySlug,
-              primaryAgentSlugFromDecisionPayload(decPayload ?? null),
-            );
             const assetName = resolveTradeFillAssetDisplayName(
               assetNameByMarketIdRaw.get(o.market_id),
               marketSymbol,
             );
-            await sendTradeFillSlack({
-              source: "bitvavo-reconcile",
-              side: String(o.side).toLowerCase() === "sell" ? "sell" : "buy",
-              assetName,
-              signalAgentName,
-            });
+            if (slackTradeNotifyByExecutor.get(o.executor_id) !== false) {
+              await sendTradeFillSlack({
+                source: "bitvavo-reconcile",
+                side: String(o.side).toLowerCase() === "sell" ? "sell" : "buy",
+                assetName,
+                executorName: executorNameById.get(o.executor_id) ?? "—",
+                exchangeName: slackExchangeNameByExecutorId.get(o.executor_id) ?? "—",
+              });
+            }
           }
         }
 

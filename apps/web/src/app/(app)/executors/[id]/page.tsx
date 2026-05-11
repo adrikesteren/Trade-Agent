@@ -223,7 +223,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .schema("trading")
     .from("executors")
     .select(
-      "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe",
+      "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -233,6 +233,15 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   if (!ex) notFound();
 
   const filterIds = (ex.filter_asset_ids as string[] | null) ?? [];
+
+  const slackTradeNotificationsEnabled =
+    (ex as { slack_trade_notifications_enabled?: boolean | null }).slack_trade_notifications_enabled !== false;
+
+  const exKey = String((ex as { exchange_api_key?: string | null }).exchange_api_key ?? "").trim();
+  const exSecret = String((ex as { exchange_api_secret?: string | null }).exchange_api_secret ?? "").trim();
+  const exchangeApiCredentialsConfigured = exKey.length > 0 && exSecret.length > 0;
+  const exchangeApiKeySuffix =
+    exKey.length >= 4 ? exKey.slice(-4) : exKey.length > 0 ? "****" : undefined;
 
   const extraRaw = ex.mediator_rails_extra as unknown;
   const mediator_rails_extra_json =
@@ -258,6 +267,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     moving_floor_activation_profit_pct: String(ex.moving_floor_activation_profit_pct ?? "0.05"),
     moving_floor_timeframe: String(ex.moving_floor_timeframe ?? "15m"),
     mediator_rails_extra_json,
+    slack_trade_notifications_enabled: slackTradeNotificationsEnabled,
+    exchange_api_credentials_configured: exchangeApiCredentialsConfigured,
+    exchange_api_key_suffix: exchangeApiKeySuffix,
   };
 
   const ledgerFetchLimit = ledgerFull ? EXECUTOR_LEDGER_FULL_FETCH_CAP : RECORD_RELATED_LIST_PREVIEW_ROWS;
@@ -364,6 +376,14 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   ];
   const symMap = await marketSymbolMap(supabase, marketIdsForLabels);
 
+  const executorExchangeId = String(ex.exchange_id ?? "").trim();
+  const executorExchangeOption = exchangeOptions.find((o) => o.id === executorExchangeId);
+  const executorExchangeLinkName =
+    String(executorExchangeOption?.name ?? "").trim() ||
+    String(executorExchangeOption?.code ?? "").trim() ||
+    executorExchangeId ||
+    "—";
+
   const ledgerViewAll = ledgerFull ? undefined : `/executors/${id}?ledger=all`;
 
   return (
@@ -381,10 +401,23 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
               <>
                 <Output label="Enabled" type="boolean" value={ex.enabled} />
                 <Output label="Execution mode" type="text" value={String(ex.execution_mode ?? "—")} />
+                <Output label="Slack trade fills" type="boolean" value={slackTradeNotificationsEnabled} />
+                <Output label="Exchange API credentials" type="boolean" value={exchangeApiCredentialsConfigured} />
                 <Output label="Orders (preview)" type="number" value={orderTotal} />
               </>
             }
-            meta={id}
+            meta={
+              executorExchangeId ? (
+                <span className="bk-text-muted text-sm">
+                  Exchange:{" "}
+                  <Link href={`/exchanges/${executorExchangeId}`} className="bk-link">
+                    {executorExchangeLinkName}
+                  </Link>
+                </span>
+              ) : (
+                <span className="bk-text-muted text-sm">Exchange: —</span>
+              )
+            }
             actions={
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <ExecutorDetailBalanceActions executorId={id} />
@@ -422,8 +455,27 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                   <RecordDetailGrid>
                     <Output label="Name" type="text" value={String(ex.name ?? "")} />
                     <Output label="Enabled" type="boolean" value={ex.enabled} />
+                    <Output label="Slack trade-fill notifications" type="boolean" value={slackTradeNotificationsEnabled} />
+                    <Output label="Exchange API credentials" type="boolean" value={exchangeApiCredentialsConfigured} />
+                    <Output
+                      label="Stored API key (suffix)"
+                      type="text"
+                      value={exchangeApiCredentialsConfigured ? (exchangeApiKeySuffix ? `…${exchangeApiKeySuffix}` : "—") : "—"}
+                    />
                     <Output label="Execution mode" type="text" value={executionModeLabel(String(ex.execution_mode ?? ""))} />
-                    <Output label="Exchange ID" type="text" value={String(ex.exchange_id ?? "—")} />
+                    {executorExchangeId ? (
+                      <Output
+                        label="Exchange"
+                        record={{
+                          pathPrefix: "/exchanges",
+                          id: executorExchangeId,
+                          name: executorExchangeLinkName,
+                        }}
+                        value={executorExchangeLinkName}
+                      />
+                    ) : (
+                      <Output label="Exchange" type="text" value="—" />
+                    )}
                     <Output label="Asset filter" type="text" value={assetFilterModeLabel(ex.asset_filter_mode as ExecutorAssetFilterMode)} />
                     <Output
                       label="Filter assets (base)"

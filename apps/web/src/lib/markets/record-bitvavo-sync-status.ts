@@ -50,6 +50,8 @@ export async function patchSyncRunMetadata(
 
 export const BITVAVO_SYNC_JOB_MARKETS_EUR = "bitvavo_markets_eur";
 export const BITVAVO_SYNC_JOB_CANDLES_EUR = "bitvavo_candles_eur";
+/** Bitvavo GET /assets → `catalog.assets.name` + `metadata.bitvavo` (deposit/withdrawal, decimals, networks). */
+export const BITVAVO_SYNC_JOB_ASSET_DATA = "bitvavo_asset_data";
 /**
  * CoinGecko USD fundamentals refresh (`/coins/markets` → `catalog.assets` live columns).
  * Only rows with `coingecko_coin_id` set; id backfill is `coingecko_asset_coin_id`.

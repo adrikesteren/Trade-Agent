@@ -150,6 +150,16 @@ export async function createExecutor(formData: FormData): Promise<void> {
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
 
+  const slack_trade_notifications_enabled = formData.has("slack_trade_notifications_enabled");
+
+  let exchange_api_key = String(formData.get("exchange_api_key") ?? "").trim();
+  let exchange_api_secret = String(formData.get("exchange_api_secret") ?? "").trim();
+  if (execution_mode === "live") {
+    if (!exchange_api_key || !exchange_api_secret) {
+      throw new Error("Live mode requires exchange API key and secret (private REST signing).");
+    }
+  }
+
   const { data: inserted, error } = await supabase
     .schema("trading")
     .from("executors")
@@ -162,6 +172,9 @@ export async function createExecutor(formData: FormData): Promise<void> {
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
       updated_at: new Date().toISOString(),
+      slack_trade_notifications_enabled,
+      exchange_api_key,
+      exchange_api_secret,
       ...rails,
     })
     .select("id")
@@ -252,6 +265,31 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
+  const slack_trade_notifications_enabled = formData.has("slack_trade_notifications_enabled");
+
+  const { data: curRow, error: curErr } = await supabase
+    .schema("trading")
+    .from("executors")
+    .select("exchange_api_key, exchange_api_secret")
+    .eq("id", executorId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (curErr) throw new Error(curErr.message);
+  if (!curRow) throw new Error("Executor not found.");
+
+  const formKey = String(formData.get("exchange_api_key") ?? "").trim();
+  const formSecret = String(formData.get("exchange_api_secret") ?? "").trim();
+  const exchange_api_key = formKey || String((curRow as { exchange_api_key?: string }).exchange_api_key ?? "");
+  const exchange_api_secret =
+    formSecret || String((curRow as { exchange_api_secret?: string }).exchange_api_secret ?? "");
+
+  if (execution_mode === "live") {
+    if (!String(exchange_api_key).trim() || !String(exchange_api_secret).trim()) {
+      throw new Error(
+        "Live mode requires non-empty exchange API key and secret. Fill both fields or leave unchanged if already stored.",
+      );
+    }
+  }
 
   const { error } = await supabase
     .schema("trading")
@@ -264,6 +302,9 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
       updated_at: new Date().toISOString(),
+      slack_trade_notifications_enabled,
+      exchange_api_key,
+      exchange_api_secret,
       ...rails,
     })
     .eq("id", executorId)

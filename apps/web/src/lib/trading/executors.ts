@@ -31,6 +31,9 @@ export type ExecutorRow = {
   moving_floor_trail_pct: string | number;
   moving_floor_activation_profit_pct: string | number;
   moving_floor_timeframe: string;
+  slack_trade_notifications_enabled: boolean;
+  exchange_api_key: string;
+  exchange_api_secret: string;
 };
 
 /** Prefer "Default" by name, then oldest created. */
@@ -52,7 +55,7 @@ export async function fetchExecutorsForUsers(
     .schema("trading")
     .from("executors")
     .select(
-      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe",
+      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
     )
     .in("user_id", userIds);
   if (error) throw new Error(error.message);

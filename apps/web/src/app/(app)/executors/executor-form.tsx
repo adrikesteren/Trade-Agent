@@ -30,6 +30,12 @@ export type ExecutorFormInitial = {
   moving_floor_activation_profit_pct?: string;
   moving_floor_timeframe?: string;
   mediator_rails_extra_json?: string;
+  /** When unset on create, defaults to on (matches DB default). */
+  slack_trade_notifications_enabled?: boolean;
+  /** Server-derived: both key and secret non-empty in DB (no raw values sent to the client). */
+  exchange_api_credentials_configured?: boolean;
+  /** Last few characters of stored key for display only (edit mode). */
+  exchange_api_key_suffix?: string;
 };
 
 export function ExecutorForm({
@@ -87,6 +93,22 @@ export function ExecutorForm({
             Enabled
           </label>
 
+          <label className="flex cursor-pointer flex-col gap-1 text-sm">
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name="slack_trade_notifications_enabled"
+                defaultChecked={initial?.slack_trade_notifications_enabled !== false}
+              />
+              Slack trade-fill notifications
+            </span>
+            <span className="bk-text-muted pl-6 text-xs">
+              When enabled, trade fills for this executor may post to Slack if{" "}
+              <code className="font-mono text-[var(--text)]">TRADE_FILL_SLACK_WEBHOOK_URL</code> is set. No webhook
+              means nothing is sent either way.
+            </span>
+          </label>
+
           <div>
             <label htmlFor="ex-mode" className="bk-form-label">
               Execution mode
@@ -122,6 +144,50 @@ export function ExecutorForm({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
+            Exchange API credentials
+          </div>
+          <p className="bk-text-muted text-xs">
+            Used for <strong className="text-[var(--text)]">private</strong> REST calls (e.g. Bitvavo signed orders and
+            order status). Stored on this executor row; not read from{" "}
+            <code className="font-mono text-[var(--text)]">.env</code>.
+          </p>
+          {mode === "edit" && initial?.exchange_api_credentials_configured ? (
+            <p className="bk-text-muted text-xs">
+              Credentials are saved. Key ends with{" "}
+              <span className="font-mono text-[var(--text)]">{initial.exchange_api_key_suffix ?? "…"}</span>. Leave the
+              fields below empty to keep the current key and secret; fill to replace.
+            </p>
+          ) : mode === "edit" ? (
+            <p className="bk-text-muted text-xs">Leave empty if unchanged. Live trading needs both key and secret.</p>
+          ) : null}
+          <div>
+            <label htmlFor="ex-exchange-api-key" className="bk-form-label">
+              Exchange API key
+            </label>
+            <input
+              id="ex-exchange-api-key"
+              name="exchange_api_key"
+              type="text"
+              autoComplete="off"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              required={mode === "create" && execMode === "live"}
+            />
+          </div>
+          <div>
+            <label htmlFor="ex-exchange-api-secret" className="bk-form-label">
+              Exchange API secret
+            </label>
+            <input
+              id="ex-exchange-api-secret"
+              name="exchange_api_secret"
+              type="password"
+              autoComplete="off"
+              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+              required={mode === "create" && execMode === "live"}
+            />
           </div>
 
           {execMode === "live" && (mode === "create" || initial?.execution_mode !== "live") ? (

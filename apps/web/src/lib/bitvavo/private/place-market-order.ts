@@ -1,6 +1,6 @@
 import "server-only";
 
-import { bitvavoPrivatePost } from "./signed-request";
+import { bitvavoPrivatePost, type BitvavoExchangeCredentials } from "@/lib/bitvavo/private/signed-request";
 
 const ORDER_PATH = "/v2/order";
 
@@ -24,12 +24,13 @@ function operatorIdFromEnv(): number {
 
 /** Market buy spending a fixed quote (EUR) amount. */
 export async function placeBitvavoMarketBuyQuote(params: {
+  credentials: BitvavoExchangeCredentials;
   market: string;
   amountQuoteEur: number;
   clientOrderId: string;
 }): Promise<BitvavoPlaceMarketBuyQuoteResult> {
   const amountQuote = params.amountQuoteEur.toFixed(2);
-  const res = await bitvavoPrivatePost(ORDER_PATH, {
+  const res = await bitvavoPrivatePost(params.credentials, ORDER_PATH, {
     market: params.market.toUpperCase(),
     side: "buy",
     orderType: "market",
@@ -62,12 +63,13 @@ export async function placeBitvavoMarketBuyQuote(params: {
 
 /** Market sell for a fixed base amount. */
 export async function placeBitvavoMarketSellAmount(params: {
+  credentials: BitvavoExchangeCredentials;
   market: string;
   amountBase: number;
   clientOrderId: string;
 }): Promise<BitvavoPlaceMarketSellAmountResult> {
   const amount = params.amountBase.toFixed(8);
-  const res = await bitvavoPrivatePost(ORDER_PATH, {
+  const res = await bitvavoPrivatePost(params.credentials, ORDER_PATH, {
     market: params.market.toUpperCase(),
     side: "sell",
     orderType: "market",

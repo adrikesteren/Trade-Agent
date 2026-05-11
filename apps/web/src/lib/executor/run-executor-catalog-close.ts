@@ -3,7 +3,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
-import { placeBitvavoMarketBuyQuote, placeBitvavoMarketSellAmount } from "@/lib/bitvavo/place-market-order";
+import { placeBitvavoMarketBuyQuote, placeBitvavoMarketSellAmount } from "@/lib/bitvavo/private/place-market-order";
+import { bitvavoCredentialsFromExchangeApiFields } from "@/lib/bitvavo/private/signed-request";
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
@@ -28,9 +29,6 @@ import {
 } from "@/lib/trading/executor-wallet";
 import {
   fetchAssetDisplayNameByMarketId,
-  fetchTradeFillSignalAgentLabels,
-  labelFromSignalAgentMap,
-  primaryAgentSlugFromDecisionPayload,
   resolveTradeFillAssetDisplayName,
   sendTradeFillSlack,
 } from "@/lib/ops/send-trade-fill-slack";
@@ -377,12 +375,28 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     executorsByUser.set(ex.user_id, cur);
   }
 
+  const catalogExchangeIds = [...new Set(executorRows.map((e) => e.exchange_id).filter(Boolean))];
+  const exchangeNameByCatalogId = new Map<string, string>();
+  if (catalogExchangeIds.length) {
+    const { data: cexRows, error: cexErr } = await admin
+      .schema("catalog")
+      .from("exchanges")
+      .select("id, name, code")
+      .in("id", catalogExchangeIds);
+    if (cexErr) throw new Error(cexErr.message);
+    for (const row of cexRows ?? []) {
+      const rid = row.id as string;
+      const nm = String((row as { name?: string | null }).name ?? "").trim();
+      const code = String((row as { code?: string | null }).code ?? "").trim();
+      exchangeNameByCatalogId.set(rid, nm || code || rid);
+    }
+  }
+
+  const slackExchangeName = (row: ExecutorRow) => exchangeNameByCatalogId.get(row.exchange_id) ?? "—";
+
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
-  const [signalAgentLabelsBySlug, assetNameByMarketIdRaw] = await Promise.all([
-    fetchTradeFillSignalAgentLabels(admin),
-    fetchAssetDisplayNameByMarketId(admin, assetIdByMarket),
-  ]);
+  const assetNameByMarketIdRaw = await fetchAssetDisplayNameByMarketId(admin, assetIdByMarket);
 
   let ordersInserted = 0;
 
@@ -423,11 +437,6 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         const proposedBuy = parseProposedBuy(dec.decision_payload);
         const proposedSell = parseProposedSell(dec.decision_payload);
         if (!proposedBuy && !proposedSell) continue;
-
-        const signalAgentNameForSlack = labelFromSignalAgentMap(
-          signalAgentLabelsBySlug,
-          primaryAgentSlugFromDecisionPayload(dec.decision_payload),
-        );
 
         const { data: existingOrder, error: ordSelErr } = await admin
           .schema("trading")
@@ -514,12 +523,15 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             });
             throw e;
           }
-          await sendTradeFillSlack({
-            source: "executor-catalog-close",
-            side: "buy",
-            assetName: assetNameForSlack,
-            signalAgentName: signalAgentNameForSlack,
-          });
+          if (ex.slack_trade_notifications_enabled) {
+            await sendTradeFillSlack({
+              source: "executor-catalog-close",
+              side: "buy",
+              assetName: assetNameForSlack,
+              executorName: String(ex.name ?? "").trim() || "—",
+              exchangeName: slackExchangeName(ex),
+            });
+          }
           ordersInserted += 1;
           continue;
         }
@@ -600,18 +612,44 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             });
             throw e;
           }
-          await sendTradeFillSlack({
-            source: "executor-catalog-close",
-            side: "sell",
-            assetName: assetNameForSlack,
-            signalAgentName: signalAgentNameForSlack,
-          });
+          if (ex.slack_trade_notifications_enabled) {
+            await sendTradeFillSlack({
+              source: "executor-catalog-close",
+              side: "sell",
+              assetName: assetNameForSlack,
+              executorName: String(ex.name ?? "").trim() || "—",
+              exchangeName: slackExchangeName(ex),
+            });
+          }
           ordersInserted += 1;
           continue;
         }
 
         /* Live */
         try {
+          const bitvavoCreds = bitvavoCredentialsFromExchangeApiFields(ex.exchange_api_key, ex.exchange_api_secret);
+          if (!bitvavoCreds) {
+            const { error: credRejErr } = await admin.schema("trading").from("orders").insert({
+              user_id: userId,
+              executor_id: ex.id,
+              decision_id: dec.id,
+              market_id: marketId,
+              side: orderSide,
+              quantity: 0,
+              notional_eur: notionalEur,
+              status: "rejected",
+              paper: false,
+              external_id: null,
+            });
+            if (credRejErr && !/duplicate|unique/i.test(credRejErr.message)) {
+              throw new Error(`${marketSymbol}: missing API credentials reject insert: ${credRejErr.message}`);
+            }
+            console.error(
+              `${marketSymbol}: live order skipped — set exchange_api_key and exchange_api_secret on executor ${ex.id}`,
+            );
+            continue;
+          }
+
           if (orderSide === "buy") {
             const estFee = executorPaperFeeEur(notionalEur);
             const estDebit = tradeBuyDebitEur(notionalEur, estFee);
@@ -646,11 +684,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           const live =
             orderSide === "buy"
               ? await placeBitvavoMarketBuyQuote({
+                  credentials: bitvavoCreds,
                   market: marketSymbol,
                   amountQuoteEur: notionalEur,
                   clientOrderId: dec.id,
                 })
               : await placeBitvavoMarketSellAmount({
+                  credentials: bitvavoCreds,
                   market: marketSymbol,
                   amountBase: sellQtyRequested,
                   clientOrderId: dec.id,
@@ -752,12 +792,15 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               } catch (ledgerErr) {
                 console.error(`${marketSymbol}: live fill ledger update failed`, ledgerErr);
               }
-              await sendTradeFillSlack({
-                source: "executor-catalog-close",
-                side: orderSide,
-                assetName: assetNameForSlack,
-                signalAgentName: signalAgentNameForSlack,
-              });
+              if (ex.slack_trade_notifications_enabled) {
+                await sendTradeFillSlack({
+                  source: "executor-catalog-close",
+                  side: orderSide,
+                  assetName: assetNameForSlack,
+                  executorName: String(ex.name ?? "").trim() || "—",
+                  exchangeName: slackExchangeName(ex),
+                });
+              }
             }
           }
           ordersInserted += 1;

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { BitvavoAdapter, type Candle } from "@repo/exchange";
+import { BitvavoAdapter, type Candle } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/markets/bitvavo-list-candles-end-ms";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
 

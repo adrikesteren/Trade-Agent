@@ -2,7 +2,6 @@ import "server-only";
 
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 
-export const RELAY_MESSAGE_GROUP_MAX_URLS = 100;
 export const RELAY_POLL_MS = 1000;
 /** Max wait when chaining message-groups (exchange-close). */
 export const RELAY_CHUNK_WAIT_MAX_MS = 3_600_000;
@@ -66,6 +65,28 @@ export function buildSymbolClosePipelineUrl(
   return u.toString();
 }
 
+function toRelayOriginAndPath(targetUrl: string): { origin: string; path: string } {
+  const u = new URL(targetUrl);
+  const path = `${u.pathname}${u.search}`;
+  return { origin: u.origin, path };
+}
+
+function toRelayOriginAndPaths(targetUrls: string[]): { origin: string; paths: string[] } {
+  if (targetUrls.length === 0) {
+    throw new Error("Relay message-group requires at least one target URL");
+  }
+  const first = toRelayOriginAndPath(targetUrls[0]!);
+  const paths = [first.path];
+  for (let i = 1; i < targetUrls.length; i += 1) {
+    const part = toRelayOriginAndPath(targetUrls[i]!);
+    if (part.origin !== first.origin) {
+      throw new Error("Relay message-group requires all target URLs to share the same origin");
+    }
+    paths.push(part.path);
+  }
+  return { origin: first.origin, paths };
+}
+
 type RelayMessageRow = { id: string; status: string };
 
 function isRelayMessageTerminal(status: string): boolean {
@@ -108,10 +129,11 @@ export async function postRelaySingleMessage(
   headers: Record<string, string>,
   maxRetries: number,
 ): Promise<string> {
+  const { origin, path } = toRelayOriginAndPath(url);
   const res = await fetch(`${relayBase}/api/v1/messages`, {
     method: "POST",
     headers: relayIngressPostHeaders(),
-    body: JSON.stringify({ url, method: "POST", headers, maxRetries }),
+    body: JSON.stringify({ origin, path, method: "POST", headers, maxRetries }),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -131,10 +153,11 @@ export async function postRelayMessageGroup(
   headers: Record<string, string>,
   maxRetries: number,
 ): Promise<{ groupId: string; messageIds: string[] }> {
+  const { origin, paths } = toRelayOriginAndPaths(urls);
   const res = await fetch(`${relayBase}/api/v1/message-group`, {
     method: "POST",
     headers: relayIngressPostHeaders(),
-    body: JSON.stringify({ urls, method: "POST", headers, maxRetries }),
+    body: JSON.stringify({ origin, paths, method: "POST", headers, maxRetries }),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -146,7 +169,7 @@ export async function postRelayMessageGroup(
   };
   const groupId = json.message_group?.id;
   const messageIds = (json.messages ?? []).map((m) => m.id).filter((x): x is string => Boolean(x));
-  if (!groupId || messageIds.length !== urls.length) {
+  if (!groupId || messageIds.length !== paths.length) {
     throw new Error("Relay /message-group response missing message_group.id or message ids");
   }
   return { groupId, messageIds };

@@ -10,8 +10,10 @@ export type TradeFillSlackPayload = {
   side: "buy" | "sell";
   /** `catalog.assets` display (name, else code). */
   assetName: string;
-  /** Primary agent from the trade decision (`signal_agents.description` or `agent_id`). */
-  signalAgentName: string;
+  /** `trading.executors.name`. */
+  executorName: string;
+  /** `catalog.exchanges.name` (else code). */
+  exchangeName: string;
 };
 
 /** First `signalsIn[].agent_id` from mediator payload (sorted signals). */
@@ -98,10 +100,11 @@ const SLACK_SELL_COLOR = "#e01e5a";
 function buildSlackBody(p: TradeFillSlackPayload): Record<string, unknown> {
   const sideUpper = p.side === "buy" ? "BUY" : "SELL";
   const color = p.side === "buy" ? SLACK_BUY_COLOR : SLACK_SELL_COLOR;
+  const executorBracket = slackMrkdwnEscape(p.executorName.trim() || "—");
   const asset = slackMrkdwnEscape(p.assetName.trim() || "—");
-  const agent = slackMrkdwnEscape(p.signalAgentName.trim() || "—");
-  const mrkdwn = `*${sideUpper}* - ${asset} - ${agent}`;
-  const plain = `${sideUpper} - ${p.assetName.trim() || "—"} - ${p.signalAgentName.trim() || "—"}`;
+  const exchange = slackMrkdwnEscape(p.exchangeName.trim() || "—");
+  const mrkdwn = `[${executorBracket}]: *${sideUpper}* - ${asset} - ${exchange}`;
+  const plain = `[${p.executorName.trim() || "—"}]: ${sideUpper} - ${p.assetName.trim() || "—"} - ${p.exchangeName.trim() || "—"}`;
   return {
     text: plain,
     attachments: [
@@ -120,7 +123,7 @@ function buildSlackBody(p: TradeFillSlackPayload): Record<string, unknown> {
 
 /**
  * Optional Slack Incoming Webhook (#trade-fills). Never throws; logs on failure.
- * Message: bold BUY/SELL, asset display name, signal agent label; buy = green / sell = red attachment bar.
+ * Message: `[Executor]: BUY/SELL - Asset - Exchange`; buy = green / sell = red attachment bar.
  */
 export async function sendTradeFillSlack(payload: TradeFillSlackPayload): Promise<void> {
   const url = process.env.SLACK_TRADE_FILLS_WEBHOOK_URL?.trim();
