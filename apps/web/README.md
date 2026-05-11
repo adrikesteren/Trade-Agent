@@ -120,6 +120,20 @@ Background jobs for **daily risk reset** and **live order reconciliation**, plus
 | `BITVAVO_RECONCILE_BATCH` | Optional | Max live orders examined per run (default `40`). |
 | `BITVAVO_RECONCILE_LOCK_TTL_MS` | Optional | Redis lock TTL for reconcile (default 9 minutes). |
 
+## QStash (optional)
+
+When `QSTASH_TOKEN` and `APP_URL` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues one **`asset-close-pipeline`** HTTP call per distinct catalog asset (no per-asset CoinGecko ingest — faster than `symbol-close-pipeline`; see [docs/ops-developer.md](../../docs/ops-developer.md)). Signing keys (`QSTASH_CURRENT_SIGNING_KEY`, …) let QStash call workers without putting `CRON_SECRET` in the Upstash destination. The dashboard **Schedules** page lists QStash cron schedules when `QSTASH_TOKEN` is configured.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `QSTASH_TOKEN` | For QStash features | Publish + schedules API (server-only). |
+| `QSTASH_URL` | Optional | Override QStash API base (default cloud). |
+| `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` | Recommended with QStash | Verify `Upstash-Signature` on worker routes. |
+| `APP_URL` | For publish URLs | Public origin of this app (e.g. `https://…` or tunneled `https://…` for local QStash). |
+| `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` | Optional | Delay spread between queued asset-close jobs in seconds (default `2`; decimals e.g. `0.1` allowed). |
+| `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` | Optional | Parallel QStash `publish` calls per batch in exchange-close (default `32`, max `128`). |
+| `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK` | Optional | Set `1` to serialize overlapping **asset/symbol-close** runs per asset when Redis is configured (extra latency; leave unset for throughput). |
+
 Manual worker calls (dev):
 
 ```bash

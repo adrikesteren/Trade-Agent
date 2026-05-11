@@ -2,8 +2,11 @@ import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
+
 /** Service role client — bypasses RLS. Only use in trusted server/worker code. */
 export function createServiceRoleClient() {
+  loadMonorepoDotenvOnce();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) {

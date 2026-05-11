@@ -30,12 +30,29 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 | `POST /api/workers/mediator-catalog-close` | Mediator (`mediator_catalog_close`) |
 | `POST /api/workers/executor-catalog-close` | Executor (`executor_catalog_close`) |
 | `GET` or `POST` `/api/workers/symbol-close-pipeline` | Single-asset pipeline: CoinGecko + Bitvavo candles + scoped signal/mediator/executor (`sync_runs` `symbol_close_pipeline`) |
+| `GET` or `POST` `/api/workers/asset-close-pipeline` | Same scoped pipeline as symbol-close **without CoinGecko** (faster); candles + signal/mediator/executor; same `sync_runs` job key. |
+| `GET` or `POST` `/api/workers/exchange-close-pipeline` | Optional **QStash fan-out**: for an `exchangeCode`, enqueue **`asset-close-pipeline`** once per distinct catalog `asset.code` (default quote EUR). Requires `QSTASH_TOKEN` + `APP_URL`. |
 | `POST /api/workers/risk-daily-reset` | Reset `trading.risk_state.daily_pnl_eur` (intended once per UTC day) |
 | `POST /api/workers/bitvavo-reconcile` | Live order status sync vs Bitvavo |
 
 ---
 
-### `GET` / `POST /api/workers/symbol-close-pipeline`
+### `GET` or `POST` `/api/workers/exchange-close-pipeline`
+
+- **Query (required):** `exchangeCode` (case-insensitive, matches `catalog.exchanges.code`).
+- **Query (optional):** `quote` — defaults to **EUR**; only markets with that quote are considered when collecting distinct base assets.
+- **Env:** `QSTASH_TOKEN`, **`APP_URL`** (public origin of this Next app, no trailing slash). Optional `EXCHANGE_CLOSE_QSTASH_STAGGER_SEC` (seconds between queued jobs, default `2`; decimals like `0.1` allowed — restart `pnpm dev` after changing `.env`). Optional `EXCHANGE_CLOSE_QSTASH_PUBLISH_CONCURRENCY` (parallel `publish` calls per wave, default `32`, max `128`) speeds the **exchange-close HTTP** round-trip to Upstash. Response JSON includes `appliedStaggerSec`, `staggerDelaySamples`, and `qstashPublishConcurrency`. Optional `SYMBOL_CLOSE_PIPELINE_REDIS_LOCK=1` adds a Redis lock **per asset-close** (slower when overlapping; leave unset for max throughput).
+- **Auth:** `Authorization: Bearer ${CRON_SECRET}` **or** valid QStash signature when `QSTASH_CURRENT_SIGNING_KEY` is set (same dual-auth pattern as `symbol-close-pipeline`).
+- **Flow:** resolve exchange → list markets for the quote → **distinct base assets ordered by `catalog.assets.coingecko_market_cap_usd` descending** (unknown cap last; tie-break `market_symbol`) → `client.publish` to `{APP_URL}/api/workers/asset-close-pipeline?...` with staggered `delay` to avoid bursting your server. A QStash **Schedule** can `POST` this worker on a cron (optionally forward Bearer or rely on signature-only downstream).
+
+---
+
+### `GET` or `POST` `/api/workers/asset-close-pipeline`
+
+- **Query (required):** same as `symbol-close-pipeline` (`assetCode`, `exchangeCode`, optional `quote`).
+- **Behaviour:** calls the same orchestration with **`skipCoingecko: true` always** (no `/coins/markets` ingest for that asset). Optional POST JSON: `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (booleans). Same `sync_runs` `symbol_close_pipeline` overlap rules as symbol-close.
+
+### `GET` or `POST` `/api/workers/symbol-close-pipeline`
 
 - **Query (required):** `assetCode`, `exchangeCode` — matched **case-insensitively** against `catalog.assets.code` and `catalog.exchanges.code`.
 - **Query (optional):** `quote` — defaults to **EUR**; with asset + exchange resolves exactly one `catalog.markets` row.
@@ -47,7 +64,7 @@ This document is **step 5** in the role model from [how-we-use-agents.md](./how-
 
 ## Workers (auth)
 
-All worker handlers use [verifyScheduledWorker](../apps/web/src/lib/workers/verify-scheduled-worker.ts): **`Authorization: Bearer ${CRON_SECRET}`** only.
+Most worker handlers use [verifyScheduledWorker](../apps/web/src/lib/workers/verify-scheduled-worker.ts) (`Authorization: Bearer ${CRON_SECRET}`). **`symbol-close-pipeline`**, **`asset-close-pipeline`**, and **`exchange-close-pipeline`** also accept a valid **QStash** request signature (`Upstash-Signature`) when `QSTASH_CURRENT_SIGNING_KEY` is set, so QStash need not forward `CRON_SECRET`.
 
 ### `POST /api/workers/risk-daily-reset`
 

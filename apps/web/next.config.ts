@@ -1,22 +1,36 @@
 import type { NextConfig } from "next";
-import dotenv from "dotenv";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import path from "path";
+import { fileURLToPath } from "url";
+
+import { loadMonorepoDotenvOnce } from "./src/lib/env/load-monorepo-dotenv-once";
 
 /**
- * Next loads `.env` from `apps/web` by default; in this monorepo secrets often live at repo root.
- * Load root then optional overrides (later wins).
+ * Next default `.env` is under `apps/web`; this monorepo keeps secrets in the repo root.
+ * Load those files first (also used by Turbopack middleware / server chunks that miss `process.env`).
  */
-const webRoot = path.dirname(fileURLToPath(import.meta.url));
-const monorepoRoot = path.resolve(webRoot, "..", "..");
+loadMonorepoDotenvOnce();
 
-// `override: true` so repo `.env` wins over stray OS/user env (e.g. old SIGNAL_DEFAULT_USER_ID in Windows).
-dotenv.config({ path: path.join(monorepoRoot, ".env"), override: true });
-dotenv.config({ path: path.join(monorepoRoot, ".env.local"), override: true });
-dotenv.config({ path: path.join(webRoot, ".env.local"), override: true });
+/** Directory containing this `next.config` file (= `apps/web`). */
+const webRoot = path.dirname(fileURLToPath(import.meta.url));
+/** Repo root: one level above `apps/web`. */
+const monorepoRoot = path.resolve(webRoot, "..");
+
+void monorepoRoot; // reserved for future config that needs explicit repo root
+
+/** Read after `loadMonorepoDotenvOnce()` so repo-root `.env` is applied before `env` inlining. */
+const nextPublicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+const nextPublicSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@repo/blocks", "@repo/exchange", "@repo/redis", "@repo/risk", "@repo/trading"],
+  /**
+   * Inlines into Edge middleware and the browser bundle. `loadMonorepoDotenvOnce()` must run above
+   * so these are non-empty when values only exist in the monorepo root `.env`.
+   */
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: nextPublicSupabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: nextPublicSupabaseAnonKey,
+  },
 };
 
 export default nextConfig;

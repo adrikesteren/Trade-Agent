@@ -4,12 +4,12 @@ import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/m
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyWorkerAuth } from "@/lib/workers/verify-worker-auth";
 
+/** Same optional skips as symbol-close, except CoinGecko is never run (faster fan-out from exchange-close). */
 function parsePipelineBody(raw: string): Partial<SymbolClosePipelineOptions> {
   if (!raw.trim()) return {};
   try {
     const o = JSON.parse(raw) as Record<string, unknown>;
     return {
-      skipCoingecko: o.skipCoingecko === true,
       skipCandles: o.skipCandles === true,
       skipSignals: o.skipSignals === true,
       skipMediator: o.skipMediator === true,
@@ -53,6 +53,7 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
     exchangeCode,
     quote,
     ...bodyOpts,
+    skipCoingecko: true,
   });
 
   if (!result.ok && result.syncRunId == null) {
@@ -75,14 +76,14 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
 }
 
 /**
- * GET: Bearer CRON_SECRET or QStash signature (when signing keys set); same as POST with empty body; query params `assetCode`, `exchangeCode`, optional `quote`.
+ * GET: same auth as symbol-close; query `assetCode`, `exchangeCode`, optional `quote`. **No CoinGecko ingest** (candles + scoped catalog-close only).
  */
 export async function GET(request: Request) {
   return handle(request, "");
 }
 
 /**
- * POST: Bearer CRON_SECRET or QStash signature (when signing keys set). Optional JSON body: `skipCoingecko`, `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` (all booleans, default false).
+ * POST: optional JSON skips `skipCandles`, `skipSignals`, `skipMediator`, `skipExecutor` only. CoinGecko is always skipped.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

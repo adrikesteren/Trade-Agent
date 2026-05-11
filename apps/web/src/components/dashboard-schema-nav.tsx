@@ -71,6 +71,9 @@ export function DashboardSchemaNav() {
             <Link href="/dashboard/sync-runs">Sync Runs</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
+            <Link href="/dashboard/schedules">QStash schedules</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
             <Link href="/dashboard/signal-jobs">Signal Jobs</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>

@@ -1,14 +1,24 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 import { supabaseAuthCookieOptions } from "./auth-cookie";
 
 export async function createClient() {
+  loadMonorepoDotenvOnce();
   const cookieStore = await cookies();
 
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+  if (!url || !anonKey) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set them in the monorepo root `.env` (or `apps/web/.env.local`) and restart `pnpm dev`.",
+    );
+  }
+
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!.trim(),
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!.trim(),
+    url,
+    anonKey,
     {
       cookieOptions: supabaseAuthCookieOptions,
       cookies: {

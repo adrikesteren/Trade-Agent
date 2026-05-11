@@ -8,9 +8,27 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+  if (!supabaseUrl || !supabaseAnonKey) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(
+        "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set them in repo-root `.env` and restart `pnpm dev` (see `next.config.ts` `env` passthrough).",
+      );
+    }
+    const path = request.nextUrl.pathname;
+    if (path.startsWith("/dashboard") || path.startsWith("/docs")) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", path);
+      return NextResponse.redirect(url);
+    }
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!.trim(),
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!.trim(),
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookieOptions: supabaseAuthCookieOptions,
       cookies: {
