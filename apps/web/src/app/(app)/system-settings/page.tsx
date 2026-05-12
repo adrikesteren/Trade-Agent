@@ -1,6 +1,14 @@
 import Link from "next/link";
 
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
+import { ListViewPagination } from "@/components/list-view-pagination";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
+import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
@@ -21,7 +29,14 @@ import {
   listViewOutlineActionClass,
 } from "@repo/blocks";
 
-export default async function SystemSettingsListPage() {
+export default async function SystemSettingsListPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const isAdmin = await isDashboardAdministrator();
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date | null) =>
@@ -39,11 +54,6 @@ export default async function SystemSettingsListPage() {
           subtitle="Administrator role is required to view rows in public.system_settings."
           summary="Promote your user in SQL (see docs/ops-developer.md) or ask an administrator."
           toolbar={<ListViewPlaceholderToolbar />}
-          actions={
-            <Link href="/overview" className={listViewOutlineActionClass}>
-              Overview
-            </Link>
-          }
         />
       </div>
     );
@@ -78,8 +88,15 @@ export default async function SystemSettingsListPage() {
   );
 
   const n = rows.length;
+  const pages = totalPages(n, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+  const pagedRows = rows.slice(from, to + 1);
+
   const summaryBits = [
+    `${pagedRows.length} on this page`,
     `${n} setting${n === 1 ? "" : "s"}`,
+    `Page ${page} of ${pages}`,
     "public.system_settings",
     "Open a row for Edit (dialog) or Delete (confirm)",
   ];
@@ -101,18 +118,15 @@ export default async function SystemSettingsListPage() {
         summary={summaryBits.join(" · ")}
         toolbar={<ListViewPlaceholderToolbar />}
         actions={
-          <>
-            <Link href="/sync-runs" className={listViewOutlineActionClass}>
-              Sync runs
-            </Link>
-            <Link href="/overview" className={listViewOutlineActionClass}>
-              Overview
-            </Link>
-          </>
+          <Link href="/sync-runs" className={listViewOutlineActionClass}>
+            Sync runs
+          </Link>
         }
       />
 
       {dbErr ? <Alert tone="error">{dbErr.message}</Alert> : null}
+
+      <ListViewPagination pathname="/system-settings" page={page} pageSize={pageSize} totalCount={n} />
 
       <Card>
         <CardBody className="!pt-0">
@@ -127,7 +141,7 @@ export default async function SystemSettingsListPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ def, effective, updatedAt }) => (
+                {pagedRows.map(({ def, effective, updatedAt }) => (
                   <tr key={def.key}>
                     <Td>
                       <Link href={`/system-settings/${encodeURIComponent(def.key)}`} className="bk-link">
@@ -146,6 +160,8 @@ export default async function SystemSettingsListPage() {
           </TableWrap>
         </CardBody>
       </Card>
+
+      <ListViewPagination pathname="/system-settings" page={page} pageSize={pageSize} totalCount={n} />
     </div>
   );
 }

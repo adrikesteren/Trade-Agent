@@ -114,23 +114,27 @@ function ElapsedCell({ r, nowMs, ready }: { r: SyncRunRow; nowMs: number; ready:
   );
 }
 
-function mergeRunIntoList(prev: SyncRunRow[], row: SyncRunRow): SyncRunRow[] {
+function mergeRunIntoList(prev: SyncRunRow[], row: SyncRunRow, pageSize: number): SyncRunRow[] {
   const existing = prev.find((r) => r.id === row.id);
   const merged = existing ? ({ ...existing, ...row } as SyncRunRow) : row;
   const without = prev.filter((r) => r.id !== merged.id);
   const next = [merged, ...without];
   next.sort(sortByCreatedDesc);
-  return next.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
+  return next.slice(0, pageSize);
 }
 
 export function SyncRunsLiveClient({
   initialRuns,
   initialError,
   localePrefs,
+  page = 1,
+  pageSize = DASHBOARD_LIST_VIEW_LIMIT,
 }: {
   initialRuns: SyncRunRow[];
   initialError: string | null;
   localePrefs: UserLocalePreferences;
+  page?: number;
+  pageSize?: number;
 }) {
   const [runs, setRuns] = useState<SyncRunRow[]>(() => [...initialRuns].sort(sortByCreatedDesc));
   const [fetchError] = useState<string | null>(initialError);
@@ -141,15 +145,19 @@ export function SyncRunsLiveClient({
     [localePrefs],
   );
 
-  const recentRuns = useMemo(() => runs.slice(0, DASHBOARD_LIST_VIEW_LIMIT), [runs]);
+  const recentRuns = useMemo(() => runs, [runs]);
 
-  const applyPayload = useCallback((rec: Record<string, unknown>) => {
-    const row = rowFromPayload(rec);
-    if (!row) return;
-    setRuns((prev) => mergeRunIntoList(prev, row));
-  }, []);
+  const applyPayload = useCallback(
+    (rec: Record<string, unknown>) => {
+      const row = rowFromPayload(rec);
+      if (!row) return;
+      setRuns((prev) => mergeRunIntoList(prev, row, pageSize));
+    },
+    [pageSize],
+  );
 
   useEffect(() => {
+    if (page !== 1) return;
     const supabase = createClient();
     const channel = supabase
       .channel("dashboard-sync-runs")
@@ -176,7 +184,7 @@ export function SyncRunsLiveClient({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [applyPayload]);
+  }, [applyPayload, page]);
 
   return (
     <>
@@ -186,8 +194,9 @@ export function SyncRunsLiveClient({
             Recent sync runs
           </h2>
           <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-            Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed). Updates live via
-            Realtime. Open a run via the <strong>Job</strong> link.
+            Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed).
+            {page === 1 ? " Updates live via Realtime on this page." : " Open page 1 for live updates."} Open a run via
+            the <strong>Job</strong> link.
           </p>
           {fetchError ? (
             <Alert tone="error" className="mt-2 !text-xs">

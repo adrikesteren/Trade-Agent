@@ -1,4 +1,4 @@
-export type ExecutionMode = "paper" | "live";
+export type ExecutionMode = "paper" | "live" | "historical";
 export type ExecutorAssetFilterMode = "all" | "whitelist" | "blacklist";
 
 export type ExecutorFilterInput = {

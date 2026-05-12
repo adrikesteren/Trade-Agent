@@ -1,5 +1,12 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -163,7 +170,14 @@ async function fetchCatalogExtrasByMarketId(
   return catalogByMarketId;
 }
 
-export default async function SignalsPage() {
+export default async function SignalsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
@@ -184,16 +198,20 @@ export default async function SignalsPage() {
 
   const sorted = [...raw].sort((a, b) => compareSignals(a, b, catalogByMarketId));
   const ranked = topSignalPerMarketAndAgent(sorted);
-  const list = ranked.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
+  const totalCount = ranked.length;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+  const list = ranked.slice(from, to + 1);
 
   const sortLineParts = [
-    `${list.length} row${list.length === 1 ? "" : "s"} shown`,
-    raw.length > list.length || ranked.length > list.length
-      ? `${ranked.length} ranked${raw.length !== ranked.length ? ` · ${raw.length} signals loaded` : ""}`
-      : null,
+    `${list.length} on this page`,
+    `${totalCount} ranked rows`,
+    `Page ${page} of ${pages}`,
+    raw.length !== ranked.length ? `${raw.length} signals loaded` : null,
     "one row per market + agent (top rank each)",
     "ENTER → EXIT → other · mcap desc · tie: newest",
-    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
+    `${pageSize} per page`,
   ].filter((s): s is string => Boolean(s));
 
   return (
@@ -205,14 +223,9 @@ export default async function SignalsPage() {
         rowCount={list.length}
         sortLine={sortLineParts.join(" · ")}
         actions={
-          <>
-            <Link href="/signal-agents" className={listViewOutlineActionClass}>
-              Signal agents
-            </Link>
-            <Link href="/overview" className={listViewOutlineActionClass}>
-              Overview
-            </Link>
-          </>
+          <Link href="/signal-agents" className={listViewOutlineActionClass}>
+            Signal agents
+          </Link>
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
@@ -223,6 +236,7 @@ export default async function SignalsPage() {
           <code className="bk-code">trading.signals</code> but are not listed here.
         </Alert>
       ) : null}
+      <ListViewPagination pathname="/signals" page={page} pageSize={pageSize} totalCount={totalCount} />
       <Card>
         <CardBody className="!pt-0">
           <TableWrap>
@@ -290,6 +304,7 @@ export default async function SignalsPage() {
           </TableWrap>
         </CardBody>
       </Card>
+      <ListViewPagination pathname="/signals" page={page} pageSize={pageSize} totalCount={totalCount} />
     </div>
   );
 }

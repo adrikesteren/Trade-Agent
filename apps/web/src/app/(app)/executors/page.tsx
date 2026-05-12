@@ -1,5 +1,12 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { getDashboardSession } from "@/lib/supabase/dashboard-session";
 import { ensureUserExecutorExists } from "@/lib/trading/executors";
 import {
@@ -24,7 +31,14 @@ type ExecutorListRow = {
   asset_filter_mode: string;
 };
 
-export default async function ExecutorsListPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function ExecutorsListPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const { supabase, user } = await getDashboardSession();
   if (!user) redirect("/login");
 
@@ -34,15 +48,31 @@ export default async function ExecutorsListPage() {
       .from("executors")
       .select("id, name, enabled, exchange_id, execution_mode, asset_filter_mode")
       .eq("user_id", user.id)
-      .order("created_at", { ascending: true })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT);
+      .order("created_at", { ascending: true });
 
-  let { data: rows, error } = await listQuery();
+  let { count: totalRaw, error: countError } = await supabase
+    .schema("trading")
+    .from("executors")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id);
 
-  if (!error && !(rows?.length ?? 0)) {
+  if (!countError && (totalRaw ?? 0) === 0) {
     await ensureUserExecutorExists(supabase, user.id, { verifiedEmptyExecutorList: true });
-    ({ data: rows, error } = await listQuery());
+    const again = await supabase
+      .schema("trading")
+      .from("executors")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    totalRaw = again.count;
+    if (again.error) countError = again.error;
   }
+
+  const totalCount = totalRaw ?? 0;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+
+  const { data: rows, error } = await listQuery().range(from, to);
 
   const list = (rows ?? []) as ExecutorListRow[];
 
@@ -53,7 +83,7 @@ export default async function ExecutorsListPage() {
         title="Executors"
         iconLetter="E"
         rowCount={list.length}
-        sortLine="Portfolios: paper/live and asset filters"
+        sortLine={`Portfolios: paper, live, historical backtest, and asset filters · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
         actions={
           <Link href="/executors/new" className={listViewOutlineActionClass}>
             New executor
@@ -61,6 +91,9 @@ export default async function ExecutorsListPage() {
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
+
+      <ListViewPagination pathname="/executors" page={page} pageSize={pageSize} totalCount={totalCount} />
+
       <Card>
         <CardBody className="!pt-0">
           <TableWrap>
@@ -84,9 +117,14 @@ export default async function ExecutorsListPage() {
                     <Td className="font-mono">{row.asset_filter_mode}</Td>
                     <Td>{row.enabled ? "yes" : "no"}</Td>
                     <Td>
-                      <Link href={`/executors/${row.id}`} className="bk-link">
-                        Open
-                      </Link>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Link href={`/executors/${row.id}`} className="bk-link">
+                          Open
+                        </Link>
+                        <Link href={`/executors/new?from=${encodeURIComponent(row.id)}`} className={listViewOutlineActionClass}>
+                          Clone
+                        </Link>
+                      </span>
                     </Td>
                   </tr>
                 ))}
@@ -102,6 +140,8 @@ export default async function ExecutorsListPage() {
           </TableWrap>
         </CardBody>
       </Card>
+
+      <ListViewPagination pathname="/executors" page={page} pageSize={pageSize} totalCount={totalCount} />
     </div>
   );
 }

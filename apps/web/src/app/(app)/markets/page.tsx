@@ -1,4 +1,12 @@
+import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -14,7 +22,6 @@ import {
   TableWrap,
   Td,
   Th,
-  listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
 
@@ -24,7 +31,14 @@ type MarketListingRow = {
   assets: unknown;
 };
 
-export default async function MarketsIndexPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function MarketsIndexPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
 
@@ -67,13 +81,18 @@ export default async function MarketsIndexPage() {
     return (a.market_symbol ?? "").localeCompare(b.market_symbol ?? "", undefined, { sensitivity: "base" });
   });
 
-  const displayListings = sortedListings.slice(0, DASHBOARD_LIST_VIEW_LIMIT);
-  const n = displayListings.length;
+  const totalCount = sortedListings.length;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+  const displayListings = sortedListings.slice(from, to + 1);
+
   const summaryBits = [
-    `${n} listing${n === 1 ? "" : "s"} shown`,
-    "Sorted by Market Cap",
-    `${exchange?.name ?? "Bitvavo"} · EUR`,
-    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
+    `${displayListings.length} on this page`,
+    `${totalCount} loaded & ranked`,
+    `Page ${page} of ${pages}`,
+    `${exchange?.name ?? "Bitvavo"}`,
+    `${pageSize} per page`,
   ];
 
   return (
@@ -95,16 +114,7 @@ export default async function MarketsIndexPage() {
         }
         summary={summaryBits.join(" · ")}
         toolbar={<ListViewPlaceholderToolbar />}
-        actions={
-          <>
-            <Link href="/sync-runs" className={listViewOutlineActionClass}>
-              Sync runs
-            </Link>
-            <Link href="/overview" className={listViewOutlineActionClass}>
-              Overview
-            </Link>
-          </>
-        }
+        actions={<OverviewRetrieveBitvavoMarketsButton label="Get From Bitvavo" />}
       />
 
       <Alert tone="info">
@@ -120,6 +130,8 @@ export default async function MarketsIndexPage() {
       </Alert>
 
       {error ? <Alert tone="error">{error.message}</Alert> : null}
+
+      <ListViewPagination pathname="/markets" page={page} pageSize={pageSize} totalCount={totalCount} />
 
       <Card>
         <CardBody className="!pt-0">
@@ -187,6 +199,8 @@ export default async function MarketsIndexPage() {
           </TableWrap>
         </CardBody>
       </Card>
+
+      <ListViewPagination pathname="/markets" page={page} pageSize={pageSize} totalCount={totalCount} />
     </div>
   );
 }

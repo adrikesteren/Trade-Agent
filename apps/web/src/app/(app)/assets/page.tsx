@@ -1,4 +1,12 @@
+import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-assets-button";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -14,7 +22,6 @@ import {
   TableWrap,
   Td,
   Th,
-  listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
 
@@ -27,9 +34,25 @@ type AssetRow = {
   coingecko_total_volume_usd: number | string | null;
 };
 
-export default async function AssetsIndexPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function AssetsIndexPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
+
+  const { count: totalRaw, error: countError } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("*", { count: "exact", head: true });
+  const totalCount = totalRaw ?? 0;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
 
   const { data: rows, error } = await supabase
     .schema("catalog")
@@ -37,16 +60,20 @@ export default async function AssetsIndexPage() {
     .select("id, code, kind, name, coingecko_market_cap_usd, coingecko_total_volume_usd")
     .order("coingecko_market_cap_usd", { ascending: false, nullsFirst: false })
     .order("code", { ascending: true })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+    .range(from, to);
 
   const sortedRows = (rows ?? []) as AssetRow[];
 
-  const n = sortedRows.length;
   const summaryBits = [
-    `${n} asset${n === 1 ? "" : "s"}`,
+    `${sortedRows.length} on this page`,
+    `${totalCount} total`,
+    `Page ${page} of ${pages}`,
     "Sorted by Market Cap",
-    `Max ${DASHBOARD_LIST_VIEW_LIMIT} rows`,
+    `${pageSize} per page`,
   ];
+  if (countError) {
+    summaryBits.push(`Count error: ${countError.message}`);
+  }
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -67,14 +94,12 @@ export default async function AssetsIndexPage() {
         }
         summary={summaryBits.join(" · ")}
         toolbar={<ListViewPlaceholderToolbar />}
-        actions={
-          <Link href="/overview" className={listViewOutlineActionClass}>
-            Overview
-          </Link>
-        }
+        actions={<OverviewRetrieveBitvavoAssetsButton label="Get From Bitvavo" />}
       />
 
       {error ? <Alert tone="error">{error.message}</Alert> : null}
+
+      <ListViewPagination pathname="/assets" page={page} pageSize={pageSize} totalCount={totalCount} />
 
       <Card>
         <CardBody className="!pt-0">
@@ -115,6 +140,8 @@ export default async function AssetsIndexPage() {
           </TableWrap>
         </CardBody>
       </Card>
+
+      <ListViewPagination pathname="/assets" page={page} pageSize={pageSize} totalCount={totalCount} />
     </div>
   );
 }

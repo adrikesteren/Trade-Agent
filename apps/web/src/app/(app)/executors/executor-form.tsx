@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, Button, Card, CardBody } from "@repo/blocks";
 
@@ -32,6 +32,8 @@ export type ExecutorFormInitial = {
   mediator_rails_extra_json?: string;
   /** When unset on create, defaults to on (matches DB default). */
   slack_trade_notifications_enabled?: boolean;
+  historical_start_date?: string | null;
+  historical_end_date?: string | null;
   /** Server-derived: both key and secret non-empty in DB (no raw values sent to the client). */
   exchange_api_credentials_configured?: boolean;
   /** Last few characters of stored key for display only (edit mode). */
@@ -54,8 +56,16 @@ export function ExecutorForm({
   /** Called after a successful create or update (server action completed without throwing). */
   onSaved?: () => void;
 }) {
-  const [filterMode, setFilterMode] = useState<ExecutorAssetFilterMode>(initial?.asset_filter_mode ?? "all");
+  const [filterMode, setFilterMode] = useState<ExecutorAssetFilterMode>(
+    initial?.execution_mode === "historical" ? "whitelist" : (initial?.asset_filter_mode ?? "all"),
+  );
   const [execMode, setExecMode] = useState<ExecutionModeValue>(initial?.execution_mode ?? "paper");
+
+  useEffect(() => {
+    if (execMode === "historical") {
+      setFilterMode("whitelist");
+    }
+  }, [execMode]);
 
   return (
     <Card>
@@ -93,21 +103,27 @@ export function ExecutorForm({
             Enabled
           </label>
 
-          <label className="flex cursor-pointer flex-col gap-1 text-sm">
-            <span className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                name="slack_trade_notifications_enabled"
-                defaultChecked={initial?.slack_trade_notifications_enabled !== false}
-              />
-              Slack trade-fill notifications
-            </span>
-            <span className="bk-text-muted pl-6 text-xs">
-              When enabled, trade fills for this executor may post to Slack if{" "}
-              <code className="font-mono text-[var(--text)]">TRADE_FILL_SLACK_WEBHOOK_URL</code> is set. No webhook
-              means nothing is sent either way.
-            </span>
-          </label>
+          {execMode !== "historical" ? (
+            <label className="flex cursor-pointer flex-col gap-1 text-sm">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="slack_trade_notifications_enabled"
+                  defaultChecked={initial?.slack_trade_notifications_enabled !== false}
+                />
+                Slack trade-fill notifications
+              </span>
+              <span className="bk-text-muted pl-6 text-xs">
+                When enabled, trade fills for this executor may post to Slack if{" "}
+                <code className="font-mono text-[var(--text)]">TRADE_FILL_SLACK_WEBHOOK_URL</code> is set. No webhook
+                means nothing is sent either way.
+              </span>
+            </label>
+          ) : (
+            <p className="bk-text-muted text-xs">
+              Slack trade-fill notifications are disabled for historical executors (cannot be enabled).
+            </p>
+          )}
 
           <div>
             <label htmlFor="ex-mode" className="bk-form-label">
@@ -124,8 +140,54 @@ export function ExecutorForm({
             >
               <option value="paper">Paper (simulated fills)</option>
               <option value="live">Live (Bitvavo — server API keys)</option>
+              <option value="historical">Historical (backtest date range — paper only)</option>
             </select>
           </div>
+
+          {execMode === "historical" ? (
+            <Alert tone="warning">
+              <p className="text-sm">
+                Historical runs overwrite <strong className="text-[var(--text)]">shared</strong> rows in{" "}
+                <code className="font-mono text-[var(--text)]">trading.signals</code> for your user and this market for
+                each bar in the range. Use a dedicated account or accept that signal history for that market may
+                change.
+              </p>
+            </Alert>
+          ) : null}
+
+          {execMode === "historical" ? (
+            <div className="bk-stack bk-stack_gap-sm">
+              <div>
+                <label htmlFor="ex-hist-start" className="bk-form-label">
+                  Historical start date (UTC calendar day)
+                </label>
+                <input
+                  id="ex-hist-start"
+                  name="historical_start_date"
+                  type="date"
+                  className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+                  defaultValue={initial?.historical_start_date ?? ""}
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="ex-hist-end" className="bk-form-label">
+                  Historical end date (UTC calendar day)
+                </label>
+                <input
+                  id="ex-hist-end"
+                  name="historical_end_date"
+                  type="date"
+                  className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+                  defaultValue={initial?.historical_end_date ?? ""}
+                  required
+                />
+              </div>
+              <p className="bk-text-muted text-xs">
+                Bitvavo 15m candles only. Exchange must be Bitvavo. One base asset in the whitelist.
+              </p>
+            </div>
+          ) : null}
 
           <div>
             <label htmlFor="ex-exchange" className="bk-form-label">
@@ -406,20 +468,47 @@ export function ExecutorForm({
             <label htmlFor="ex-filter-mode" className="bk-form-label">
               Asset filter
             </label>
-            <select
-              id="ex-filter-mode"
-              name="asset_filter_mode"
-              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
-              value={filterMode}
-              onChange={(e) => setFilterMode(e.target.value as ExecutorAssetFilterMode)}
-            >
-              <option value="all">All assets</option>
-              <option value="whitelist">Whitelist (only listed base assets)</option>
-              <option value="blacklist">Blacklist (all except listed base assets)</option>
-            </select>
+            {execMode === "historical" ? (
+              <>
+                <input type="hidden" name="asset_filter_mode" value="whitelist" readOnly />
+                <p className="bk-text-muted mt-1 text-xs">Whitelist only (required for historical).</p>
+              </>
+            ) : (
+              <select
+                id="ex-filter-mode"
+                name="asset_filter_mode"
+                className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+                value={filterMode}
+                onChange={(e) => setFilterMode(e.target.value as ExecutorAssetFilterMode)}
+              >
+                <option value="all">All assets</option>
+                <option value="whitelist">Whitelist (only listed base assets)</option>
+                <option value="blacklist">Blacklist (all except listed base assets)</option>
+              </select>
+            )}
           </div>
 
-          {filterMode !== "all" ? (
+          {execMode === "historical" ? (
+            <div>
+              <label htmlFor="ex-assets-hist" className="bk-form-label">
+                Asset (exactly one)
+              </label>
+              <select
+                id="ex-assets-hist"
+                name="filter_asset_ids"
+                className="bk-input mt-1 w-full max-w-md font-mono text-sm"
+                defaultValue={(initial?.filter_asset_ids ?? [])[0] ?? ""}
+                required
+              >
+                <option value="">— Select one asset —</option>
+                {assetOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : filterMode !== "all" ? (
             <div>
               <label htmlFor="ex-assets" className="bk-form-label">
                 Assets (base)

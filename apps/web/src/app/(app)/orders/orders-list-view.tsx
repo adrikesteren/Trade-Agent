@@ -1,5 +1,11 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -93,9 +99,17 @@ export type OrdersListViewProps = {
   executorIdFilter: string | null;
   /** When listing under an executor record, link back to that detail page. */
   parentExecutor?: { id: string; name: string };
+  paginationPathname: string;
+  page: number;
 };
 
-export async function OrdersListView({ executorIdFilter, parentExecutor }: OrdersListViewProps) {
+export async function OrdersListView({
+  executorIdFilter,
+  parentExecutor,
+  paginationPathname,
+  page: pageRaw,
+}: OrdersListViewProps) {
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
@@ -104,6 +118,19 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  let countQ = supabase
+    .schema("trading")
+    .from("orders")
+    .select("*", { count: "exact", head: true });
+  if (executorIdFilter) {
+    countQ = countQ.eq("executor_id", executorIdFilter);
+  }
+  const { count: totalRaw, error: countError } = await countQ;
+  const totalCount = totalRaw ?? 0;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+
   let q = supabase
     .schema("trading")
     .from("orders")
@@ -111,7 +138,7 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
       "id, decision_id, executor_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at",
     )
     .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+    .range(from, to);
   if (executorIdFilter) {
     q = q.eq("executor_id", executorIdFilter);
   }
@@ -123,6 +150,9 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
+  const extraQuery: Record<string, string | undefined> = {};
+  if (executorIdFilter) extraQuery.executorId = executorIdFilter;
+
   return (
     <ListViewLayout>
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -133,8 +163,8 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
           rowCount={list.length}
           sortLine={
             executorIdFilter
-              ? `Filtered by executor · sorted by created (newest first) · max ${DASHBOARD_LIST_VIEW_LIMIT} rows`
-              : `Sorted by created (newest first) · max ${DASHBOARD_LIST_VIEW_LIMIT} rows`
+              ? `Filtered by executor · sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
+              : `Sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
           }
           actions={
             <>
@@ -149,13 +179,20 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
               <Link href="/fills" className={listViewOutlineActionClass}>
                 Fills
               </Link>
-              <Link href="/overview" className={listViewOutlineActionClass}>
-                Overview
-              </Link>
             </>
           }
         />
         {error ? <Alert tone="error">{error.message}</Alert> : null}
+        {countError ? <Alert tone="error">{countError.message}</Alert> : null}
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
+
         <Card>
           <CardBody className="!pt-0">
             <TableWrap>
@@ -238,6 +275,14 @@ export async function OrdersListView({ executorIdFilter, parentExecutor }: Order
             </TableWrap>
           </CardBody>
         </Card>
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
       </div>
     </ListViewLayout>
   );

@@ -33,6 +33,10 @@ export type MediatorCatalogCloseBody = {
   onlyMarketId?: string | null;
   /** When true, do not enqueue full-catalog executor HTTP job after the last batch. */
   disableDownstreamEnqueue?: boolean;
+  /** When set, only this executor is evaluated (used for historical replay). Catalog-close still skips other historical executors when unset. */
+  onlyExecutorId?: string | null;
+  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay). */
+  signalUserIdsOverride?: string[] | null;
 };
 
 export type RunMediatorCatalogCloseResult = {
@@ -173,9 +177,12 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   const marketBatchSizeVal = Math.min(Math.max(body.marketBatchSize ?? marketBatchSize(), 1), 120);
   const closeTimeIso = body.closeTimeIso;
   const onlyMarketId = body.onlyMarketId != null && String(body.onlyMarketId).trim() !== "" ? String(body.onlyMarketId).trim() : null;
+  const onlyExecutorId =
+    body.onlyExecutorId != null && String(body.onlyExecutorId).trim() !== "" ? String(body.onlyExecutorId).trim() : null;
   const disableDownstreamEnqueue = body.disableDownstreamEnqueue === true;
 
-  const userIds = parseSignalUserIdsFromEnv();
+  const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
+  const userIds = override?.length ? override : parseSignalUserIdsFromEnv();
   if (!userIds.length) {
     return {
       ok: true,
@@ -323,6 +330,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
 
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
       for (const ex of executors) {
+        if (ex.execution_mode === "historical" && (!onlyExecutorId || ex.id !== onlyExecutorId)) continue;
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
         if (String(ex.exchange_id) !== exchangeId) continue;
 

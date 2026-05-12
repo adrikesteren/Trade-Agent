@@ -1,9 +1,15 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   TRADE_DECISIONS_FETCH_POOL,
-  buildTradeDecisionListViewRows,
+  dedupeTradeDecisionsForListView,
 } from "@/lib/dashboard/trade-decision-list";
+import {
+  clampPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -127,13 +133,18 @@ export type TradeDecisionsListViewProps = {
   parentExecutor?: { id: string; name: string };
   /** When false, omits the CRON_SECRET explainer (used on nested executor routes). */
   showCronBanner?: boolean;
+  paginationPathname: string;
+  page: number;
 };
 
 export async function TradeDecisionsListView({
   executorIdFilter,
   parentExecutor,
   showCronBanner = true,
+  paginationPathname,
+  page: pageRaw,
 }: TradeDecisionsListViewProps) {
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
@@ -152,14 +163,22 @@ export async function TradeDecisionsListView({
   const { data: rows, error } = await q;
 
   const raw = (rows ?? []) as DecisionRow[];
-  const list = buildTradeDecisionListViewRows(raw, DASHBOARD_LIST_VIEW_LIMIT);
+  const deduped = dedupeTradeDecisionsForListView(raw);
+  const totalCount = deduped.length;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+  const list = deduped.slice(from, to + 1);
 
   const marketIds = [...new Set(list.map((r) => r.market_id))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
-  const sortLineCore = `Approved first · bar close desc · one row per market · max ${DASHBOARD_LIST_VIEW_LIMIT} shown`;
+  const sortLineCore = `Approved first · bar close desc · one row per market · ${totalCount} ranked from last ${TRADE_DECISIONS_FETCH_POOL} rows · Page ${page} of ${pages}`;
+
+  const extraQuery: Record<string, string | undefined> = {};
+  if (executorIdFilter) extraQuery.executorId = executorIdFilter;
 
   return (
     <ListViewLayout>
@@ -180,9 +199,6 @@ export async function TradeDecisionsListView({
               <Link href="/signals" className={listViewOutlineActionClass}>
                 Signals
               </Link>
-              <Link href="/overview" className={listViewOutlineActionClass}>
-                Overview
-              </Link>
             </>
           }
         />
@@ -195,6 +211,15 @@ export async function TradeDecisionsListView({
             Zo kan niet iedereen op het internet achtergrondjobs starten.
           </Alert>
         ) : null}
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
+
         <Card>
           <CardBody className="!pt-0">
             <TableWrap>
@@ -268,6 +293,14 @@ export async function TradeDecisionsListView({
             </TableWrap>
           </CardBody>
         </Card>
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
       </div>
     </ListViewLayout>
   );

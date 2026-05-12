@@ -1,8 +1,10 @@
-import type { ExecutionModeValue, ExecutorAssetFilterMode } from "@/app/(app)/executors/actions";
+import type { ExecutorAssetFilterMode } from "@/app/(app)/executors/actions";
 import { ExecutorDetailBalanceActions } from "@/app/(app)/executors/[id]/executor-detail-balance-actions";
+import { ExecutorHistoricalRunPanel } from "@/app/(app)/executors/[id]/executor-historical-run-panel";
 import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/(app)/executors/[id]/executor-related-load";
 import { ExecutorEditDialog } from "@/app/(app)/executors/[id]/executor-edit-dialog";
-import type { AssetOption, ExchangeOption, ExecutorFormInitial } from "@/app/(app)/executors/executor-form";
+import type { AssetOption, ExchangeOption } from "@/app/(app)/executors/executor-form";
+import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
 import {
   DASHBOARD_LIST_VIEW_LIMIT,
@@ -30,6 +32,7 @@ import {
   RecordDetailGrid,
   RecordDetailSection,
   RecordRelatedList,
+  listViewOutlineActionClass,
 } from "@repo/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -185,6 +188,7 @@ function orderStatusClass(status: string): string {
 
 function executionModeLabel(m: string): string {
   if (m === "live") return "Live (Bitvavo — server API keys)";
+  if (m === "historical") return "Historical (backtest — paper only)";
   return "Paper (simulated fills)";
 }
 
@@ -223,7 +227,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .schema("trading")
     .from("executors")
     .select(
-      "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
+      "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -232,45 +236,12 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   if (exErr) return <Alert tone="error">{exErr.message}</Alert>;
   if (!ex) notFound();
 
-  const filterIds = (ex.filter_asset_ids as string[] | null) ?? [];
-
-  const slackTradeNotificationsEnabled =
-    (ex as { slack_trade_notifications_enabled?: boolean | null }).slack_trade_notifications_enabled !== false;
-
-  const exKey = String((ex as { exchange_api_key?: string | null }).exchange_api_key ?? "").trim();
-  const exSecret = String((ex as { exchange_api_secret?: string | null }).exchange_api_secret ?? "").trim();
-  const exchangeApiCredentialsConfigured = exKey.length > 0 && exSecret.length > 0;
-  const exchangeApiKeySuffix =
-    exKey.length >= 4 ? exKey.slice(-4) : exKey.length > 0 ? "****" : undefined;
-
-  const extraRaw = ex.mediator_rails_extra as unknown;
-  const mediator_rails_extra_json =
-    extraRaw != null && typeof extraRaw === "object" ? JSON.stringify(extraRaw, null, 2) : "{}";
-
-  const initial: ExecutorFormInitial = {
-    name: String(ex.name ?? ""),
-    enabled: Boolean(ex.enabled),
-    execution_mode: ex.execution_mode as ExecutionModeValue,
-    exchange_id: String(ex.exchange_id ?? ""),
-    asset_filter_mode: ex.asset_filter_mode as ExecutorAssetFilterMode,
-    filter_asset_ids: filterIds,
-    default_notional_eur: String(ex.default_notional_eur ?? "100"),
-    max_risk_per_trade: String(ex.max_risk_per_trade ?? "0.05"),
-    max_open_positions: String(ex.max_open_positions ?? "5"),
-    max_exposure_per_symbol_eur: String(ex.max_exposure_per_symbol_eur ?? "500"),
-    daily_loss_limit_eur: String(ex.daily_loss_limit_eur ?? "100"),
-    max_drawdown_eur: String(ex.max_drawdown_eur ?? "500"),
-    cooldown_after_losses: String(ex.cooldown_after_losses ?? "3"),
-    allow_add: Boolean(ex.allow_add),
-    profit_taking_enabled: Boolean(ex.profit_taking_enabled),
-    moving_floor_trail_pct: String(ex.moving_floor_trail_pct ?? "0.15"),
-    moving_floor_activation_profit_pct: String(ex.moving_floor_activation_profit_pct ?? "0.05"),
-    moving_floor_timeframe: String(ex.moving_floor_timeframe ?? "15m"),
-    mediator_rails_extra_json,
-    slack_trade_notifications_enabled: slackTradeNotificationsEnabled,
-    exchange_api_credentials_configured: exchangeApiCredentialsConfigured,
-    exchange_api_key_suffix: exchangeApiKeySuffix,
-  };
+  const initial = executorRowToFormInitial(ex);
+  const filterIds = initial.filter_asset_ids;
+  const slackTradeNotificationsEnabled = initial.slack_trade_notifications_enabled !== false;
+  const exchangeApiCredentialsConfigured = Boolean(initial.exchange_api_credentials_configured);
+  const exchangeApiKeySuffix = initial.exchange_api_key_suffix;
+  const mediator_rails_extra_json = initial.mediator_rails_extra_json;
 
   const ledgerFetchLimit = ledgerFull ? EXECUTOR_LEDGER_FULL_FETCH_CAP : RECORD_RELATED_LIST_PREVIEW_ROWS;
   const ledgerUiPreviewLimit = ledgerFull ? EXECUTOR_LEDGER_FULL_FETCH_CAP : RECORD_RELATED_LIST_PREVIEW_ROWS;
@@ -400,7 +371,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             highlights={
               <>
                 <Output label="Enabled" type="boolean" value={ex.enabled} />
-                <Output label="Execution mode" type="text" value={String(ex.execution_mode ?? "—")} />
+                <Output label="Execution mode" type="text" value={executionModeLabel(String(ex.execution_mode ?? ""))} />
                 <Output label="Slack trade fills" type="boolean" value={slackTradeNotificationsEnabled} />
                 <Output label="Exchange API credentials" type="boolean" value={exchangeApiCredentialsConfigured} />
                 <Output label="Orders (preview)" type="number" value={orderTotal} />
@@ -420,6 +391,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             }
             actions={
               <div className="flex flex-wrap items-center justify-end gap-2">
+                <Link href={`/executors/new?from=${encodeURIComponent(id)}`} className={listViewOutlineActionClass}>
+                  Clone
+                </Link>
                 <ExecutorDetailBalanceActions executorId={id} />
                 <ExecutorEditDialog executorId={id} assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={initial} />
               </div>
@@ -489,8 +463,33 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                       }
                       span="full"
                     />
+                    {String(ex.execution_mode) === "historical" ? (
+                      <>
+                        <Output
+                          label="Historical start (UTC date)"
+                          type="text"
+                          value={String((ex as { historical_start_date?: string | null }).historical_start_date ?? "—")}
+                        />
+                        <Output
+                          label="Historical end (UTC date)"
+                          type="text"
+                          value={String((ex as { historical_end_date?: string | null }).historical_end_date ?? "—")}
+                        />
+                      </>
+                    ) : null}
                   </RecordDetailGrid>
                 </RecordDetailSection>
+                {String(ex.execution_mode) === "historical" ? (
+                  <RecordDetailSection title="Historical backtest">
+                    <ExecutorHistoricalRunPanel
+                      executorId={id}
+                      equityEur={Number(rsRow?.equity_eur ?? 0)}
+                      historicalStartDate={(ex as { historical_start_date?: string | null }).historical_start_date ?? null}
+                      historicalEndDate={(ex as { historical_end_date?: string | null }).historical_end_date ?? null}
+                      enabled={Boolean(ex.enabled)}
+                    />
+                  </RecordDetailSection>
+                ) : null}
                 <RecordDetailSection title="Mediator / risk rails">
                   <RecordDetailGrid>
                     <Output label="Default order size (EUR)" type="text" value={fmtEur(ex.default_notional_eur)} />

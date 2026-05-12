@@ -28,10 +28,14 @@ export function uniqueTradeDecisionsByMarket<T extends { market_id: string }>(so
   return out;
 }
 
+export function dedupeTradeDecisionsForListView<T extends SortableDecision & { market_id: string }>(raw: T[]): T[] {
+  const sorted = [...raw].sort(compareTradeDecisionsListView);
+  return uniqueTradeDecisionsByMarket(sorted);
+}
+
 export function buildTradeDecisionListViewRows<T extends SortableDecision & { market_id: string }>(
   raw: T[],
   displayLimit: number = DASHBOARD_LIST_VIEW_LIMIT,
 ): T[] {
-  const sorted = [...raw].sort(compareTradeDecisionsListView);
-  return uniqueTradeDecisionsByMarket(sorted).slice(0, displayLimit);
+  return dedupeTradeDecisionsForListView(raw).slice(0, displayLimit);
 }

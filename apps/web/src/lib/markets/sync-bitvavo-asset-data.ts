@@ -148,3 +148,89 @@ export async function syncBitvavoAssetData(
     unmatchedSymbols,
   };
 }
+
+export type UpsertCatalogCryptoAssetsFromBitvavoResult = {
+  fetchedFromApi: number;
+  assetsUpserted: number;
+  inserted: number;
+  updated: number;
+};
+
+const UPSERT_CODES_CHUNK = 500;
+const UPSERT_ROWS_CHUNK = 200;
+
+/**
+ * Fetches Bitvavo `GET /v2/assets` and upserts every row into `catalog.assets` (`kind` = `crypto`):
+ * `code` = uppercase symbol, `name` from Bitvavo, `metadata.bitvavo` merged (preserves e.g. CoinGecko keys).
+ */
+export async function upsertCatalogCryptoAssetsFromBitvavo(
+  supabase: SupabaseClient,
+): Promise<UpsertCatalogCryptoAssetsFromBitvavoResult> {
+  let rows = await fetchBitvavoAssetsJson();
+  const uniqueBySymbol = new Map<string, BitvavoAssetDataRow>();
+  for (const r of rows) {
+    uniqueBySymbol.set(String(r.symbol).toUpperCase(), r);
+  }
+  rows = [...uniqueBySymbol.values()];
+
+  if (rows.length === 0) {
+    return { fetchedFromApi: 0, assetsUpserted: 0, inserted: 0, updated: 0 };
+  }
+
+  const codes = rows.map((r) => String(r.symbol).toUpperCase());
+  const codeToExistingMeta = new Map<string, unknown>();
+
+  for (let i = 0; i < codes.length; i += UPSERT_CODES_CHUNK) {
+    const slice = codes.slice(i, i + UPSERT_CODES_CHUNK);
+    const { data, error } = await supabase
+      .schema("catalog")
+      .from("assets")
+      .select("code, metadata")
+      .eq("kind", "crypto")
+      .in("code", slice);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+    for (const row of data ?? []) {
+      codeToExistingMeta.set(String(row.code).toUpperCase(), row.metadata);
+    }
+  }
+
+  let inserted = 0;
+  let updated = 0;
+  const upsertPayload = rows.map((row) => {
+    const code = String(row.symbol).toUpperCase();
+    if (codeToExistingMeta.has(code)) {
+      updated += 1;
+    } else {
+      inserted += 1;
+    }
+    const name =
+      typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : code;
+    const existingMeta = codeToExistingMeta.get(code);
+    return {
+      kind: "crypto" as const,
+      code,
+      name,
+      metadata: mergeAssetMetadata(existingMeta, row),
+    };
+  });
+
+  for (let i = 0; i < upsertPayload.length; i += UPSERT_ROWS_CHUNK) {
+    const chunk = upsertPayload.slice(i, i + UPSERT_ROWS_CHUNK);
+    const { error: upErr } = await supabase.schema("catalog").from("assets").upsert(chunk, {
+      onConflict: "kind,code",
+    });
+    if (upErr) {
+      throw new Error(upErr.message);
+    }
+  }
+
+  return {
+    fetchedFromApi: rows.length,
+    assetsUpserted: upsertPayload.length,
+    inserted,
+    updated,
+  };
+}

@@ -1,5 +1,12 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  parseListPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -13,14 +20,31 @@ import {
 } from "@repo/blocks";
 import Link from "next/link";
 
-export default async function SignalAgentsPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function SignalAgentsPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) ?? {};
+  const pageRaw = parseListPage(sp);
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
+
+  const { count: totalRaw, error: countError } = await supabase
+    .schema("trading")
+    .from("signal_agents")
+    .select("*", { count: "exact", head: true });
+  const totalCount = totalRaw ?? 0;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+
   const { data: rows, error } = await supabase
     .schema("trading")
     .from("signal_agents")
     .select("id, agent_id, enabled, version, description, created_at, updated_at")
     .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+    .range(from, to);
 
   const list = rows ?? [];
 
@@ -31,19 +55,17 @@ export default async function SignalAgentsPage() {
         title="Signal Agents"
         iconLetter="A"
         rowCount={list.length}
-        sortLine="Sorted by Created date"
+        sortLine={`Sorted by Created date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
         actions={
-          <>
-            <Link href="/signals" className={listViewOutlineActionClass}>
-              Signals
-            </Link>
-            <Link href="/overview" className={listViewOutlineActionClass}>
-              Overview
-            </Link>
-          </>
+          <Link href="/signals" className={listViewOutlineActionClass}>
+            Signals
+          </Link>
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
+
+      <ListViewPagination pathname="/signal-agents" page={page} pageSize={pageSize} totalCount={totalCount} />
+
       <Card>
         <CardBody className="!pt-0">
           <TableWrap>
@@ -89,6 +111,8 @@ export default async function SignalAgentsPage() {
           </TableWrap>
         </CardBody>
       </Card>
+
+      <ListViewPagination pathname="/signal-agents" page={page} pageSize={pageSize} totalCount={totalCount} />
     </div>
   );
 }

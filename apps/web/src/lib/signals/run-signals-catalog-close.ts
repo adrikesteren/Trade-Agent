@@ -27,6 +27,8 @@ export type SignalsCatalogCloseBody = {
   onlyMarketId?: string | null;
   /** When true, do not enqueue full-catalog mediator HTTP job after the last batch. */
   disableDownstreamEnqueue?: boolean;
+  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay for executor owner). */
+  signalUserIdsOverride?: string[] | null;
 };
 
 export type RunSignalsCatalogCloseResult = {
@@ -108,7 +110,8 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
   const onlyMarketId = body.onlyMarketId != null && String(body.onlyMarketId).trim() !== "" ? String(body.onlyMarketId).trim() : null;
   const disableDownstreamEnqueue = body.disableDownstreamEnqueue === true;
 
-  const configuredUserIds = parseSignalUserIdsFromEnv();
+  const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
+  const configuredUserIds = override?.length ? override : parseSignalUserIdsFromEnv();
   if (!configuredUserIds.length) {
     return {
       ok: true,

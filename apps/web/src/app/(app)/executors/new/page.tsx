@@ -1,4 +1,5 @@
-import { ExecutorForm, type AssetOption, type ExchangeOption } from "@/app/(app)/executors/executor-form";
+import { ExecutorForm, type AssetOption, type ExchangeOption, type ExecutorFormInitial } from "@/app/(app)/executors/executor-form";
+import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, PageHeader, Stack } from "@repo/blocks";
@@ -33,31 +34,78 @@ async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeO
   }));
 }
 
-export default async function NewExecutorPage() {
+function parseCloneFromParam(raw: string | string[] | undefined): string {
+  if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
+  return String(raw ?? "").trim();
+}
+
+type NewExecutorPageProps = {
+  searchParams?: Promise<{ from?: string | string[] }>;
+};
+
+export default async function NewExecutorPage({ searchParams }: NewExecutorPageProps) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [assetOptions, exchangeOptions] = await Promise.all([fetchAssetOptions(supabase), fetchExchangeOptions(supabase)]);
+  const sp = (await searchParams) ?? {};
+  const cloneFromId = parseCloneFromParam(sp.from);
+
+  const [assetOptions, exchangeOptions, cloneRow] = await Promise.all([
+    fetchAssetOptions(supabase),
+    fetchExchangeOptions(supabase),
+    cloneFromId
+      ? supabase
+          .schema("trading")
+          .from("executors")
+          .select(
+            "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
+          )
+          .eq("id", cloneFromId)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null as { message: string } | null }),
+  ]);
+
+  let cloneInitial: ExecutorFormInitial | undefined;
+  let cloneSourceName: string | undefined;
+  let cloneError: string | null = null;
+
+  if (cloneFromId) {
+    if (cloneRow.error) {
+      cloneError = cloneRow.error.message;
+    } else if (!cloneRow.data) {
+      cloneError = "Executor not found or you do not have access.";
+    } else {
+      const row = cloneRow.data;
+      cloneSourceName = String(row.name ?? "").trim() || "Executor";
+      const base = cloneSourceName;
+      const copyName = base ? `${base} (copy)` : "Executor (copy)";
+      cloneInitial = executorRowToFormInitial(row, { nameOverride: copyName });
+    }
+  }
+
+  const title = cloneInitial ? "Clone executor" : "New executor";
+  const subtitle = cloneInitial
+    ? `Settings copied from "${cloneSourceName ?? "executor"}". Exchange API keys are not copied — use paper mode or enter new keys for live. Balance and related records stay on the original.`
+    : "Create a portfolio with its own paper/live mode, optional asset whitelist or blacklist, then add EUR balance on the executor detail page.";
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader
-        title="New executor"
-        subtitle="Create a portfolio with its own paper/live mode, optional asset whitelist or blacklist, then add EUR balance on the executor detail page."
-      />
+      <PageHeader title={title} subtitle={subtitle} />
       <Stack gap="md">
         <p className="bk-text-muted text-sm">
           <Link href="/executors" className="bk-link">
             Back to executors
           </Link>
         </p>
+        {cloneError ? <Alert tone="error">{cloneError}</Alert> : null}
         {assetOptions.length === 0 ? (
           <Alert tone="warning">No catalog assets loaded yet; asset filters will be empty until assets exist.</Alert>
         ) : null}
-        <ExecutorForm mode="create" assetOptions={assetOptions} exchangeOptions={exchangeOptions} />
+        <ExecutorForm mode="create" assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={cloneInitial} />
       </Stack>
     </div>
   );

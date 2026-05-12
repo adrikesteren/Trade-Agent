@@ -50,6 +50,10 @@ export type ExecutorCatalogCloseBody = {
   onlyMarketId?: string | null;
   /** Reserved for API parity with signals/mediator (executor does not enqueue downstream jobs). */
   disableDownstreamEnqueue?: boolean;
+  /** When set, only this executor is evaluated (used for historical replay). */
+  onlyExecutorId?: string | null;
+  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay). */
+  signalUserIdsOverride?: string[] | null;
 };
 
 export type RunExecutorCatalogCloseResult = {
@@ -258,8 +262,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   const marketBatchSizeVal = Math.min(Math.max(body.marketBatchSize ?? marketBatchSize(), 1), 120);
   const closeTimeIso = body.closeTimeIso;
   const onlyMarketId = body.onlyMarketId != null && String(body.onlyMarketId).trim() !== "" ? String(body.onlyMarketId).trim() : null;
+  const onlyExecutorId =
+    body.onlyExecutorId != null && String(body.onlyExecutorId).trim() !== "" ? String(body.onlyExecutorId).trim() : null;
 
-  const userIds = parseSignalUserIdsFromEnv();
+  const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
+  const userIds = override?.length ? override : parseSignalUserIdsFromEnv();
   if (!userIds.length) {
     return {
       ok: true,
@@ -413,6 +420,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
 
       for (const ex of executors) {
+        if (ex.execution_mode === "historical" && (!onlyExecutorId || ex.id !== onlyExecutorId)) continue;
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
         if (String(ex.exchange_id) !== exchangeId) continue;
 
@@ -523,7 +531,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             });
             throw e;
           }
-          if (ex.slack_trade_notifications_enabled) {
+          if (ex.slack_trade_notifications_enabled && ex.execution_mode !== "historical") {
             await sendTradeFillSlack({
               source: "executor-catalog-close",
               side: "buy",
@@ -612,7 +620,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             });
             throw e;
           }
-          if (ex.slack_trade_notifications_enabled) {
+          if (ex.slack_trade_notifications_enabled && ex.execution_mode !== "historical") {
             await sendTradeFillSlack({
               source: "executor-catalog-close",
               side: "sell",
@@ -792,7 +800,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               } catch (ledgerErr) {
                 console.error(`${marketSymbol}: live fill ledger update failed`, ledgerErr);
               }
-              if (ex.slack_trade_notifications_enabled) {
+              if (ex.slack_trade_notifications_enabled && ex.execution_mode !== "historical") {
                 await sendTradeFillSlack({
                   source: "executor-catalog-close",
                   side: orderSide,

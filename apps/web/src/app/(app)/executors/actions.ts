@@ -15,7 +15,7 @@ function revalidateExecutorSurface(executorId: string) {
 }
 
 export type ExecutorAssetFilterMode = "all" | "whitelist" | "blacklist";
-export type ExecutionModeValue = "paper" | "live";
+export type ExecutionModeValue = "paper" | "live" | "historical";
 
 function parseFilterMode(raw: FormDataEntryValue | null): ExecutorAssetFilterMode {
   const s = String(raw ?? "").trim();
@@ -25,8 +25,29 @@ function parseFilterMode(raw: FormDataEntryValue | null): ExecutorAssetFilterMod
 
 function parseExecutionMode(raw: FormDataEntryValue | null): ExecutionModeValue {
   const s = String(raw ?? "").trim();
-  if (s === "live" || s === "paper") return s;
+  if (s === "live" || s === "paper" || s === "historical") return s;
   return "paper";
+}
+
+/** HTML date input (YYYY-MM-DD) → Postgres `date` string. */
+function parseHistoryDate(label: string, raw: FormDataEntryValue | null): string {
+  const s = String(raw ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error(`${label} must be a calendar date (YYYY-MM-DD).`);
+  }
+  return s;
+}
+
+async function assertExchangeIsBitvavo(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  exchangeId: string,
+): Promise<void> {
+  const { data, error } = await supabase.schema("catalog").from("exchanges").select("code").eq("id", exchangeId).maybeSingle();
+  if (error) throw new Error(error.message);
+  const code = String(data?.code ?? "").toLowerCase();
+  if (code !== "bitvavo") {
+    throw new Error("Historical execution mode requires the Bitvavo exchange.");
+  }
 }
 
 function parseAssetIds(formData: FormData): string[] {
@@ -141,16 +162,34 @@ export async function createExecutor(formData: FormData): Promise<void> {
     throw new Error("Confirm live trading before enabling live mode.");
   }
 
-  const asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
-  const filter_asset_ids = parseAssetIds(formData);
-  if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
+  let asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
+  let filter_asset_ids = parseAssetIds(formData);
+  if (execution_mode === "historical") {
+    await assertExchangeIsBitvavo(supabase, parseUuidLike("Exchange", formData.get("exchange_id")));
+    asset_filter_mode = "whitelist";
+    filter_asset_ids = parseAssetIds(formData);
+    if (filter_asset_ids.length !== 1) {
+      throw new Error("Historical mode requires exactly one asset in the whitelist.");
+    }
+  } else if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
     throw new Error("Pick at least one asset for whitelist or blacklist mode.");
   }
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
 
-  const slack_trade_notifications_enabled = formData.has("slack_trade_notifications_enabled");
+  let historical_start_date: string | null = null;
+  let historical_end_date: string | null = null;
+  if (execution_mode === "historical") {
+    historical_start_date = parseHistoryDate("Historical start date", formData.get("historical_start_date"));
+    historical_end_date = parseHistoryDate("Historical end date", formData.get("historical_end_date"));
+    if (historical_start_date > historical_end_date) {
+      throw new Error("Historical start date must be on or before the end date.");
+    }
+  }
+
+  const slack_trade_notifications_enabled =
+    execution_mode === "historical" ? false : formData.has("slack_trade_notifications_enabled");
 
   let exchange_api_key = String(formData.get("exchange_api_key") ?? "").trim();
   let exchange_api_secret = String(formData.get("exchange_api_secret") ?? "").trim();
@@ -175,6 +214,8 @@ export async function createExecutor(formData: FormData): Promise<void> {
       slack_trade_notifications_enabled,
       exchange_api_key,
       exchange_api_secret,
+      historical_start_date,
+      historical_end_date,
       ...rails,
     })
     .select("id")
@@ -257,15 +298,34 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
     throw new Error("Confirm live trading before enabling live mode.");
   }
 
-  const asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
-  const filter_asset_ids = parseAssetIds(formData);
-  if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
+  let asset_filter_mode = parseFilterMode(formData.get("asset_filter_mode"));
+  let filter_asset_ids = parseAssetIds(formData);
+  if (execution_mode === "historical") {
+    await assertExchangeIsBitvavo(supabase, parseUuidLike("Exchange", formData.get("exchange_id")));
+    asset_filter_mode = "whitelist";
+    filter_asset_ids = parseAssetIds(formData);
+    if (filter_asset_ids.length !== 1) {
+      throw new Error("Historical mode requires exactly one asset in the whitelist.");
+    }
+  } else if (asset_filter_mode !== "all" && filter_asset_ids.length === 0) {
     throw new Error("Pick at least one asset for whitelist or blacklist mode.");
   }
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
-  const slack_trade_notifications_enabled = formData.has("slack_trade_notifications_enabled");
+
+  let historical_start_date: string | null = null;
+  let historical_end_date: string | null = null;
+  if (execution_mode === "historical") {
+    historical_start_date = parseHistoryDate("Historical start date", formData.get("historical_start_date"));
+    historical_end_date = parseHistoryDate("Historical end date", formData.get("historical_end_date"));
+    if (historical_start_date > historical_end_date) {
+      throw new Error("Historical start date must be on or before the end date.");
+    }
+  }
+
+  const slack_trade_notifications_enabled =
+    execution_mode === "historical" ? false : formData.has("slack_trade_notifications_enabled");
 
   const { data: curRow, error: curErr } = await supabase
     .schema("trading")
@@ -305,6 +365,8 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       slack_trade_notifications_enabled,
       exchange_api_key,
       exchange_api_secret,
+      historical_start_date,
+      historical_end_date,
       ...rails,
     })
     .eq("id", executorId)

@@ -1,5 +1,11 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
+import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import {
+  clampPage,
+  rangeForPage,
+  totalPages,
+} from "@/lib/dashboard/list-pagination";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@repo/blocks";
@@ -31,16 +37,35 @@ async function fetchExecutorNamesById(
 export type PositionsListViewProps = {
   executorIdFilter: string | null;
   parentExecutor?: { id: string; name: string };
+  paginationPathname: string;
+  page: number;
 };
 
-export async function PositionsListView({ executorIdFilter, parentExecutor }: PositionsListViewProps) {
+export async function PositionsListView({
+  executorIdFilter,
+  parentExecutor,
+  paginationPathname,
+  page: pageRaw,
+}: PositionsListViewProps) {
+  const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
+
+  let countQ = supabase.schema("trading").from("positions").select("*", { count: "exact", head: true });
+  if (executorIdFilter) {
+    countQ = countQ.eq("executor_id", executorIdFilter);
+  }
+  const { count: totalRaw, error: countError } = await countQ;
+  const totalCount = totalRaw ?? 0;
+  const pages = totalPages(totalCount, pageSize);
+  const page = clampPage(pageRaw, pages);
+  const { from, to } = rangeForPage(page, pageSize);
+
   let q = supabase
     .schema("trading")
     .from("positions")
     .select("id, user_id, executor_id, market_id, quantity, avg_price, paper, updated_at")
     .order("updated_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+    .range(from, to);
   if (executorIdFilter) {
     q = q.eq("executor_id", executorIdFilter);
   }
@@ -49,6 +74,9 @@ export async function PositionsListView({ executorIdFilter, parentExecutor }: Po
   const list = rows ?? [];
   const executorIds = [...new Set((list as { executor_id?: string }[]).map((r) => r.executor_id).filter(Boolean))] as string[];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
+
+  const extraQuery: Record<string, string | undefined> = {};
+  if (executorIdFilter) extraQuery.executorId = executorIdFilter;
 
   return (
     <ListViewLayout>
@@ -60,8 +88,8 @@ export async function PositionsListView({ executorIdFilter, parentExecutor }: Po
           rowCount={list.length}
           sortLine={
             executorIdFilter
-              ? "Filtered by executor · sorted by updated date (newest first)"
-              : "Sorted by updated date (newest first)"
+              ? `Filtered by executor · sorted by updated date (newest first) · Page ${page} of ${pages} · ${totalCount} total`
+              : `Sorted by updated date (newest first) · Page ${page} of ${pages} · ${totalCount} total`
           }
           actions={
             parentExecutor ? (
@@ -72,6 +100,16 @@ export async function PositionsListView({ executorIdFilter, parentExecutor }: Po
           }
         />
         {error ? <Alert tone="error">{error.message}</Alert> : null}
+        {countError ? <Alert tone="error">{countError.message}</Alert> : null}
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
+
         <Card>
           <CardBody>
             <pre className="bk-pre">
@@ -87,6 +125,14 @@ export async function PositionsListView({ executorIdFilter, parentExecutor }: Po
             </pre>
           </CardBody>
         </Card>
+
+        <ListViewPagination
+          pathname={paginationPathname}
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          extraQuery={extraQuery}
+        />
       </div>
     </ListViewLayout>
   );

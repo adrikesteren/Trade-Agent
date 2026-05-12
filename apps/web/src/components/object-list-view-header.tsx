@@ -3,9 +3,7 @@ import {
   ListViewPlaceholderToolbar,
   ListViewTitlePickerPlaceholder,
   PageHeader,
-  listViewOutlineActionClass,
 } from "@repo/blocks";
-import Link from "next/link";
 import type { ReactNode } from "react";
 
 export type ObjectListViewHeaderProps = {
@@ -55,13 +53,7 @@ export function ObjectListViewHeader({
       titleAddon={<ListViewTitlePickerPlaceholder />}
       summary={summary}
       toolbar={<ListViewPlaceholderToolbar />}
-      actions={
-        actions ?? (
-          <Link href="/overview" className={listViewOutlineActionClass}>
-            Overview
-          </Link>
-        )
-      }
+      actions={actions}
     />
   );
 }
