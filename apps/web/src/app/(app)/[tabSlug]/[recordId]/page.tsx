@@ -1,5 +1,5 @@
 import { LogsDetailView } from "@/app/(app)/object-tab-views/logs-detail-view";
-import { getObjectMetadataBySlug } from "@/lib/schema/object-registry";
+import { getObjectMetadataBySlug } from "@/models/registry";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ tabSlug: string; recordId: string }> };

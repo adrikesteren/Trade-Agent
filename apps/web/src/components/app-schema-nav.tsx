@@ -8,7 +8,7 @@ import {
   menuTriggerPlainClass,
 } from "@repo/adricore/blocks";
 import { getTabHref } from "@repo/adricore/platform";
-import type { TabMetadata } from "@/models/types";
+import type { TabMetadata } from "@repo/adricore/metadata";
 import Link from "next/link";
 
 type NavBlock =
