@@ -10,6 +10,7 @@ import { ConnectorsModel } from "./connectors";
 import { ExchangeAssetsModel } from "./exchange-assets";
 import { ExchangeCandlesModel } from "./exchange-candles";
 import { ExchangesModel } from "./exchanges";
+import { MarketsModel } from "./markets";
 import { LogsModel } from "./logs";
 import { SystemSettingsModel } from "./system-settings";
 import { TasksModel } from "./tasks";
@@ -52,6 +53,7 @@ const models = [
   new ExchangeAssetsModel(),
   new ExchangeCandlesModel(),
   new ExchangesModel(),
+  new MarketsModel(),
   new LogsModel(),
   new SystemSettingsModel(),
   new TasksModel(),

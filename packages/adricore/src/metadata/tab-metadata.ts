@@ -31,10 +31,10 @@ export class ObjectTabMetadata extends TabMetadata {
   public readonly object: ObjectMetadata;
 
   constructor(object: ObjectMetadata, section?: string, order?: number) {
-    super(object?.icon, section, order);
     if (!object) {
       throw new ObjectIsRequiredException();
     }
+    super(object.icon, section, order);
     this.object = object;
   }
 
