@@ -1,5 +1,5 @@
 import { AppHeaderActions } from "@/components/app-header-actions";
-import { AppSchemaNav } from "@/components/app-schema-nav";
+import { AppSchemaNav, type TabInfo } from "@/components/app-schema-nav";
 import { AppShellAppSwitcher } from "@/components/app-shell-app-switcher";
 import { listDashboardAppSwitchOptions } from "@/config/app-shell";
 import { getDashboardActiveApp } from "@/lib/shell/get-dashboard-active-app";
@@ -22,6 +22,15 @@ export default async function AppLayout({
   const { appId, app } = await getDashboardActiveApp();
   const appSwitchOptions = listDashboardAppSwitchOptions();
 
+  const tabInfos: TabInfo[] = app.tabs.map(tab => ({
+    slug: tab.getApiName(),
+    label: tab.getLabel(),
+    href: tab.getHref(),
+    target: tab.getTarget(),
+    section: tab.section,
+    order: tab.order,
+  }));
+
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
       <AppShell className="min-h-0 flex-1 overflow-hidden">
@@ -34,7 +43,7 @@ export default async function AppLayout({
           nav={
             <div className="flex flex-wrap items-center gap-3">
               <AppShellAppSwitcher options={appSwitchOptions} currentId={appId} />
-              <AppSchemaNav tabs={app.tabs} />
+              <AppSchemaNav tabs={tabInfos} />
             </div>
           }
           actions={<AppHeaderActions />}

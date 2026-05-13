@@ -7,14 +7,22 @@ import {
   DropdownMenuTrigger,
   menuTriggerPlainClass,
 } from "@repo/adricore/blocks";
-import type { TabMetadata } from "@repo/adricore/metadata";
 import Link from "next/link";
 
-type NavBlock =
-  | { kind: "link"; tab: TabMetadata }
-  | { kind: "dropdown"; section: string; tabs: TabMetadata[] };
+export type TabInfo = {
+  slug: string;
+  label: string;
+  href: string;
+  target?: string;
+  section?: string;
+  order?: number;
+};
 
-function buildNavBlocks(tabs: TabMetadata[]): NavBlock[] {
+type NavBlock =
+  | { kind: "link"; tab: TabInfo }
+  | { kind: "dropdown"; section: string; tabs: TabInfo[] };
+
+function buildNavBlocks(tabs: TabInfo[]): NavBlock[] {
   const sorted = [...tabs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const blocks: NavBlock[] = [];
   for (const tab of sorted) {
@@ -33,7 +41,7 @@ function buildNavBlocks(tabs: TabMetadata[]): NavBlock[] {
 }
 
 export type AppSchemaNavProps = {
-  tabs: TabMetadata[];
+  tabs: TabInfo[];
 };
 
 export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
@@ -44,8 +52,8 @@ export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
       {blocks.map((block, i) => {
         if (block.kind === "link") {
           return (
-              <Link key={`${block.tab.slug}-${i}`} href={block.tab.getHref()} className={menuTriggerPlainClass} target={block.tab.getTarget()}>
-                {block.tab.getLabel()}
+              <Link key={`${block.tab.slug}-${i}`} href={block.tab.href} className={menuTriggerPlainClass} target={block.tab.target}>
+                {block.tab.label}
               </Link>
           );
         }
@@ -55,7 +63,7 @@ export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
             <DropdownMenuContent align="start">
               {block.tabs.map((tab) => (
                 <DropdownMenuItem key={tab.slug} asChild>
-                  <Link href={tab.getHref()} target={tab.getTarget()}>{tab.getLabel()}</Link>
+                  <Link href={tab.href} target={tab.target}>{tab.label}</Link>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
