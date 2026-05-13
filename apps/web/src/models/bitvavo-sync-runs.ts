@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class BitvavoSyncRunsModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class BitvavoSyncRunsModel extends ObjectMetadata {
       "public",
       "bitvavo_sync_runs",
       "bitvavo_sync_runs",
-      new ObjectLabelMetadata("Bitvavo Sync Run", "Bitvavo Sync Runs")
+      new ObjectLabelMetadata("Bitvavo Sync Run", "Bitvavo Sync Runs"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata, ObjectRelationshipMetadata, ObjectRelationshipReferenceTypes, ObjectFieldDataTypes, ObjectFieldMetadata } from "@repo/adricore/metadata";
 import { objectRegistry } from "./registry";
 
@@ -7,7 +8,8 @@ export class ExecutorsModel extends ObjectMetadata {
       "trading",
       "executors",
       "executors",
-      new ObjectLabelMetadata("Executor", "Executors")
+      new ObjectLabelMetadata("Executor", "Executors"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 

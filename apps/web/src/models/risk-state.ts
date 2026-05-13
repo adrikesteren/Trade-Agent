@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class RiskStateModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class RiskStateModel extends ObjectMetadata {
       "trading",
       "risk_state",
       "risk_state",
-      new ObjectLabelMetadata("Risk State", "Risk States")
+      new ObjectLabelMetadata("Risk State", "Risk States"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

@@ -1,18 +1,89 @@
-/**
- * Shell navigation item (Salesforce-style app tab / navigation menu item).
- * Parent context lives on `AppMetadata`, not on each tab.
- */
-export type TabMetadata = {
-  /** Stable id for keys and routing, e.g. first URL segment */
-  slug: string;
-  label: string;
-  order?: number;
-  icon?: string;
-  /** Internal path (e.g. `/overview`) or external URL when prefixed accordingly */
-  href?: string;
-  /**
-   * Optional shell grouping: consecutive tabs with the same `section` render inside one dropdown
-   * (see `AppSchemaNav`).
-   */
-  section?: string;
-};
+import { AdriObjectMetadata } from "./adri-object-metadata";
+import { AdriRoutable, RouteMetadata } from "./route-metadata";
+import { IconMetadata } from "./icon-metadata";
+import { ObjectMetadata } from "./object-metadata";
+import { IconIsRequiredException, ObjectIsRequiredException, ApiNameIsRequiredException, RouteIsRequiredException } from "./exceptions";
+
+export abstract class TabMetadata implements AdriRoutable, AdriObjectMetadata {
+  public readonly icon: IconMetadata;
+  public readonly section?: string;
+  public readonly order?: number;
+
+  constructor(icon: IconMetadata, section?: string, order?: number) {
+    if (!icon) {
+      throw new IconIsRequiredException();
+    }
+    this.icon = icon;
+    this.section = section;
+    this.order = order;
+  }
+
+  public abstract getApiName(): string;
+  public abstract getLabel(): string;
+  public abstract getHref(): string;
+  public abstract getTarget(): string | undefined;
+
+  // We add this for backwards compatibility with UI mapping
+  get slug() { return this.getApiName(); }
+}
+
+export class ObjectTabMetadata extends TabMetadata {
+  public readonly object: ObjectMetadata;
+
+  constructor(object: ObjectMetadata, section?: string, order?: number) {
+    super(object?.icon, section, order);
+    if (!object) {
+      throw new ObjectIsRequiredException();
+    }
+    this.object = object;
+  }
+
+  public getApiName(): string {
+    return this.object.apiName;
+  }
+
+  public getLabel(): string {
+    return this.object.label.plural;
+  }
+
+  public getHref(): string {
+    // Note: the original getHref returns `/${slug}` usually. We use `/${apiName}`.
+    return `/${this.object.getApiName()}`;
+  }
+
+  public getTarget(): string | undefined {
+    return undefined;
+  }
+}
+
+export class RouteTabMetadata extends TabMetadata {
+  public readonly apiName: string;
+  public readonly route: RouteMetadata;
+
+  constructor(apiName: string, route: RouteMetadata, section?: string, order?: number) {
+    super(route?.icon, section, order);
+    if (!apiName || apiName.trim() === "") {
+      throw new ApiNameIsRequiredException();
+    } else if (!route) {
+      throw new RouteIsRequiredException();
+    }
+    this.apiName = apiName;
+    this.route = route;
+  }
+
+  public getApiName(): string {
+    return this.apiName;
+  }
+
+  public getLabel(): string {
+    return this.route.getLabel();
+  }
+
+  public getHref(): string {
+    return this.route.getHref();
+  }
+
+  public getTarget(): string | undefined {
+    return this.route.getTarget();
+  }
+}

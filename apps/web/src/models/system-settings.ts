@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class SystemSettingsModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class SystemSettingsModel extends ObjectMetadata {
       "public",
       "system_settings",
       "system_settings",
-      new ObjectLabelMetadata("System Setting", "System Settings")
+      new ObjectLabelMetadata("System Setting", "System Settings"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

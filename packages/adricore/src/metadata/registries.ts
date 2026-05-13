@@ -2,6 +2,9 @@ import type { AdriObjectMetadata } from "./adri-object-metadata";
 import type { ObjectMetadata } from "./object-metadata";
 import type { ObjectRelationshipMetadata } from "./object-relationship-metadata";
 import type { ObjectFieldMetadata } from "./object-field-metadata";
+import type { IconMetadata } from "./icon-metadata";
+import type { TabMetadata } from "./tab-metadata";
+import type { AppMetadata } from "./app-metadata";
 import { SourceObjectIsRequiredException } from "./exceptions";
 
 export abstract class AdriObjectRegistry<T extends AdriObjectMetadata> {
@@ -59,5 +62,23 @@ export class ObjectFieldMetadataRegistry extends AdriObjectRegistry<ObjectFieldM
     }
     
     return clonedRegistry;
+  }
+}
+
+export class IconMetadataRegistry extends AdriObjectRegistry<IconMetadata> {
+  constructor(icons?: IconMetadata[]) {
+    super(icons);
+  }
+}
+
+export class TabMetadataRegistry extends AdriObjectRegistry<TabMetadata> {
+  constructor(tabs?: TabMetadata[]) {
+    super(tabs);
+  }
+}
+
+export class AppMetadataRegistry extends AdriObjectRegistry<AppMetadata> {
+  constructor(apps?: AppMetadata[]) {
+    super(apps);
   }
 }

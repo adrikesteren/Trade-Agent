@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class WalletTransactionsModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class WalletTransactionsModel extends ObjectMetadata {
       "trading",
       "wallet_transactions",
       "wallet_transactions",
-      new ObjectLabelMetadata("Wallet Transaction", "Wallet Transactions")
+      new ObjectLabelMetadata("Wallet Transaction", "Wallet Transactions"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

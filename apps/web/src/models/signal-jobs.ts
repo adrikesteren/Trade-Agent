@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class SignalJobsModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class SignalJobsModel extends ObjectMetadata {
       "automation",
       "signal_jobs",
       "signal_jobs",
-      new ObjectLabelMetadata("Signal Job", "Signal Jobs")
+      new ObjectLabelMetadata("Signal Job", "Signal Jobs"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

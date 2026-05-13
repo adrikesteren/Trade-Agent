@@ -1,62 +1,59 @@
-import type { AppMetadata } from "@repo/adricore/metadata";
-import { DEFAULT_APP_ID } from "@repo/adricore/metadata";
-import { getTabBySlug as resolveTabInApp } from "@repo/adricore/platform";
+import { AppMetadataRegistry, AppMetadata, TabMetadataRegistry, ObjectTabMetadata, RouteTabMetadata, RouteMetadata, DEFAULT_APP_ID, ACTIVE_APP_COOKIE_NAME } from "@repo/adricore/metadata";
+import { objectRegistry } from "../models/registry";
+import { iconRegistry } from "../models/icons";
 
 /**
  * Trade Agent dashboard: all shell apps (`AppMetadata` per registry key).
  * Cookie `ACTIVE_APP_COOKIE_NAME` selects which entry is active; invalid/missing → `DEFAULT_APP_ID`.
  */
-export const appRegistry = {
-  [DEFAULT_APP_ID]: {
-    label: "Full workspace",
-    tabs: [
-      { slug: "overview", label: "Overview", href: "/overview", order: 0 },
-      { slug: "preferences", label: "Preferences", href: "/me/preferences", order: 1 },
-      { slug: "assets", label: "Assets", href: "/assets", order: 10, section: "Catalog" },
-      { slug: "markets", label: "Markets", href: "/markets", order: 11, section: "Catalog" },
-      { slug: "exchanges", label: "Exchanges", href: "/exchanges", order: 12, section: "Catalog" },
-      { slug: "signals", label: "Signals", href: "/signals", order: 20, section: "Trading" },
-      { slug: "signal-agents", label: "Signal Agents", href: "/signal-agents", order: 21, section: "Trading" },
-      { slug: "executors", label: "Executors", href: "/executors", order: 22, section: "Trading" },
-      { slug: "tasks", label: "Tasks", href: "/tasks", order: 30 },
-      { slug: "system-settings", label: "System settings", href: "/system-settings", order: 40 },
-    ],
-  },
-  "catalog-focus": {
-    label: "Catalog",
-    tabs: [
-      { slug: "overview", label: "Overview", href: "/overview", order: 0 },
-      { slug: "preferences", label: "Preferences", href: "/me/preferences", order: 1 },
-      { slug: "assets", label: "Assets", href: "/assets", order: 10, section: "Catalog" },
-      { slug: "markets", label: "Markets", href: "/markets", order: 11, section: "Catalog" },
-      { slug: "exchanges", label: "Exchanges", href: "/exchanges", order: 12, section: "Catalog" },
-    ],
-  },
-} satisfies Record<string, AppMetadata>;
 
-export type DashboardAppId = keyof typeof appRegistry;
+export const tabRegistry = new TabMetadataRegistry([
+  new ObjectTabMetadata(objectRegistry.registrations.get("overview") || objectRegistry.registrations.get("assets")!, undefined, 0), // Will use external RouteTabMetadata later if Overview is just a route
+  // For now we map standard objects to tabs:
+  new RouteTabMetadata("overview", new RouteMetadata(iconRegistry.registrations.get("Activity")!, "/overview", "Overview"), undefined, 0),
+  new RouteTabMetadata("preferences", new RouteMetadata(iconRegistry.registrations.get("Settings")!, "/me/preferences", "Preferences"), undefined, 1),
+  new ObjectTabMetadata(objectRegistry.registrations.get("assets")!, "Catalog", 10),
+  new ObjectTabMetadata(objectRegistry.registrations.get("markets")!, "Catalog", 11),
+  new ObjectTabMetadata(objectRegistry.registrations.get("exchanges")!, "Catalog", 12),
+  new ObjectTabMetadata(objectRegistry.registrations.get("signals")!, "Trading", 20),
+  new ObjectTabMetadata(objectRegistry.registrations.get("signal_agents")!, "Trading", 21),
+  new ObjectTabMetadata(objectRegistry.registrations.get("executors")!, "Trading", 22),
+  new ObjectTabMetadata(objectRegistry.registrations.get("tasks")!, undefined, 30),
+  new ObjectTabMetadata(objectRegistry.registrations.get("system_settings")!, undefined, 40)
+]);
+
+export const appRegistry = new AppMetadataRegistry([
+  new AppMetadata(DEFAULT_APP_ID, "Full workspace", new TabMetadataRegistry(Array.from(tabRegistry.registrations.values()))),
+  new AppMetadata("catalog-focus", "Catalog", new TabMetadataRegistry([
+    tabRegistry.registrations.get("overview")!,
+    tabRegistry.registrations.get("preferences")!,
+    tabRegistry.registrations.get("assets")!,
+    tabRegistry.registrations.get("markets")!,
+    tabRegistry.registrations.get("exchanges")!
+  ]))
+]);
+
+export type DashboardAppId = typeof DEFAULT_APP_ID | "catalog-focus";
 
 export function resolveActiveAppId(cookieValue: string | undefined): DashboardAppId {
-  if (cookieValue && Object.hasOwn(appRegistry, cookieValue)) {
+  if (cookieValue && appRegistry.registrations.has(cookieValue)) {
     return cookieValue as DashboardAppId;
   }
   return DEFAULT_APP_ID;
 }
 
 export function getActiveAppMetadata(appId: string): AppMetadata {
-  if (Object.hasOwn(appRegistry, appId)) {
-    return appRegistry[appId as DashboardAppId];
-  }
-  return appRegistry[DEFAULT_APP_ID];
+  return appRegistry.registrations.get(appId) || appRegistry.registrations.get(DEFAULT_APP_ID)!;
 }
 
 export function listDashboardAppSwitchOptions(): { id: DashboardAppId; label: string }[] {
-  return (Object.keys(appRegistry) as DashboardAppId[]).map((id) => ({
-    id,
-    label: appRegistry[id].label ?? id,
+  return Array.from(appRegistry.registrations.values()).map((app) => ({
+    id: app.getApiName() as DashboardAppId,
+    label: app.label,
   }));
 }
 
 export function getTabBySlug(app: AppMetadata, segment: string) {
-  return resolveTabInApp(app, segment);
+  // Using apiName as slug identifier
+  return app.tabRegistry.registrations.get(segment);
 }

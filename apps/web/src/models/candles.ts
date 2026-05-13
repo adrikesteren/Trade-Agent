@@ -1,3 +1,4 @@
+import { iconRegistry } from "./icons";
 import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
 
 export class CandlesModel extends ObjectMetadata {
@@ -6,7 +7,8 @@ export class CandlesModel extends ObjectMetadata {
       "public",
       "candles",
       "candles",
-      new ObjectLabelMetadata("Candle", "Candles")
+      new ObjectLabelMetadata("Candle", "Candles"),
+      iconRegistry.registrations.get("Database")!
     );
   }
 }

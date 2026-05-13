@@ -1,12 +1,14 @@
 import { AdriObjectMetadata } from "./adri-object-metadata";
 import { ObjectLabelMetadata } from "./object-label-metadata";
+import { IconMetadata } from "./icon-metadata";
 import { ObjectFieldMetadataRegistry, ObjectRelationshipMetadataRegistry } from "./registries";
 import { standardObjectFieldRegistry } from "./standard-fields";
 import { 
   SchemaIsRequiredException, 
   TableIsRequiredException, 
   ApiNameIsRequiredException, 
-  LabelIsRequiredException 
+  LabelIsRequiredException,
+  IconIsRequiredException
 } from "./exceptions";
 
 /** NameFieldSpec kept for backwards compatibility with UI */
@@ -19,6 +21,7 @@ export abstract class ObjectMetadata implements AdriObjectMetadata {
   public readonly table: string;
   public readonly apiName: string;
   public readonly label: ObjectLabelMetadata;
+  public readonly icon: IconMetadata;
   public readonly fieldRegistry: ObjectFieldMetadataRegistry;
   public readonly childRelationships: ObjectRelationshipMetadataRegistry = new ObjectRelationshipMetadataRegistry();
 
@@ -33,7 +36,8 @@ export abstract class ObjectMetadata implements AdriObjectMetadata {
     schema: string, 
     table: string, 
     apiName: string, 
-    label: ObjectLabelMetadata
+    label: ObjectLabelMetadata,
+    icon: IconMetadata
   ) {
     if (!schema || schema.trim() === "") {
       throw new SchemaIsRequiredException();
@@ -43,12 +47,15 @@ export abstract class ObjectMetadata implements AdriObjectMetadata {
       throw new ApiNameIsRequiredException();
     } else if (!label) {
       throw new LabelIsRequiredException();
+    } else if (!icon) {
+      throw new IconIsRequiredException();
     }
     
     this.schema = schema;
     this.table = table;
     this.apiName = apiName;
     this.label = label;
+    this.icon = icon;
     
     // Default fallback for slug/idColumn based on apiName
     this.slug = apiName;

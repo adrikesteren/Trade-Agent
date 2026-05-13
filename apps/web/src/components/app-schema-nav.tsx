@@ -7,7 +7,6 @@ import {
   DropdownMenuTrigger,
   menuTriggerPlainClass,
 } from "@repo/adricore/blocks";
-import { getTabHref } from "@repo/adricore/platform";
 import type { TabMetadata } from "@repo/adricore/metadata";
 import Link from "next/link";
 
@@ -44,11 +43,10 @@ export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
     <nav className="flex flex-wrap items-center gap-3 text-xs">
       {blocks.map((block, i) => {
         if (block.kind === "link") {
-          const href = getTabHref(block.tab);
           return (
-            <Link key={`${block.tab.slug}-${i}`} href={href} className={menuTriggerPlainClass}>
-              {block.tab.label}
-            </Link>
+              <Link key={`${block.tab.slug}-${i}`} href={block.tab.getHref()} className={menuTriggerPlainClass} target={block.tab.getTarget()}>
+                {block.tab.getLabel()}
+              </Link>
           );
         }
         return (
@@ -57,7 +55,7 @@ export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
             <DropdownMenuContent align="start">
               {block.tabs.map((tab) => (
                 <DropdownMenuItem key={tab.slug} asChild>
-                  <Link href={getTabHref(tab)}>{tab.label}</Link>
+                  <Link href={tab.getHref()} target={tab.getTarget()}>{tab.getLabel()}</Link>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

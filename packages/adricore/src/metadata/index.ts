@@ -1,10 +1,12 @@
 export {
   ACTIVE_APP_COOKIE_NAME,
   DEFAULT_APP_ID,
-  type AppMetadata,
 } from "./app-metadata";
 
-export type { TabMetadata } from "./tab-metadata";
+export * from "./app-metadata";
+export * from "./tab-metadata";
+export * from "./route-metadata";
+export * from "./icon-metadata";
 
 // OOP Metadata Core
 export * from "./exceptions";

@@ -102,3 +102,38 @@ export class SlugIsRequiredException extends Error {
     this.name = "SlugIsRequiredException";
   }
 }
+
+export class IconIsRequiredException extends Error {
+  constructor(message = "Icon is required.") {
+    super(message);
+    this.name = "IconIsRequiredException";
+  }
+}
+
+export class ObjectIsRequiredException extends Error {
+  constructor(message = "Object is required.") {
+    super(message);
+    this.name = "ObjectIsRequiredException";
+  }
+}
+
+export class HrefIsRequiredException extends Error {
+  constructor(message = "Href is required.") {
+    super(message);
+    this.name = "HrefIsRequiredException";
+  }
+}
+
+export class RouteIsRequiredException extends Error {
+  constructor(message = "Route is required.") {
+    super(message);
+    this.name = "RouteIsRequiredException";
+  }
+}
+
+export class TabIsRequiredException extends Error {
+  constructor(message = "Tab is required.") {
+    super(message);
+    this.name = "TabIsRequiredException";
+  }
+}
