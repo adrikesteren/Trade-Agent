@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
+
 /** Bitvavo pairs use `BASE-QUOTE` (e.g. ETH-BTC, FUN-EUR). */
 export function parseMarketSymbol(marketSymbol: string): { base: string; quote: string } {
   const i = marketSymbol.lastIndexOf("-");
@@ -12,14 +14,16 @@ export function parseMarketSymbol(marketSymbol: string): { base: string; quote: 
   };
 }
 
+export type EnsureMarketResult =
+  | { ok: true; marketId: string; exchangeId: string; assetId: string }
+  | { ok: false; reason: "missing_quote_asset"; exchangeId: string; quote: string };
+
 /**
  * Ensure a row exists in `assets` + `markets` for this exchange listing (one tradable pair).
  * Idempotent; safe for ingest and sync.
+ * Skips creating a market when `quote` has no matching `catalog.assets` row (fiat ISO vs crypto code).
  */
-export async function ensureMarket(
-  supabase: SupabaseClient,
-  params: { exchangeCode: string; marketSymbol: string },
-): Promise<{ marketId: string; exchangeId: string; assetId: string }> {
+export async function ensureMarket(supabase: SupabaseClient, params: { exchangeCode: string; marketSymbol: string }): Promise<EnsureMarketResult> {
   const market = params.marketSymbol.toUpperCase();
   const { base, quote } = parseMarketSymbol(market);
 
@@ -46,10 +50,16 @@ export async function ensureMarket(
 
   if (existing) {
     return {
+      ok: true,
       marketId: existing.id as string,
       exchangeId,
       assetId: existing.asset_id as string,
     };
+  }
+
+  const quoteAssetId = await resolveQuoteAssetId(supabase, quote);
+  if (!quoteAssetId) {
+    return { ok: false, reason: "missing_quote_asset", exchangeId, quote };
   }
 
   const { data: assetRow, error: assetErr } = await supabase
@@ -81,7 +91,7 @@ export async function ensureMarket(
         exchange_id: exchangeId,
         asset_id: assetId,
         market_symbol: market,
-        quote_code: quote,
+        quote_asset_id: quoteAssetId,
         status: "trading",
         metadata: {},
       },
@@ -104,5 +114,5 @@ export async function ensureMarket(
     /* non-fatal: listing exists; candles can be filled by the EUR sweep */
   }
 
-  return { marketId, exchangeId, assetId };
+  return { ok: true, marketId, exchangeId, assetId };
 }

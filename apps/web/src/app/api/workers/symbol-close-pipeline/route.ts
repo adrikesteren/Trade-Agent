@@ -31,8 +31,8 @@ async function handle(request: Request, rawBody: string): Promise<Response> {
   if (!(await verifyScheduledWorker(request, rawBody))) {
     const devHint =
       process.env.NODE_ENV === "development"
-        ? "Use Authorization: Bearer CRON_SECRET."
-        : "Invalid or missing worker auth (Bearer CRON_SECRET).";
+        ? "Use Authorization: Bearer <secret> matching public.system_settings key cron_secret (JSON string) or CRON_SECRET env."
+        : "Invalid or missing worker auth (Bearer must match cron_secret in public.system_settings or CRON_SECRET env).";
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 

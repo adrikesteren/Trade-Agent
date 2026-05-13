@@ -20,7 +20,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { Button, Card, CardBody } from "@repo/blocks";
+import { Button, Card, CardBody } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -224,6 +224,7 @@ export function MarketCandleChart({
       decimal_format: decimalFormat,
       date_format: dateFormat,
       time_format: timeFormat,
+      primary_asset: null,
     }),
     [userTimezone, decimalFormat, dateFormat, timeFormat],
   );

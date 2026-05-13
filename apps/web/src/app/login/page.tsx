@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { Alert, Button, FormElement, Input, PageHeader, Stack } from "@repo/blocks";
+import { Alert, Button, FormElement, Input, PageHeader, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useId, useState } from "react";

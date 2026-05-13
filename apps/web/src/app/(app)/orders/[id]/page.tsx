@@ -1,5 +1,7 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -12,7 +14,7 @@ import {
   RecordDetailGrid,
   RecordDetailSection,
   RecordRelatedList,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -21,6 +23,7 @@ type OrderDetail = {
   id: string;
   decision_id: string | null;
   executor_id: string;
+  /** Resolved via `decisions → signals → candles` */
   market_id: string;
   side: string;
   quantity: string | number | null;
@@ -31,6 +34,52 @@ type OrderDetail = {
   created_at: string;
   updated_at: string | null;
 };
+
+type OrderRowDb = {
+  id: string;
+  decision_id: string | null;
+  executor_id: string;
+  side: string;
+  quantity: string | number | null;
+  notional_eur: string | number | null;
+  status: string;
+  paper: boolean;
+  external_id: string | null;
+  created_at: string;
+  updated_at: string | null;
+  decisions?: {
+    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+  } | {
+    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+  }[] | null;
+};
+
+function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+function flattenOrderDetail(row: OrderRowDb, candleById: Map<string, CatalogCandleBar>): OrderDetail {
+  const td = unwrapOne(row.decisions);
+  const sig = unwrapOne(td?.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const c = cid ? candleById.get(cid) : undefined;
+  const market_id = c?.market_id ? c.market_id.trim() : "";
+  return {
+    id: row.id,
+    decision_id: row.decision_id,
+    executor_id: row.executor_id,
+    market_id,
+    side: row.side,
+    quantity: row.quantity,
+    notional_eur: row.notional_eur,
+    status: row.status,
+    paper: row.paper,
+    external_id: row.external_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
 
 type FillRow = {
   id: string;
@@ -69,22 +118,29 @@ export default async function OrderDetailPage({ params }: PageProps) {
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at, updated_at",
+      "id, decision_id, executor_id, side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( signals ( candle_id ) )",
     )
     .eq("id", orderId)
     .maybeSingle();
 
   if (ordErr || !orderRow) notFound();
 
-  const order = orderRow as OrderDetail;
+  const rowDb = orderRow as OrderRowDb;
+  const cid = String(unwrapOne(unwrapOne(rowDb.decisions)?.signals)?.candle_id ?? "").trim();
+  const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
+  const order = flattenOrderDetail(rowDb, candleById);
 
-  const { data: mRow } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("market_symbol")
-    .eq("id", order.market_id)
-    .maybeSingle();
-  const marketSym = String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim();
+  const { data: mRow } = order.market_id
+    ? await supabase
+        .schema("catalog")
+        .from("markets")
+        .select("market_symbol")
+        .eq("id", order.market_id)
+        .maybeSingle()
+    : { data: null };
+  const marketSym = order.market_id
+    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
+    : "";
 
   const { data: exRow } = await supabase
     .schema("trading")
@@ -105,7 +161,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const fills = (fillRows ?? []) as FillRow[];
   const fillTotal = typeof fillCount === "number" ? fillCount : fills.length;
 
-  const titleLabel = marketSym || `Order ${order.id.slice(0, 8)}…`;
+  const titleLabel = marketSym || (order.market_id ? `Market ${order.market_id.slice(0, 8)}…` : `Order ${order.id.slice(0, 8)}…`);
 
   return (
     <DetailPageLayout
@@ -127,6 +183,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           meta={order.id}
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="orders" relatedId={orderId} />}
       content={
         <>
           {fillErr ? (
@@ -140,14 +197,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <RecordDetailSection title="Details">
                   <RecordDetailGrid>
                     <Output label="Order ID" type="text" value={order.id} span="full" />
-                    <Output
-                      label="Market"
-                      record={{
-                        pathPrefix: "/markets",
-                        id: order.market_id,
-                        name: marketSym || order.market_id.slice(0, 8) + "…",
-                      }}
-                    />
+                    {order.market_id ? (
+                      <Output
+                        label="Market"
+                        record={{
+                          pathPrefix: "/markets",
+                          id: order.market_id,
+                          name: marketSym || order.market_id.slice(0, 8) + "…",
+                        }}
+                      />
+                    ) : (
+                      <Output label="Market" type="text" value="—" />
+                    )}
                     <Output
                       label="Executor"
                       record={{
@@ -170,7 +231,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </RecordDetailCard>
             }
             related={
-              <RecordDetailCard>
+              <div className="bk-stack bk-stack_gap-md">
+                <RecordDetailCard>
                 <RecordRelatedList
                   title="Fills"
                   description="Sorted by created date (newest first)."
@@ -191,6 +253,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   )}
                 />
               </RecordDetailCard>
+              </div>
             }
           />
         </>

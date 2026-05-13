@@ -1,4 +1,4 @@
-import { Button } from "@repo/blocks";
+import { Button } from "@repo/adricore/blocks";
 
 export function SignOutButton() {
   return (

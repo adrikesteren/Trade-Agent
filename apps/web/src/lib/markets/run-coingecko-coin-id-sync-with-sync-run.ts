@@ -23,6 +23,7 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
         filledViaSearch: 0,
         searchAttempts: 0,
         stillMissingCoinId: 0,
+        tasksCreated: 0,
         failures: [],
         syncRunId: begun.runId,
       };
@@ -45,6 +46,7 @@ export async function runCoingeckoCoinIdSyncWithSyncRun(
             filledViaSearch: result.filledViaSearch,
             searchAttempts: result.searchAttempts,
             stillMissingCoinId: result.stillMissingCoinId,
+            tasksCreated: result.tasksCreated,
             failureCount: result.failures.length,
           },
         });

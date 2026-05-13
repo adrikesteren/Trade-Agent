@@ -31,6 +31,11 @@ export type TradeDecisionInput = {
   forceExit?: boolean;
   /** Suggested EUR size before risk clamp (worker/env). */
   notionalEurSuggested?: number;
+  /**
+   * When true (historical replay), ENTER while already long uses the same buy risk path as the first entry
+   * (scale-in). Live catalog-close omits this so ENTER stays blocked with reason code `already_in_position`.
+   */
+  enterScaleInWhenLong?: boolean;
 };
 
 export type TradeDecisionOutput = {
@@ -139,7 +144,7 @@ export function evaluateTradeDecision(input: TradeDecisionInput): TradeDecisionO
   }
 
   if (resolvedIntent === "ENTER") {
-    if (inPosition) {
+    if (inPosition && !input.enterScaleInWhenLong) {
       return {
         approved: false,
         reasonCodes: ["already_in_position"],

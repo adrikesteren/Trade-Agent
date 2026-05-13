@@ -7,7 +7,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 

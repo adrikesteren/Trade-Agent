@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 import { escapeIlikeExactPattern } from "@/lib/markets/resolve-primary-market-by-codes";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
 import {
   buildSymbolClosePipelineUrl,
   downstreamWorkerHeaders,
@@ -102,6 +103,19 @@ export async function runExchangeClosePipeline(
   }
 
   const quote = (opts.quote ?? "EUR").trim().toUpperCase() || "EUR";
+  const quoteAssetId = await resolveQuoteAssetId(admin, quote);
+  if (!quoteAssetId) {
+    return {
+      ok: false,
+      exchangeCode: exchangeIn,
+      quote,
+      distinctAssetCodes: [],
+      published: 0,
+      failures: [],
+      error: "unknown_quote_asset",
+    };
+  }
+
   const exPattern = escapeIlikeExactPattern(exchangeIn);
 
   const { data: exRows, error: exErr } = await admin
@@ -157,13 +171,13 @@ export async function runExchangeClosePipeline(
       `
       asset_id,
       market_symbol,
-      assets (
+      assets!markets_asset_id_fkey (
         coingecko_market_cap_usd
       )
     `,
     )
     .eq("exchange_id", exchangeId)
-    .eq("quote_code", quote);
+    .eq("quote_asset_id", quoteAssetId);
 
   if (mErr) {
     return {
@@ -242,7 +256,7 @@ export async function runExchangeClosePipeline(
   try {
     relayBase = normalizeRelayBaseUrl();
     appBase = getAppBaseUrl();
-    workerHeaders = downstreamWorkerHeaders();
+    workerHeaders = await downstreamWorkerHeaders();
     maxRetries = relayMaxRetries();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

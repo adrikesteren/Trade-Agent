@@ -8,7 +8,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody } from "@repo/blocks";
+import { Alert, Card, CardBody } from "@repo/adricore/blocks";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;

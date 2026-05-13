@@ -5,15 +5,17 @@ import type { RiskStateSnapshot } from "@repo/risk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
-import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
+import { getCatalogPipelineUserIds } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { enqueueExecutorCatalogCloseAfterMediator } from "@/lib/executor/enqueue-executor-catalog-close";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
+import { fetchWalletBalanceForAsset } from "@/lib/trading/executor-wallet";
 import { defaultNotionalFromExecutor, executorToMediatorRails } from "@/lib/trading/executor-mediator-rails";
 import {
   ensureDefaultExecutorsForUsers,
-  ensureRiskStateForExecutor,
   executorAllowsMarketAsset,
+  fetchExecutorById,
   fetchExecutorsForUsers,
   fetchMarketAssetIds,
   type ExecutorRow,
@@ -35,8 +37,18 @@ export type MediatorCatalogCloseBody = {
   disableDownstreamEnqueue?: boolean;
   /** When set, only this executor is evaluated (used for historical replay). Catalog-close still skips other historical executors when unset. */
   onlyExecutorId?: string | null;
-  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay). */
+  /** When set, use these user ids instead of the default catalog pipeline users (historical replay). */
   signalUserIdsOverride?: string[] | null;
+  /**
+   * When set, read `trading.signals` for these `user_id`s (e.g. `automated_process`) while applying mediator rails
+   * to executors resolved separately (e.g. single `onlyExecutorId` owned by a human).
+   */
+  signalQueryUserIds?: string[] | null;
+  /**
+   * Historical executor replay only: allow repeated ENTER signals to propose further buys while
+   * already long (same risk gate as first entry). Live catalog-close must not set this.
+   */
+  historicalReplayScaleInEnter?: boolean;
 };
 
 export type RunMediatorCatalogCloseResult = {
@@ -97,12 +109,12 @@ function buildRiskSnapshot(
 type SignalRow = {
   id: string;
   intent: string;
-  close_time: string;
   created_at?: string;
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
 
 type CandleRow = {
+  id: string;
   close: string | number;
   candle_timestamps: { close_time: string; open_time: string } | { close_time: string; open_time: string }[] | null;
 };
@@ -119,36 +131,37 @@ function agentSlugFromRow(row: SignalRow): string {
   return one?.agent_id ?? "unknown";
 }
 
-function mapCloseRows(rows: CandleRow[]): { close: number; closeTimeIso: string }[] {
+function mapBarCandles(rows: CandleRow[]): { id: string; close: number; closeTimeIso: string }[] {
   const mapped = (rows ?? [])
     .map((r) => {
       const rawTs = r.candle_timestamps as unknown;
       const ts = (Array.isArray(rawTs) ? rawTs[0] : rawTs) as { close_time?: string } | null | undefined;
       const closeTime = ts?.close_time;
       if (!closeTime) return null;
-      return { close: Number(r.close), closeTimeIso: closeTime };
+      return { id: r.id, close: Number(r.close), closeTimeIso: closeTime };
     })
     .filter((x): x is NonNullable<typeof x> => x != null);
   mapped.sort((a, b) => Date.parse(a.closeTimeIso) - Date.parse(b.closeTimeIso));
   return mapped;
 }
 
-async function findClosePriceForBar(
+/** Latest catalog bar for this close time: OHLC close + candle row id (signals FK). */
+async function findBarCandle(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; closeTimeIso: string },
-): Promise<number | null> {
+): Promise<{ price: number; candleId: string } | null> {
   const { data, error } = await admin
     .schema("catalog")
     .from("candles")
-    .select("close, candle_timestamps ( open_time, close_time )")
+    .select("id, close, candle_timestamps ( open_time, close_time )")
     .eq("market_id", args.marketId)
     .eq("timeframe", args.timeframe)
     .limit(500);
   if (error) throw new Error(error.message);
-  const rows = mapCloseRows((data ?? []) as CandleRow[]);
+  const rows = mapBarCandles((data ?? []) as CandleRow[]);
   const hit = rows.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
   if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
-  return hit.close;
+  return { price: hit.close, candleId: hit.id };
 }
 
 function computeMovingFloorDecision(args: {
@@ -180,10 +193,26 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   const onlyExecutorId =
     body.onlyExecutorId != null && String(body.onlyExecutorId).trim() !== "" ? String(body.onlyExecutorId).trim() : null;
   const disableDownstreamEnqueue = body.disableDownstreamEnqueue === true;
+  const historicalReplayScaleInEnter = body.historicalReplayScaleInEnter === true;
 
   const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
-  const userIds = override?.length ? override : parseSignalUserIdsFromEnv();
-  if (!userIds.length) {
+  const userIds = override?.length ? override : await getCatalogPipelineUserIds(admin);
+
+  const sqOverride = body.signalQueryUserIds?.map((x) => String(x ?? "").trim()).filter(Boolean) ?? null;
+  const signalQueryUserIds = sqOverride?.length ? sqOverride : userIds;
+
+  if (!signalQueryUserIds.length) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      decisionsUpserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      skippedReason: "no_signal_user_ids",
+    };
+  }
+
+  if (!onlyExecutorId && !userIds.length) {
     return {
       ok: true,
       marketsProcessed: 0,
@@ -197,6 +226,19 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
   if (exErr || !ex) throw new Error("Bitvavo exchange not found");
   const exchangeId = ex.id as string;
+
+  const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+  const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
+  if (quoteNorm && !quoteAssetIdFilter) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      decisionsUpserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      skippedReason: "unknown_quote_asset",
+    };
+  }
 
   let effectiveTotal: number;
   let rows: { id: string; market_symbol: string }[];
@@ -240,8 +282,8 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       .from("markets")
       .select("id", { count: "exact", head: true })
       .eq("exchange_id", exchangeId);
-    if (quote != null && String(quote).trim() !== "") {
-      countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
+    if (quoteAssetIdFilter) {
+      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
     }
     const { count: totalMarkets, error: countErr } = await countQuery;
     if (countErr) throw new Error(countErr.message);
@@ -260,7 +302,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       };
     }
 
-    const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+    const quoteArg = quoteNorm;
     const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
       p_exchange_id: exchangeId,
       p_quote: quoteArg,
@@ -284,22 +326,44 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     };
   }
 
-  const t = Date.parse(closeTimeIso);
-  const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
-  const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
+  let executorRows: ExecutorRow[];
+  if (onlyExecutorId) {
+    const lone = await fetchExecutorById(admin, onlyExecutorId);
+    if (!lone) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        decisionsUpserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: effectiveTotal,
+        skippedReason: "only_executor_not_found",
+      };
+    }
+    await ensureDefaultExecutorsForUsers(admin, [lone.user_id]);
+    executorRows = [lone];
+  } else {
+    if (!userIds.length) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        decisionsUpserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: effectiveTotal,
+        skippedReason: "no_signal_user_ids",
+      };
+    }
+    await ensureDefaultExecutorsForUsers(admin, userIds);
+    executorRows = await fetchExecutorsForUsers(admin, userIds);
+  }
 
-  await ensureDefaultExecutorsForUsers(admin, userIds);
-  const executorRows = await fetchExecutorsForUsers(admin, userIds);
   const executorsByUser = new Map<string, ExecutorRow[]>();
-  for (const uid of userIds) executorsByUser.set(uid, []);
   for (const ex of executorRows) {
     const cur = executorsByUser.get(ex.user_id) ?? [];
     cur.push(ex);
     executorsByUser.set(ex.user_id, cur);
   }
-
-  for (const ex of executorRows) {
-    await ensureRiskStateForExecutor(admin, { userId: ex.user_id, executorId: ex.id });
+  for (const suid of signalQueryUserIds) {
+    if (!executorsByUser.has(suid)) executorsByUser.set(suid, []);
   }
 
   const marketIdsForAssets = rows.map((r) => r.id as string);
@@ -312,38 +376,64 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
-    for (const userId of userIds) {
+    const { data: mktQuote, error: mktQuoteErr } = await admin
+      .schema("catalog")
+      .from("markets")
+      .select("quote_asset_id")
+      .eq("id", marketId)
+      .maybeSingle();
+    if (mktQuoteErr) throw new Error(`${marketSymbol}: markets quote_asset_id: ${mktQuoteErr.message}`);
+    const quoteAssetIdForMarket = String((mktQuote as { quote_asset_id?: string } | null)?.quote_asset_id ?? "").trim() || null;
+
+    const bar = await findBarCandle(admin, { marketId, timeframe, closeTimeIso });
+    if (!bar) continue;
+
+    for (const signalUid of signalQueryUserIds) {
       const { data: sigData, error: sigErr } = await admin
         .schema("trading")
         .from("signals")
-        .select("id, intent, close_time, created_at, signal_agents ( agent_id )")
-        .eq("user_id", userId)
-        .eq("market_id", marketId)
-        .eq("timeframe", timeframe)
-        .gte("close_time", closeLow)
-        .lte("close_time", closeHigh);
+        .select("id, intent, created_at, signal_agents ( agent_id )")
+        .eq("user_id", signalUid)
+        .eq("candle_id", bar.candleId);
 
       if (sigErr) throw new Error(`${marketSymbol}: signals select: ${sigErr.message}`);
 
-      const matched = ((sigData ?? []) as SignalRow[]).filter((r) => closeTimesMatch(r.close_time, closeTimeIso));
+      const matched = (sigData ?? []) as SignalRow[];
       matched.sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
 
-      const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
+      const executors = onlyExecutorId
+        ? executorRows.filter(
+            (e) =>
+              e.enabled &&
+              e.id === onlyExecutorId &&
+              executorAllowsMarketAsset(e, marketAssetId) &&
+              String(e.exchange_id) === exchangeId,
+          )
+        : (executorsByUser.get(signalUid) ?? []).filter((e) => e.enabled);
       for (const ex of executors) {
         if (ex.execution_mode === "historical" && (!onlyExecutorId || ex.id !== onlyExecutorId)) continue;
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
         if (String(ex.exchange_id) !== exchangeId) continue;
 
-        const { data: riskEx, error: riskExErr } = await admin
-          .schema("trading")
-          .from("risk_state")
-          .select("equity_eur, open_position_count, exposure_by_market, daily_pnl_eur, max_drawdown_eur, consecutive_losses, kill_switch")
-          .eq("user_id", userId)
-          .eq("executor_id", ex.id)
-          .maybeSingle();
+        const ownerId = ex.user_id;
 
-        if (riskExErr) throw new Error(riskExErr.message);
-        const riskSnap = buildRiskSnapshot(riskEx ?? {}, marketId, marketSymbol);
+        const quoteBalance =
+          quoteAssetIdForMarket != null
+            ? await fetchWalletBalanceForAsset(admin, { executorId: ex.id, assetId: quoteAssetIdForMarket })
+            : 0;
+        const riskSnap = buildRiskSnapshot(
+          {
+            equity_eur: quoteBalance,
+            open_position_count: ex.risk_open_position_count,
+            exposure_by_market: ex.risk_exposure_by_market ?? {},
+            daily_pnl_eur: ex.risk_daily_pnl_eur,
+            max_drawdown_eur: ex.risk_runtime_max_drawdown_eur,
+            consecutive_losses: ex.risk_consecutive_losses,
+            kill_switch: ex.risk_kill_switch,
+          },
+          marketId,
+          marketSymbol,
+        );
         const rails = executorToMediatorRails(ex);
         const notionalSuggested = defaultNotionalFromExecutor(ex);
 
@@ -351,7 +441,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           .schema("trading")
           .from("positions")
           .select("quantity, avg_price")
-          .eq("user_id", userId)
+          .eq("user_id", ownerId)
           .eq("executor_id", ex.id)
           .eq("market_id", marketId)
           .maybeSingle();
@@ -360,7 +450,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         const positionQty = Number(posRow?.quantity ?? 0);
         const avgPrice = Number(posRow?.avg_price ?? 0);
         const inPosition = positionQty > 0;
-        const closePrice = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+        const closePrice = bar.price;
 
         let forceExit = false;
         let movingFloorSnapshot: Record<string, unknown> | null = null;
@@ -369,12 +459,12 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             .schema("trading")
             .from("executor_moving_floors")
             .select("peak_price_since_entry, floor_price, activated_at")
-            .eq("user_id", userId)
+            .eq("user_id", ownerId)
             .eq("executor_id", ex.id)
             .eq("market_id", marketId)
             .maybeSingle();
           if (floorErr) throw new Error(floorErr.message);
-          if (closePrice != null && Number.isFinite(avgPrice) && avgPrice > 0 && rails.profitTakingEnabled) {
+          if (Number.isFinite(avgPrice) && avgPrice > 0 && rails.profitTakingEnabled) {
             const trailPct = Number(rails.movingFloorTrailPct ?? 0.15);
             const activationProfitPct = Number(rails.movingFloorActivationProfitPct ?? 0.05);
             const prevPeak = Math.max(Number(floorRow?.peak_price_since_entry ?? avgPrice), avgPrice);
@@ -391,7 +481,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             });
             const { error: upFloorErr } = await admin.schema("trading").from("executor_moving_floors").upsert(
               {
-                user_id: userId,
+                user_id: ownerId,
                 executor_id: ex.id,
                 market_id: marketId,
                 peak_price_since_entry: next.peak,
@@ -419,7 +509,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             .schema("trading")
             .from("executor_moving_floors")
             .delete()
-            .eq("user_id", userId)
+            .eq("user_id", ownerId)
             .eq("executor_id", ex.id)
             .eq("market_id", marketId);
           if (delFloorErr) throw new Error(delFloorErr.message);
@@ -433,13 +523,14 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           signalIntents: intents,
           inPosition,
           positionQuantity: positionQty,
-          marketPriceEur: closePrice ?? undefined,
+          marketPriceEur: closePrice,
           forceExit,
           notionalEurSuggested: notionalSuggested,
+          enterScaleInWhenLong: historicalReplayScaleInEnter,
         });
 
-        const canonicalClose = matched[0]?.close_time ?? closeTimeIso;
         const primarySignalId = matched[0]?.id ?? null;
+        if (!matched.length || !primarySignalId) continue;
 
         const signalsIn = matched.map((r) => ({
           id: r.id,
@@ -448,10 +539,8 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         }));
 
         const decisionRow = {
-          user_id: userId,
+          user_id: ownerId,
           executor_id: ex.id,
-          market_id: marketId,
-          close_time: canonicalClose,
           timeframe,
           signal_id: primarySignalId,
           approved: decision.approved,
@@ -468,16 +557,17 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             executorName: ex.name,
             exchangeId: ex.exchange_id,
             movingFloor: movingFloorSnapshot,
+            barCloseTimeIso: closeTimeIso,
             ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
             ...(body.signalsSyncRunId ? { signalsSyncRunId: body.signalsSyncRunId } : {}),
             ...(body.mediatorPipelineSyncRunId ? { mediatorSyncRunId: body.mediatorPipelineSyncRunId } : {}),
           },
         };
 
-        const { error: upErr } = await admin.schema("trading").from("trade_decisions").upsert(decisionRow, {
-          onConflict: "user_id,executor_id,market_id,timeframe,close_time",
+        const { error: upErr } = await admin.schema("trading").from("decisions").upsert(decisionRow, {
+          onConflict: "user_id,executor_id,signal_id",
         });
-        if (upErr) throw new Error(`${marketSymbol}: trade_decisions upsert: ${upErr.message}`);
+        if (upErr) throw new Error(`${marketSymbol}: decisions upsert: ${upErr.message}`);
         decisionsUpserted += 1;
       }
     }
@@ -492,7 +582,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     decisionsUpserted > 0 &&
     !disableDownstreamEnqueue &&
     process.env.EXECUTOR_AFTER_MEDIATOR_DISABLE !== "1" &&
-    userIds.length > 0
+    signalQueryUserIds.length > 0
   ) {
     try {
       await enqueueExecutorCatalogCloseAfterMediator({

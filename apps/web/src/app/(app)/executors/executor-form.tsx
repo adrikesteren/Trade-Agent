@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { Alert, Button, Card, CardBody } from "@repo/blocks";
+import { Alert, Button, Card, CardBody } from "@repo/adricore/blocks";
 
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "./actions";
 import { createExecutor, updateExecutor } from "./actions";
@@ -184,7 +184,8 @@ export function ExecutorForm({
                 />
               </div>
               <p className="bk-text-muted text-xs">
-                Bitvavo 15m candles only. Exchange must be Bitvavo. One base asset in the whitelist.
+                Bitvavo 15m candles only. Exchange must be Bitvavo. One base asset in the whitelist. Run requires a
+                positive paper balance on that same base asset.
               </p>
             </div>
           ) : null}

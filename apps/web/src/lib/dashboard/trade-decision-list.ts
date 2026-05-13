@@ -1,7 +1,7 @@
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 
-/** Fetch pool before per-market dedupe (same as trade decisions list view). */
-export const TRADE_DECISIONS_FETCH_POOL = 400;
+/** Fetch pool before per-market dedupe (catalog-close can create many rows per bar). */
+export const TRADE_DECISIONS_FETCH_POOL = 8000;
 
 /** Executor detail only needs a pool to pick 10 preview rows after sort/dedupe. */
 export const EXECUTOR_DETAIL_TRADE_DECISION_POOL = 120;

@@ -12,6 +12,7 @@ import {
   syncCoingeckoAssetMetricsMarketsPhase,
   syncCoingeckoAssetMetricsResolvePhase,
 } from "@/lib/markets/sync-coingecko-metrics";
+import { syncFiatAssetDollarValues } from "@/lib/markets/sync-fiat-dollar-values";
 
 /** Optional: reuse an existing `sync_runs` row when callers pass `syncRunId`. */
 export type CoingeckoMetricsSyncBody = {
@@ -27,6 +28,8 @@ export type CoingeckoMetricsSyncResult = {
   /** Crypto rows without `coingecko_coin_id` (skipped; use coin-id sync to fill). */
   stillMissingCoingeckoId: number;
   searchAttemptsThisRun: number;
+  /** Fiat `catalog.assets.dollar_value` rows touched (Frankfurter). */
+  fiatDollarValuesUpdated: number;
   /** Always false; kept for API compatibility with older clients. */
   continuationQueued: boolean;
   syncRunId: string | null;
@@ -54,6 +57,7 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
           searchFailures: [],
           stillMissingCoingeckoId: 0,
           searchAttemptsThisRun: 0,
+          fiatDollarValuesUpdated: 0,
           continuationQueued: false,
           syncRunId: begun.runId,
         };
@@ -72,6 +76,7 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
       searchFailures: [],
       stillMissingCoingeckoId: 0,
       searchAttemptsThisRun: 0,
+      fiatDollarValuesUpdated: 0,
       continuationQueued: false,
       syncRunId: null,
     };
@@ -82,6 +87,14 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
     const p2 = await syncCoingeckoAssetMetricsMarketsPhase(admin, p1.idByCoingecko);
     const stillMissing = p1.stillMissingCoingeckoId;
 
+    let fiatDollarValuesUpdated = 0;
+    try {
+      const f = await syncFiatAssetDollarValues(admin);
+      fiatDollarValuesUpdated = f.updated;
+    } catch {
+      /* soft-fail */
+    }
+
     const result: CoingeckoMetricsSyncResult = {
       assetsConsidered: p1.assetsConsidered,
       resolvedThisRun: p1.resolvedThisRun,
@@ -89,6 +102,7 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
       searchFailures: p1.searchFailures,
       stillMissingCoingeckoId: stillMissing,
       searchAttemptsThisRun: p1.searchAttemptsThisRun,
+      fiatDollarValuesUpdated,
       continuationQueued: false,
       syncRunId: runId,
     };
@@ -106,6 +120,7 @@ export async function runCoingeckoMetricsSyncWithSyncRun(
             stillMissingCoingeckoId: result.stillMissingCoingeckoId,
             searchAttemptsThisRun: result.searchAttemptsThisRun,
             searchFailureCount: result.searchFailures.length,
+            fiatDollarValuesUpdated: result.fiatDollarValuesUpdated,
           },
         });
       } catch {

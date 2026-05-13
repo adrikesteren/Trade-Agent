@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { Button, Stack } from "@repo/blocks";
+import { Button, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 export default async function Home() {

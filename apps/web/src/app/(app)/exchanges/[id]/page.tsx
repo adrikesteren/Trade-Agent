@@ -1,4 +1,5 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -12,7 +13,7 @@ import {
   RecordDetailGrid,
   RecordDetailSection,
   RecordRelatedList,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -38,7 +39,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   const { data: markets, count } = await supabase
     .schema("catalog")
     .from("markets")
-    .select("id, market_symbol, quote_code, status", { count: "exact" })
+    .select("id, market_symbol, quote_asset:assets!markets_quote_asset_id_fkey ( code ), status", { count: "exact" })
     .eq("exchange_id", id)
     .order("market_symbol", { ascending: true })
     .limit(DASHBOARD_LIST_VIEW_LIMIT);
@@ -65,6 +66,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
           meta={`id: ${ex.id}`}
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="exchanges" relatedId={id} />}
       content={
         <RecordDetailTabs
           details={
@@ -80,33 +82,40 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
             </RecordDetailCard>
           }
           related={
-            <RecordDetailCard>
-              <RecordRelatedList
-                title="Markets"
-                description={
-                  marketTotal > list.length
-                    ? `Preview: first ${list.length} of ${marketTotal} listings.`
-                    : marketTotal > 0
-                      ? `${marketTotal} listing${marketTotal === 1 ? "" : "s"}.`
-                      : undefined
-                }
-                items={list}
-                getKey={(m) => m.id}
-                totalCount={typeof count === "number" ? count : undefined}
-                viewAllHref="/markets"
-                emptyMessage="No markets synced for this exchange yet."
-                renderRow={(m) => (
-                  <>
-                    <Link href={`/markets/${m.id}`} className="bk-link font-mono" style={{ fontWeight: 600 }}>
-                      {m.market_symbol}
-                    </Link>
-                    <span className="bk-text-muted ml-2" style={{ fontSize: "0.75rem" }}>
-                      {m.quote_code} · {m.status}
-                    </span>
-                  </>
-                )}
-              />
-            </RecordDetailCard>
+            <div className="bk-stack bk-stack_gap-md">
+              <RecordDetailCard>
+                <RecordRelatedList
+                  title="Markets"
+                  description={
+                    marketTotal > list.length
+                      ? `Preview: first ${list.length} of ${marketTotal} listings.`
+                      : marketTotal > 0
+                        ? `${marketTotal} listing${marketTotal === 1 ? "" : "s"}.`
+                        : undefined
+                  }
+                  items={list}
+                  getKey={(m) => m.id}
+                  totalCount={typeof count === "number" ? count : undefined}
+                  viewAllHref="/markets"
+                  emptyMessage="No markets synced for this exchange yet."
+                  renderRow={(m) => {
+                    const rawQ = m.quote_asset as unknown;
+                    const qa = (Array.isArray(rawQ) ? rawQ[0] : rawQ) as { code?: string } | null;
+                    const quoteLabel = String(qa?.code ?? "—");
+                    return (
+                    <>
+                      <Link href={`/markets/${m.id}`} className="bk-link font-mono" style={{ fontWeight: 600 }}>
+                        {m.market_symbol}
+                      </Link>
+                      <span className="bk-text-muted ml-2" style={{ fontSize: "0.75rem" }}>
+                        {quoteLabel} · {m.status}
+                      </span>
+                    </>
+                    );
+                  }}
+                />
+              </RecordDetailCard>
+            </div>
           }
         />
       }

@@ -228,10 +228,10 @@ export async function createExecutor(formData: FormData): Promise<void> {
   redirect(`/executors/${newId}`);
 }
 
-function parseBalanceAmount(formData: FormData, field: string): number {
+function parseBalanceQuantity(formData: FormData, field: string): number {
   const raw = String(formData.get(field) ?? "").trim();
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) throw new Error("Amount must be a positive number.");
+  if (!Number.isFinite(n) || n <= 0) throw new Error("Quantity must be a positive number.");
   return n;
 }
 
@@ -242,15 +242,15 @@ export async function addExecutorBalance(executorId: string, formData: FormData)
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId });
-
-  const amount = parseBalanceAmount(formData, "amount_eur");
+  const assetId = parseUuidLike("Asset", formData.get("asset_id"));
+  const quantity = parseBalanceQuantity(formData, "quantity");
   const note = String(formData.get("note") ?? "").trim() || null;
 
-  const { error } = await supabase.schema("trading").rpc("apply_executor_balance_change", {
+  const { error } = await supabase.schema("trading").rpc("apply_wallet_balance_change", {
     p_executor_id: executorId,
     p_kind: "deposit",
-    p_amount_eur: amount,
+    p_asset_id: assetId,
+    p_quantity: quantity,
     p_note: note,
   });
   if (error) throw new Error(error.message);
@@ -265,15 +265,15 @@ export async function removeExecutorBalance(executorId: string, formData: FormDa
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId });
-
-  const amount = parseBalanceAmount(formData, "amount_eur");
+  const assetId = parseUuidLike("Asset", formData.get("asset_id"));
+  const quantity = parseBalanceQuantity(formData, "quantity");
   const note = String(formData.get("note") ?? "").trim() || null;
 
-  const { error } = await supabase.schema("trading").rpc("apply_executor_balance_change", {
+  const { error } = await supabase.schema("trading").rpc("apply_wallet_balance_change", {
     p_executor_id: executorId,
     p_kind: "withdrawal",
-    p_amount_eur: amount,
+    p_asset_id: assetId,
+    p_quantity: quantity,
     p_note: note,
   });
   if (error) throw new Error(error.message);

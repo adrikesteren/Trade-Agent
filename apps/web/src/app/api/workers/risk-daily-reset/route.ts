@@ -6,7 +6,7 @@ import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 /**
  * POST: `Authorization: Bearer CRON_SECRET`.
- * Sets `trading.risk_state.daily_pnl_eur` to 0 for all rows (UTC day boundary when scheduled accordingly).
+ * Sets `trading.executors.risk_daily_pnl_eur` to 0 for all rows (UTC day boundary when scheduled accordingly).
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

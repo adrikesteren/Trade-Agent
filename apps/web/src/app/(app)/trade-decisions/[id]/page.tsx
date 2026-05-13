@@ -1,5 +1,7 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -12,7 +14,7 @@ import {
   RecordDetailGrid,
   RecordDetailSection,
   RecordRelatedList,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -22,15 +24,16 @@ type TradeDecisionDetail = {
   id: string;
   user_id: string;
   executor_id: string;
-  market_id: string;
-  signal_id: string | null;
+  signal_id: string;
   approved: boolean;
   reason_codes: string[] | null;
-  close_time: string;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
+  /** From `signals → candles` */
+  market_id: string;
+  bar_close_iso: string | null;
 };
 
 type OrderRow = {
@@ -43,6 +46,10 @@ type OrderRow = {
 
 function isUuidLike(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+}
+
+function shortId(uuid: string): string {
+  return uuid.length > 10 ? `${uuid.slice(0, 8)}…` : uuid;
 }
 
 function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
@@ -71,6 +78,46 @@ function formatReasonCodes(codes: string[] | null | undefined): string {
   return codes.join(", ");
 }
 
+function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+type TradeDecisionRowDb = {
+  id: string;
+  user_id: string;
+  executor_id: string;
+  signal_id: string | null;
+  approved: boolean;
+  reason_codes: string[] | null;
+  timeframe: string;
+  decision_payload: Record<string, unknown> | null;
+  risk_snapshot: Record<string, unknown> | null;
+  created_at: string;
+  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+};
+
+function flattenTradeDecisionDetail(row: TradeDecisionRowDb, candleById: Map<string, CatalogCandleBar>): TradeDecisionDetail {
+  const sig = unwrapOne(row.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const candle = cid ? candleById.get(cid) : undefined;
+  const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    executor_id: row.executor_id,
+    signal_id: String(row.signal_id ?? "").trim(),
+    approved: row.approved,
+    reason_codes: row.reason_codes,
+    timeframe: row.timeframe,
+    decision_payload: row.decision_payload,
+    risk_snapshot: row.risk_snapshot,
+    created_at: row.created_at,
+    market_id: candle?.market_id ? candle.market_id.trim() : "",
+    bar_close_iso: barClose,
+  };
+}
+
 function orderStatusClass(status: string): string {
   const s = status.toLowerCase();
   if (s === "filled") return "font-medium text-emerald-700 dark:text-emerald-400";
@@ -92,16 +139,19 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
 
   const { data: decRow, error: decErr } = await supabase
     .schema("trading")
-    .from("trade_decisions")
+    .from("decisions")
     .select(
-      "id, user_id, executor_id, market_id, signal_id, approved, reason_codes, close_time, timeframe, decision_payload, risk_snapshot, created_at",
+      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (decErr || !decRow) notFound();
 
-  const dec = decRow as TradeDecisionDetail;
+  const rowDb = decRow as TradeDecisionRowDb;
+  const cid = String(unwrapOne(rowDb.signals)?.candle_id ?? "").trim();
+  const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
+  const dec = flattenTradeDecisionDetail(rowDb, candleById);
 
   const { data: mRow } = await supabase
     .schema("catalog")
@@ -109,7 +159,9 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
     .select("market_symbol")
     .eq("id", dec.market_id)
     .maybeSingle();
-  const marketSym = String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim();
+  const marketSym = dec.market_id
+    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
+    : "";
 
   const { data: exRow } = await supabase
     .schema("trading")
@@ -176,6 +228,7 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
           }
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="decisions" relatedId={dec.id} />}
       content={
         <>
           {ordErr ? (
@@ -189,14 +242,18 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                 <RecordDetailSection title="Details">
                   <RecordDetailGrid>
                     <Output label="Decision ID" type="text" value={dec.id} span="full" />
-                    <Output
-                      label="Market"
-                      record={{
-                        pathPrefix: "/markets",
-                        id: dec.market_id,
-                        name: marketSym || dec.market_id.slice(0, 8) + "…",
-                      }}
-                    />
+                    {dec.market_id ? (
+                      <Output
+                        label="Market"
+                        record={{
+                          pathPrefix: "/markets",
+                          id: dec.market_id,
+                          name: marketSym || dec.market_id.slice(0, 8) + "…",
+                        }}
+                      />
+                    ) : (
+                      <Output label="Market" type="text" value="—" />
+                    )}
                     <Output
                       label="Executor"
                       record={{
@@ -205,9 +262,22 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                         name: execName || dec.executor_id.slice(0, 8) + "…",
                       }}
                     />
-                    <Output label="Bar close" type="datetime" value={dec.close_time} formatDatetime={formatDt} />
+                    <Output
+                      label="Bar close"
+                      type="datetime"
+                      value={dec.bar_close_iso}
+                      formatDatetime={formatDt}
+                    />
                     <Output label="Timeframe" type="text" value={dec.timeframe} />
-                    <Output label="Signal ID" type="text" value={dec.signal_id ?? "—"} span="full" />
+                    {dec.signal_id ? (
+                      <Output
+                        label="Signal"
+                        record={{ pathPrefix: "/signals", id: dec.signal_id, name: shortId(dec.signal_id) }}
+                        span="full"
+                      />
+                    ) : (
+                      <Output label="Signal" type="text" value="—" span="full" />
+                    )}
                     <Output label="Reason codes" type="text" value={reasons} span="full" />
                     <Output label="Created" type="datetime" value={dec.created_at} formatDatetime={formatDt} />
                   </RecordDetailGrid>
@@ -225,7 +295,8 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
               </RecordDetailCard>
             }
             related={
-              <RecordDetailCard>
+              <div className="bk-stack bk-stack_gap-md">
+                <RecordDetailCard>
                 <RecordRelatedList
                   title="Orders"
                   description="Orders linked to this decision (newest first)."
@@ -248,6 +319,7 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                   )}
                 />
               </RecordDetailCard>
+              </div>
             }
           />
         </>

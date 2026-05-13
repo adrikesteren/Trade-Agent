@@ -2,7 +2,7 @@
 
 import { formatDatetime } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
-import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/blocks";
+import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/adricore/blocks";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { createClient } from "@/lib/supabase/client";

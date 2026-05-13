@@ -16,7 +16,7 @@ import {
 import { sweepBitvavoSingleMarketCatalogCandles } from "@/lib/markets/sweep-bitvavo-single-market-catalog-candles";
 import { runExecutorCatalogCloseDrain } from "@/lib/executor/run-executor-catalog-close";
 import { runMediatorCatalogCloseDrain } from "@/lib/mediator/run-mediator-catalog-close";
-import { resolveLatestCatalogCandleCloseIso } from "@/lib/signals/resolve-latest-catalog-close-for-signals";
+import { resolveLatestCatalogCandleCloseIsoForMarketTimeframe } from "@/lib/signals/resolve-latest-catalog-close-for-signals";
 import { runSignalsCatalogCloseDrain } from "@/lib/signals/run-signals-catalog-close";
 
 export type SymbolClosePipelineOptions = {
@@ -193,7 +193,11 @@ export async function runSymbolClosePipeline(
         steps.mediator = errStep("skipped", "unsupported exchange");
         steps.executor = errStep("skipped", "unsupported exchange");
       } else {
-        closeTimeIso = await resolveLatestCatalogCandleCloseIso(admin);
+        closeTimeIso = await resolveLatestCatalogCandleCloseIsoForMarketTimeframe(
+          admin,
+          resolved.marketId,
+          CATALOG_STORAGE_TIMEFRAME,
+        );
         if (!closeTimeIso) {
           steps.closeTime = errStep("no_catalog_close_time", "No rows in catalog.candle_timestamps; run candle sync first.");
           steps.signals = errStep("skipped", "no close time");

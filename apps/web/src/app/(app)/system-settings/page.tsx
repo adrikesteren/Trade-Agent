@@ -27,7 +27,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 
 export default async function SystemSettingsListPage({
   searchParams,

@@ -16,7 +16,7 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
   const { data: mrow, error: mErr } = await supabase
     .schema("catalog")
     .from("markets")
-    .select("id, market_symbol, quote_code, exchange_id")
+    .select("id, market_symbol, quote_asset_id, exchange_id")
     .eq("id", marketId)
     .maybeSingle();
 
@@ -36,7 +36,19 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
     return { candleRowsUpserted: 0, marketSymbol: String(mrow.market_symbol) };
   }
 
-  const quote = String(mrow.quote_code ?? "").toUpperCase();
+  const { data: quoteRow, error: qErr } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("code")
+    .eq("id", mrow.quote_asset_id as string)
+    .maybeSingle();
+
+  if (qErr) throw new Error(qErr.message);
+  const quote = String(quoteRow?.code ?? "").toUpperCase();
+  if (!quote) {
+    throw new Error("market missing quote asset code");
+  }
+
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
   const barsPerMarket = barsForRetention(timeframe);
 

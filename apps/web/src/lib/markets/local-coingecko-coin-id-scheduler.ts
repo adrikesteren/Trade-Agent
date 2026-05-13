@@ -37,21 +37,33 @@ function startLocalCoingeckoCoinIdScheduler(): void {
     inFlight = true;
     const started = Date.now();
     try {
-      const { createServiceRoleClient } = await import("@/lib/supabase/admin");
-      const { runCoingeckoCoinIdSyncWithSyncRun } = await import(
-        "@/lib/markets/run-coingecko-coin-id-sync-with-sync-run"
-      );
-      const r = await runCoingeckoCoinIdSyncWithSyncRun(createServiceRoleClient(), "automated");
+      const { getAppBaseUrl } = await import("@/lib/env/app-base-url");
+      const { buildFindCoingeckoIdAllWorkerUrl } = await import("@/lib/relay/relay-symbol-close-pipeline-client");
+      const { executeFindCoingeckoIdWorker } = await import("@/lib/markets/execute-find-coingecko-id-worker");
+      const url = buildFindCoingeckoIdAllWorkerUrl(getAppBaseUrl(), "automated");
+      const body = await executeFindCoingeckoIdWorker(url);
       const ms = Date.now() - started;
-      console.log(
-        "[local coingecko coin-id]",
-        `copied=${r.copiedFromMetadata}`,
-        `searchFilled=${r.filledViaSearch}`,
-        `searches=${r.searchAttempts}`,
-        `stillMissing=${r.stillMissingCoinId}`,
-        `${ms}ms`,
-        r.failures.length ? `warn=${r.failures.length}` : "",
-      );
+      if (!body.ok) {
+        console.warn("[local coingecko coin-id]", body.error, `${ms}ms`);
+      } else if (body.mode === "relay_enqueued") {
+        console.log(
+          "[local coingecko coin-id]",
+          `relay published=${body.published}`,
+          `assets=${body.distinctAssetCodes.length}`,
+          `${ms}ms`,
+        );
+      } else if (body.mode === "inline_bulk") {
+        const { copiedFromMetadata, filledViaSearch, searchAttempts, stillMissingCoinId, failures } = body;
+        console.log(
+          "[local coingecko coin-id]",
+          `copied=${copiedFromMetadata}`,
+          `searchFilled=${filledViaSearch}`,
+          `searches=${searchAttempts}`,
+          `stillMissing=${stillMissingCoinId}`,
+          `${ms}ms`,
+          failures.length ? `warn=${failures.length}` : "",
+        );
+      }
     } catch (e) {
       console.error("[local coingecko coin-id]", e);
     } finally {

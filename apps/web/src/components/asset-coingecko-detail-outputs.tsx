@@ -5,7 +5,7 @@ import {
 } from "@/components/asset-coingecko-metrics-block";
 import { formatDecimal, formatPercentSigned, formatUsdAmount, formatUsdSigned } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
-import { Output } from "@repo/blocks";
+import { Output } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 function num(v: number | string | null | undefined): number | null {

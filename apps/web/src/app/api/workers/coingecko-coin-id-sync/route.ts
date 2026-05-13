@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
-import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/markets/run-coingecko-coin-id-sync-with-sync-run";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
+
+import { executeFindCoingeckoIdWorker } from "@/lib/markets/execute-find-coingecko-id-worker";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
+function legacyFindCoingeckoUrl(request: Request): string {
+  const from = new URL(request.url);
+  const nu = new URL(`${from.origin}/api/workers/assets/find-coingecko-id`);
+  nu.searchParams.set("all", "true");
+  nu.searchParams.delete("assetCode");
+  const source = from.searchParams.get("source");
+  if (source) nu.searchParams.set("source", source);
+  else nu.searchParams.set("source", "manual");
+  return nu.toString();
+}
+
 /**
- * GET: Bearer CRON_SECRET — same CoinGecko coin-id sync as POST.
+ * GET: Bearer CRON_SECRET — **deprecated**; delegates to `/api/workers/assets/find-coingecko-id?all=true`.
  */
 export async function GET(request: Request) {
   const rawBody = "";
@@ -15,18 +26,16 @@ export async function GET(request: Request) {
     );
   }
 
-  try {
-    const admin = createServiceRoleClient();
-    const result = await runCoingeckoCoinIdSyncWithSyncRun(admin, "automated");
-    return NextResponse.json({ ok: true, ...result });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "sync failed";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const body = await executeFindCoingeckoIdWorker(legacyFindCoingeckoUrl(request));
+  const http =
+    body.ok === false && "error" in body && body.error.includes("Provide exactly one")
+      ? 400
+      : 200;
+  return NextResponse.json(body, { status: http });
 }
 
 /**
- * POST: Bearer CRON_SECRET — fills `assets.coingecko_coin_id` when empty.
+ * POST: Bearer CRON_SECRET — **deprecated**; delegates to `/api/workers/assets/find-coingecko-id?all=true`.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
@@ -38,12 +47,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized", hint: devHint }, { status: 401 });
   }
 
-  try {
-    const admin = createServiceRoleClient();
-    const result = await runCoingeckoCoinIdSyncWithSyncRun(admin, "automated");
-    return NextResponse.json({ ok: true, ...result });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "sync failed";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const body = await executeFindCoingeckoIdWorker(legacyFindCoingeckoUrl(request));
+  const http =
+    body.ok === false && "error" in body && body.error.includes("Provide exactly one")
+      ? 400
+      : 200;
+  return NextResponse.json(body, { status: http });
 }

@@ -1,4 +1,5 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -11,7 +12,7 @@ import {
   RecordDetailCard,
   RecordDetailGrid,
   RecordDetailSection,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -79,6 +80,7 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
           meta={run.id}
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="automation" relatedTable="sync_runs" relatedId={run.id} />}
       content={
         <RecordDetailTabs
           details={
@@ -101,7 +103,6 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
               </RecordDetailSection>
             </RecordDetailCard>
           }
-          related={<p className="bk-text-muted text-sm">No related lists for this sync run.</p>}
         />
       }
     />

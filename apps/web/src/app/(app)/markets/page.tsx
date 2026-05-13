@@ -1,3 +1,4 @@
+import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -22,14 +23,29 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
+
+type AssetEmbed = {
+  id?: string;
+  code?: string;
+  name?: string | null;
+  coingecko_market_cap_usd?: number | string | null;
+  coingecko_total_volume_usd?: number | string | null;
+};
 
 type MarketListingRow = {
   id: string;
   market_symbol: string;
   assets: unknown;
+  quote_asset: unknown;
 };
+
+function unwrapAssetEmbed(raw: unknown): AssetEmbed | null {
+  const v = (Array.isArray(raw) ? raw[0] : raw) as AssetEmbed | null;
+  if (!v || typeof v !== "object") return null;
+  return v;
+}
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -57,7 +73,8 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
           `
           id,
           market_symbol,
-          assets ( id, code, name, coingecko_market_cap_usd, coingecko_total_volume_usd )
+          assets!markets_asset_id_fkey ( id, code, name, coingecko_market_cap_usd, coingecko_total_volume_usd ),
+          quote_asset:assets!markets_quote_asset_id_fkey ( id, code, name )
         `,
         )
         .eq("exchange_id", exchange.id)
@@ -67,10 +84,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
   const rows = (listings ?? []) as MarketListingRow[];
 
   function mcapFromRow(row: MarketListingRow): number {
-    const rawA = row.assets as unknown;
-    const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
-      coingecko_market_cap_usd?: number | string | null;
-    } | null;
+    const asset = unwrapAssetEmbed(row.assets);
     return numericOrNegInf(asset?.coingecko_market_cap_usd ?? null);
   }
 
@@ -139,34 +153,30 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
             <Table className="text-xs">
               <thead>
                 <tr>
-                  <Th>Asset Name</Th>
                   <Th>Market</Th>
+                  <Th>Asset</Th>
+                  <Th>Asset Quote</Th>
                   <Th className="text-right">Market Cap</Th>
                   <Th className="text-right">24h Volume</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody>
                 {displayListings.map((row) => {
-                  const rawA = row.assets as unknown;
-                  const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as {
-                    id?: string;
-                    code?: string;
-                    name?: string | null;
-                    coingecko_market_cap_usd?: number | string | null;
-                    coingecko_total_volume_usd?: number | string | null;
-                  } | null;
+                  const asset = unwrapAssetEmbed(row.assets);
+                  const quote = unwrapAssetEmbed(row.quote_asset);
                   const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
+                  const quoteName = quote?.name?.trim() ? quote.name : (quote?.code ?? "—");
+                  const baseMini =
+                    asset?.id && asset.code
+                      ? { id: String(asset.id), code: String(asset.code), name: asset.name ?? null }
+                      : null;
+                  const quoteMini =
+                    quote?.id && quote.code
+                      ? { id: String(quote.id), code: String(quote.code), name: quote.name ?? null }
+                      : null;
                   return (
                     <tr key={row.id}>
-                      <Td>
-                        {asset?.id ? (
-                          <Link href={`/assets/${asset.id}`} className="bk-link">
-                            {assetName}
-                          </Link>
-                        ) : (
-                          assetName
-                        )}
-                      </Td>
                       <Td>
                         <span className="font-mono">
                           <Link href={`/markets/${row.id}`} className="bk-link">
@@ -174,18 +184,46 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
                           </Link>
                         </span>
                       </Td>
+                      <Td>
+                        {baseMini ? (
+                          <Link href={`/assets/${encodeURIComponent(baseMini.code)}`} className="bk-link">
+                            {assetName}
+                          </Link>
+                        ) : (
+                          assetName
+                        )}
+                      </Td>
+                      <Td>
+                        {quoteMini ? (
+                          <Link href={`/assets/${encodeURIComponent(quoteMini.code)}`} className="bk-link">
+                            {quoteName}
+                          </Link>
+                        ) : (
+                          quoteName
+                        )}
+                      </Td>
                       <Td className="text-right font-mono">
                         {formatUsdMetric(asset?.coingecko_market_cap_usd ?? null, prefs)}
                       </Td>
                       <Td className="text-right font-mono">
                         {formatUsdMetric(asset?.coingecko_total_volume_usd ?? null, prefs)}
                       </Td>
+                      <Td className="text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                        <MarketListRowActions
+                          marketId={row.id}
+                          marketSymbol={row.market_symbol}
+                          baseAsset={baseMini}
+                          quoteAsset={quoteMini}
+                        />
+                        </div>
+                      </Td>
                     </tr>
                   );
                 })}
                 {!displayListings.length ? (
                   <tr>
-                    <Td colSpan={4} muted className="py-8 text-center">
+                    <Td colSpan={6} muted className="py-8 text-center">
                       No listings yet. Open{" "}
                       <Link href="/sync-runs" className="bk-link">
                         Sync runs

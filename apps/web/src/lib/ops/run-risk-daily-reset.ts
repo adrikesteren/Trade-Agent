@@ -7,20 +7,20 @@ export type RunRiskDailyResetResult = {
   rowsUpdated: number;
 };
 
-/** Reset `daily_pnl_eur` for all users (intended once per UTC day via scheduled worker). Kill switch and other fields unchanged. */
+/** Reset `risk_daily_pnl_eur` on all executors (intended once per UTC day via scheduled worker). */
 export async function runRiskDailyReset(): Promise<RunRiskDailyResetResult> {
   const admin = createServiceRoleClient();
   const { count, error: cErr } = await admin
     .schema("trading")
-    .from("risk_state")
+    .from("executors")
     .select("*", { count: "exact", head: true });
   if (cErr) throw new Error(cErr.message);
 
   const now = new Date().toISOString();
   const { error } = await admin
     .schema("trading")
-    .from("risk_state")
-    .update({ daily_pnl_eur: 0, updated_at: now })
+    .from("executors")
+    .update({ risk_daily_pnl_eur: 0, updated_at: now })
     .not("user_id", "is", null);
   if (error) throw new Error(error.message);
 

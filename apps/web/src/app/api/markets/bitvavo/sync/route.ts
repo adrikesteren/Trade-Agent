@@ -52,6 +52,7 @@ export async function POST(request: Request) {
       quoteFilter: quote === "all" ? null : quote,
       upsertedListings: result.upsertedListings,
       upsertedAssets: result.upsertedAssets,
+      skippedMissingQuote: result.skippedMissingQuote,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "sync failed";

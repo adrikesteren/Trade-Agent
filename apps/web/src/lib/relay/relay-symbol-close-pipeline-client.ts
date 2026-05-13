@@ -1,10 +1,14 @@
 import "server-only";
 
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
+import { resolveWorkerCronSecret } from "@/lib/workers/resolve-worker-cron-secret";
 
 export const RELAY_POLL_MS = 1000;
 /** Max wait when chaining message-groups (exchange-close). */
 export const RELAY_CHUNK_WAIT_MAX_MS = 3_600_000;
+
+/** Per-message `timeout` (seconds) for Relay `historical-executor-replay` jobs — 30 minutes. */
+export const RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S = 30 * 60;
 
 export function normalizeRelayBaseUrl(): string {
   loadMonorepoDotenvOnce();
@@ -32,11 +36,13 @@ export function relayIngressPostHeaders(): Headers {
   return h;
 }
 
-export function downstreamWorkerHeaders(): Record<string, string> {
+export async function downstreamWorkerHeaders(): Promise<Record<string, string>> {
   loadMonorepoDotenvOnce();
-  const cron = process.env.CRON_SECRET?.trim();
+  const cron = (await resolveWorkerCronSecret())?.trim();
   if (!cron) {
-    throw new Error("CRON_SECRET is not set (required in Relay job headers for worker auth)");
+    throw new Error(
+      "Worker cron secret missing: add public.system_settings row key cron_secret (JSON string or {secret}) or set CRON_SECRET.",
+    );
   }
   return { Authorization: `Bearer ${cron}` };
 }
@@ -48,6 +54,51 @@ export function relayMaxRetries(): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return 2;
   return Math.min(100, Math.max(0, Math.floor(n)));
+}
+
+/** True when Relay ingress + `APP_URL` + worker cron secret (DB or env) are available. */
+export async function isRelayWorkerEnqueueConfigured(): Promise<boolean> {
+  loadMonorepoDotenvOnce();
+  if (
+    !process.env.RELAY_APP_URL?.trim() ||
+    !process.env.RELAY_APP_SECRET?.trim() ||
+    !process.env.APP_URL?.trim()
+  ) {
+    return false;
+  }
+  const cron = await resolveWorkerCronSecret();
+  return Boolean(cron?.trim());
+}
+
+/** Worker URL for one catalog asset CoinGecko coin id discovery (`source` → `sync_runs.trigger_source` when used). */
+export function buildFindCoingeckoIdWorkerUrl(appBase: string, assetCode: string, source: string): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/assets/find-coingecko-id`);
+  u.searchParams.set("assetCode", assetCode.trim());
+  if (source) u.searchParams.set("source", source);
+  return u.toString();
+}
+
+/** Orchestrator: same worker route with `all=true` (Relay message-group or inline fallback). */
+export function buildFindCoingeckoIdAllWorkerUrl(appBase: string, source: string): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/assets/find-coingecko-id`);
+  u.searchParams.set("all", "true");
+  if (source) u.searchParams.set("source", source);
+  return u.toString();
+}
+
+/**
+ * @deprecated Prefer {@link buildFindCoingeckoIdAllWorkerUrl} with explicit `source`.
+ * Historical URL for overview / cron; defaults `source=manual`.
+ */
+export function buildCoingeckoCoinIdSyncWorkerUrl(appBase: string): string {
+  return buildFindCoingeckoIdAllWorkerUrl(appBase, "manual");
+}
+
+/** Worker URL for one historical executor replay (`executorId` = `trading.executors.id`). */
+export function buildHistoricalExecutorReplayWorkerUrl(appBase: string, executorId: string): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/historical-executor-replay`);
+  u.searchParams.set("executorId", executorId.trim());
+  return u.toString();
 }
 
 export function buildSymbolClosePipelineUrl(
@@ -123,17 +174,31 @@ export async function waitForRelayMessageTerminal(relayBase: string, messageId: 
   );
 }
 
+export type PostRelaySingleMessageOptions = {
+  /** Max time for the downstream HTTP request, in whole seconds. Sent to Relay as JSON key `timeout`. */
+  timeoutSec?: number;
+};
+
 export async function postRelaySingleMessage(
   relayBase: string,
   url: string,
   headers: Record<string, string>,
   maxRetries: number,
+  options?: PostRelaySingleMessageOptions,
 ): Promise<string> {
   const { origin, path } = toRelayOriginAndPath(url);
+  const body: Record<string, unknown> = { origin, path, method: "POST", headers, maxRetries };
+  const timeoutSec = options?.timeoutSec;
+  if (timeoutSec != null) {
+    const t = Math.floor(timeoutSec);
+    if (Number.isFinite(t) && t > 0) {
+      body.timeout = t;
+    }
+  }
   const res = await fetch(`${relayBase}/api/v1/messages`, {
     method: "POST",
     headers: relayIngressPostHeaders(),
-    body: JSON.stringify({ origin, path, method: "POST", headers, maxRetries }),
+    body: JSON.stringify(body),
   });
   const text = await res.text();
   if (!res.ok) {

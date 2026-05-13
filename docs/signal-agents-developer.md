@@ -35,7 +35,7 @@ Signal agents are **not** the Cursor IDE assistant; here “agent” means a **n
 
 - **No orders** — no Bitvavo order placement, no `trading.orders` / `trading.fills` writes from signal code.
 - **No mediator** — do not write `trade_decisions` from a signal agent.
-- **No untrusted `user_id`** — workers use the Supabase **service role** and must take `user_id` only from **server-trusted configuration** (`SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`). Never copy `user_id` from unsigned client JSON. See [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
+- **No untrusted `user_id`** — workers use the Supabase **service role** and must take `user_id` only from **trusted server configuration**: the **Automated Process** user resolved from `public.automation_actor` (`key = 'automated_process'`), optionally merged with comma-separated **`SIGNAL_USER_IDS`** (extra `auth.users` UUIDs). Never copy `user_id` from unsigned client JSON. See [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
 - **`ADD` / `REDUCE` / `EXIT` without position context** — v1 rule agents should stick to **`ENTER` vs `HOLD`** where possible; exit-style intents are **safe** at the mediator (denied with clear reason codes until the executor supports exits), but can still add noise in `trading.signals` if emitted carelessly.
 
 ---
@@ -64,8 +64,8 @@ Unique constraint (multi-tenant): `(user_id, signal_agent_id, market_id, timefra
 - After a **successful** Bitvavo **EUR** candle sweep **finishes** (`incomplete: false`) for the **catalog storage timeframe** (`15m`) and **`candleRowsUpserted > 0`**, `runEurCandleSweep` resolves the **latest** `catalog.candle_timestamps.close_time` and calls `enqueueSignalsCatalogCloseAfterIncremental` once for that bar.
 - The candle worker still chooses how to fetch Bitvavo data internally; the signal step does **not** branch on those modes — it always targets the newest closed bar on the shared timestamp grid.
 - **Opt-out**: set `SIGNALS_AFTER_CANDLE_DISABLE=1`.
-- **No-op** if neither `SIGNAL_DEFAULT_USER_ID` nor `SIGNAL_USER_IDS` is set — the worker returns `skippedReason: no_signal_user_ids`.
-- **Precedence**: `SIGNAL_DEFAULT_USER_ID` wins when set (single-user). `SIGNAL_USER_IDS` is only parsed when `SIGNAL_DEFAULT_USER_ID` is unset (comma-separated legacy list).
+- **No-op** if the automated actor row is missing **and** `SIGNAL_USER_IDS` resolves to no valid users — the worker returns `skippedReason: no_signal_user_ids`.
+- **Precedence**: **Automated Process** (DB) is always first when present; **`SIGNAL_USER_IDS`** adds further UUIDs (deduped).
 
 ---
 
@@ -96,16 +96,16 @@ To add another `agent_id`, implement an evaluator, register the row in `signal_a
 
 ## Environment variables (summary)
 
-See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table. Minimum to get rows after incremental candle sync:
+See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table. After migrations, **Automated Process** is created automatically; minimum to invoke the worker manually or from a scheduler:
 
-1. `SIGNAL_DEFAULT_USER_ID=<your auth.users uuid>`
-2. `CRON_SECRET` if you invoke the worker manually or from a scheduler.
+1. `CRON_SECRET`
+2. Optional: `SIGNAL_USER_IDS` with extra `auth.users` UUIDs if you need additional pipeline identities beyond the automated actor.
 
 ---
 
 ## Troubleshooting
 
-- **No rows in `trading.signals`**: check `SIGNAL_*` env, confirm EUR `15m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-15m-v1`.
+- **No rows in `trading.signals`**: confirm `public.automation_actor` has `automated_process`, check optional `SIGNAL_USER_IDS`, confirm EUR `15m` candle sweep completed with new rows (`sync_runs` for `bitvavo_candles_eur`), confirm `trading.signal_agents` has `enabled = true` for `ma-cross-15m-v1`.
 - **Upsert errors on unique**: ensure migrations through `20260527100000_signals_signal_agent_uuid_fk.sql` are applied; `onConflict` must match `(user_id, signal_agent_id, market_id, timeframe, close_time)`.
 - **Timeouts locally**: lower universe via `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, or raise `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` / related env caps.
 
@@ -113,7 +113,7 @@ See [apps/web/README.md](../apps/web/README.md#signal-agents-env) for the table.
 
 ## Instructions for AI coding agents (Cursor)
 
-- Respect **RLS worker rules**: service role writes are allowed, but **scope `user_id` from env only**.
+- Respect **RLS worker rules**: service role writes are allowed, but **scope `user_id` from `getCatalogPipelineUserIds` / automation actor + optional env only**.
 - Do **not** place orders or write `trade_decisions` in signal-agent tasks (step 2 scope).
 - When changing indicator logic, **update or add unit tests** under `apps/web/src/lib/signals/*.test.ts` and run `pnpm --filter web test` from the repo root.
 - Prefer **deterministic** rule code for v1; avoid hidden randomness.

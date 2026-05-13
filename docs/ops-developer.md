@@ -42,7 +42,9 @@ where up.user_id = u.id
 | `GET /api/workers/bitvavo-asset-data-sync` | Same as POST with empty body (all assets from API that match catalog rows) |
 | `POST /api/workers/coingecko-metrics-sync` | CoinGecko metrics |
 | `GET /api/workers/coingecko-metrics-sync` | Same as POST with empty body |
-| `POST /api/workers/coingecko-coin-id-sync` | CoinGecko coin id backfill |
+| `GET` or `POST` `/api/workers/assets/find-coingecko-id?assetCode=<code>` | One catalog crypto asset: copy `metadata.coingecko_id` if present, else CoinGecko `/search` (and optional manual task). |
+| `GET` or `POST` `/api/workers/assets/find-coingecko-id?all=true` | All eligible assets (empty `coingecko_coin_id`, no open skip task): **Relay message-group** (one path per asset) when `RELAY_APP_URL` + `RELAY_APP_SECRET` + `APP_URL` + `CRON_SECRET` are set; otherwise **inline** capped sync + `sync_runs`. |
+| `POST /api/workers/coingecko-coin-id-sync` | **Deprecated** — same behavior as `assets/find-coingecko-id?all=true` (delegates in-process). |
 | `GET /api/workers/coingecko-coin-id-sync` | Same as POST |
 | `POST /api/workers/signals-catalog-close` | Signals for one catalog bar (`signals_catalog_close` sync run) |
 | `POST /api/workers/mediator-catalog-close` | Mediator (`mediator_catalog_close`) |

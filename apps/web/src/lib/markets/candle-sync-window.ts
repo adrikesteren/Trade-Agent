@@ -97,6 +97,64 @@ export async function computeCandleSyncWindow(
   return { kind: "ok", startOpenMs, endCloseMs, barCount };
 }
 
+/**
+ * PostgREST caps result sets (`[api] max_rows`, often 1000). Unpaginated selects silently truncate,
+ * which breaks historical/window candle sync beyond the first page.
+ */
+export const CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE = 1000;
+
+/** All `catalog.candle_timestamps.id` with `close_time` in `[gte, lte]` (ordered ascending). */
+export async function fetchAllCandleTimestampIdsInCloseTimeRange(
+  admin: SupabaseClient,
+  args: { closeTimeGteIso: string; closeTimeLteIso: string },
+): Promise<string[]> {
+  const ids: string[] = [];
+  const page = CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE;
+  for (let from = 0; ; from += page) {
+    const to = from + page - 1;
+    const { data, error } = await admin
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id")
+      .gte("close_time", args.closeTimeGteIso)
+      .lte("close_time", args.closeTimeLteIso)
+      .order("close_time", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(`candle_timestamps: ${error.message}`);
+    const chunk = (data ?? []).map((r) => r.id as string).filter(Boolean);
+    if (!chunk.length) break;
+    ids.push(...chunk);
+    if (chunk.length < page) break;
+  }
+  return ids;
+}
+
+/** All timestamp rows overlapping `[openTimeGteIso, closeTimeLteIso]` for Bitvavo candle upsert keying. */
+export async function fetchAllCandleTimestampRowsForCandleWindow(
+  admin: SupabaseClient,
+  args: { openTimeGteIso: string; closeTimeLteIso: string },
+): Promise<{ id: string; open_time: string; close_time: string }[]> {
+  const rowsOut: { id: string; open_time: string; close_time: string }[] = [];
+  const page = CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE;
+  for (let from = 0; ; from += page) {
+    const to = from + page - 1;
+    const { data, error } = await admin
+      .schema("catalog")
+      .from("candle_timestamps")
+      .select("id, open_time, close_time")
+      .gte("open_time", args.openTimeGteIso)
+      .lte("close_time", args.closeTimeLteIso)
+      .order("open_time", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(`candle_timestamps: ${error.message}`);
+    const chunk = (data ?? []) as { id: string; open_time: string; close_time: string }[];
+    if (!chunk.length) break;
+    rowsOut.push(...chunk);
+    if (chunk.length < page) break;
+  }
+  return rowsOut;
+}
+
 export async function bulkUpsertCandleTimestampsForWindow(
   admin: SupabaseClient,
   startOpenMs: number,

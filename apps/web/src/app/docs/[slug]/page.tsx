@@ -1,4 +1,4 @@
-import { PageHeader, Stack } from "@repo/blocks";
+import { PageHeader, Stack } from "@repo/adricore/blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";

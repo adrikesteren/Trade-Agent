@@ -1,4 +1,6 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -10,7 +12,7 @@ import {
   RecordDetailCard,
   RecordDetailGrid,
   RecordDetailSection,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -19,6 +21,7 @@ type PageProps = { params: Promise<{ id: string }> };
 type SignalDetail = {
   id: string;
   signal_agent_id: string;
+  candle_id: string;
   market_id: string;
   timeframe: string;
   close_time: string;
@@ -29,6 +32,37 @@ type SignalDetail = {
   created_at: string;
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
+
+type SignalRowDb = {
+  id: string;
+  signal_agent_id: string;
+  candle_id: string;
+  intent: string;
+  confidence: number | string | null;
+  reasons: unknown;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  signal_agents: { agent_id: string } | { agent_id: string }[] | null;
+};
+
+function flattenSignalDetail(row: SignalRowDb, candle: CatalogCandleBar | undefined): SignalDetail {
+  const close_time =
+    candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : row.created_at;
+  return {
+    id: row.id,
+    signal_agent_id: row.signal_agent_id,
+    candle_id: row.candle_id,
+    market_id: candle?.market_id ? candle.market_id.trim() : "",
+    timeframe: candle?.timeframe ? candle.timeframe.trim() || "—" : "—",
+    close_time,
+    intent: row.intent,
+    confidence: row.confidence,
+    reasons: row.reasons,
+    metadata: row.metadata,
+    created_at: row.created_at,
+    signal_agents: row.signal_agents,
+  };
+}
 
 function isUuidLike(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
@@ -71,22 +105,29 @@ export default async function SignalDetailPage({ params }: PageProps) {
     .schema("trading")
     .from("signals")
     .select(
-      "id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, reasons, metadata, created_at, signal_agents ( agent_id )",
+      "id, signal_agent_id, candle_id, intent, confidence, reasons, metadata, created_at, signal_agents ( agent_id )",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (sigErr || !sigRow) notFound();
 
-  const sig = sigRow as SignalDetail;
+  const rowDb = sigRow as SignalRowDb;
+  const cid = String(rowDb.candle_id ?? "").trim();
+  const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
+  const sig = flattenSignalDetail(rowDb, cid ? candleById.get(cid) : undefined);
 
-  const { data: mRow } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("market_symbol")
-    .eq("id", sig.market_id)
-    .maybeSingle();
-  const marketSym = String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim();
+  const { data: mRow } = sig.market_id
+    ? await supabase
+        .schema("catalog")
+        .from("markets")
+        .select("market_symbol")
+        .eq("id", sig.market_id)
+        .maybeSingle()
+    : { data: null };
+  const marketSym = sig.market_id
+    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
+    : "";
 
   const agentSlug = agentSlugFromRow(sig);
   const metaJson =
@@ -100,7 +141,7 @@ export default async function SignalDetailPage({ params }: PageProps) {
           variant="detail"
           icon={<ListViewObjectIcon letter="S" />}
           eyebrow="Signal"
-          title={marketSym || `Signal ${sig.id.slice(0, 8)}…`}
+          title={marketSym || (sig.market_id ? `Market ${sig.market_id.slice(0, 8)}…` : `Signal ${sig.id.slice(0, 8)}…`)}
           titleClassName="font-mono"
           highlights={
             <>
@@ -121,23 +162,27 @@ export default async function SignalDetailPage({ params }: PageProps) {
           }
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signals" relatedId={sig.id} />}
       content={
         <RecordDetailTabs
           defaultTab="details"
-          related={<p className="bk-text-muted text-sm">No linked trade decisions from this page.</p>}
           details={
             <RecordDetailCard>
               <RecordDetailSection title="Details">
                 <RecordDetailGrid>
                   <Output label="Signal ID" type="text" value={sig.id} span="full" />
-                  <Output
-                    label="Market"
-                    record={{
-                      pathPrefix: "/markets",
-                      id: sig.market_id,
-                      name: marketSym || sig.market_id.slice(0, 8) + "…",
-                    }}
-                  />
+                  {sig.market_id ? (
+                    <Output
+                      label="Market"
+                      record={{
+                        pathPrefix: "/markets",
+                        id: sig.market_id,
+                        name: marketSym || sig.market_id.slice(0, 8) + "…",
+                      }}
+                    />
+                  ) : (
+                    <Output label="Market" type="text" value="—" />
+                  )}
                   <Output
                     label="Agent"
                     record={{
@@ -162,6 +207,11 @@ export default async function SignalDetailPage({ params }: PageProps) {
                 </RecordDetailGrid>
               </RecordDetailSection>
             </RecordDetailCard>
+          }
+          related={
+            <div className="bk-stack bk-stack_gap-md">
+              <p className="bk-text-muted text-sm">No linked trade decisions from this page.</p>
+            </div>
           }
         />
       }

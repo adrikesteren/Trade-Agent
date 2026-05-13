@@ -2,7 +2,10 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getAutomatedProcessUserId } from "@/lib/automation-actor";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { fetchWalletBalanceForAsset } from "@/lib/trading/executor-wallet";
+import { fetchHistoricalExecutorPaperMarket } from "@/lib/historical/historical-executor-paper-market";
 import { timeframeDurationMs } from "@/lib/markets/prepare-eur-candle-timestamp-window";
 import { runExecutorCatalogCloseDrain } from "@/lib/executor/run-executor-catalog-close";
 import { runMediatorCatalogCloseDrain } from "@/lib/mediator/run-mediator-catalog-close";
@@ -11,10 +14,13 @@ import { fetchExchangeIdByCode } from "@/lib/trading/executors";
 import { computeHistoricalCandleWindow } from "./historical-candle-window";
 import { ingestHistoricalExecutorCandles } from "./ingest-historical-executor-candles";
 import { upsertSignalsForMarketCloseFromBars } from "./upsert-signals-for-market-close";
-import { wipeHistoricalExecutorSimulationState } from "./wipe-historical-executor-simulation";
+import { fetchAllCandleTimestampIdsInCloseTimeRange } from "@/lib/markets/candle-sync-window";
 
 /** Extra closed bars before the replay window so MA/ATR/RSI have enough history. */
 const WARMUP_BARS = 120;
+
+/** PostgREST `.in()` batch size for `candle_timestamp_id` (URI length). */
+const CANDLE_TS_IN_CHUNK = 80;
 
 type CandleRowDb = {
   id: string;
@@ -64,19 +70,13 @@ async function loadCandlesThroughRange(
     closeTimeIso: string;
   }[]
 > {
-  const { data: tsRows, error: tsErr } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .select("id")
-    .gte("close_time", args.closeTimeGteIso)
-    .lte("close_time", args.closeTimeLteIso)
-    .order("close_time", { ascending: true });
-  if (tsErr) throw new Error(tsErr.message);
-  const tsIds = (tsRows ?? []).map((r) => r.id as string).filter(Boolean);
+  const tsIds = await fetchAllCandleTimestampIdsInCloseTimeRange(admin, {
+    closeTimeGteIso: args.closeTimeGteIso,
+    closeTimeLteIso: args.closeTimeLteIso,
+  });
   const out: CandleRowDb[] = [];
-  const chunk = 400;
-  for (let i = 0; i < tsIds.length; i += chunk) {
-    const part = tsIds.slice(i, i + chunk);
+  for (let i = 0; i < tsIds.length; i += CANDLE_TS_IN_CHUNK) {
+    const part = tsIds.slice(i, i + CANDLE_TS_IN_CHUNK);
     const { data: cRows, error: cErr } = await admin
       .schema("catalog")
       .from("candles")
@@ -88,6 +88,31 @@ async function loadCandlesThroughRange(
     out.push(...((cRows ?? []) as CandleRowDb[]));
   }
   return mapCandleRows(out);
+}
+
+/** Count `catalog.candles` rows for a market/timeframe whose bucket `close_time` lies in the range. */
+async function countCandlesForMarketByCloseTimeRange(
+  admin: SupabaseClient,
+  args: { marketId: string; timeframe: string; closeTimeGteIso: string; closeTimeLteIso: string },
+): Promise<number> {
+  const tsIds = await fetchAllCandleTimestampIdsInCloseTimeRange(admin, {
+    closeTimeGteIso: args.closeTimeGteIso,
+    closeTimeLteIso: args.closeTimeLteIso,
+  });
+  let total = 0;
+  for (let i = 0; i < tsIds.length; i += CANDLE_TS_IN_CHUNK) {
+    const part = tsIds.slice(i, i + CANDLE_TS_IN_CHUNK);
+    const { count, error } = await admin
+      .schema("catalog")
+      .from("candles")
+      .select("id", { count: "exact", head: true })
+      .eq("market_id", args.marketId)
+      .eq("timeframe", args.timeframe)
+      .in("candle_timestamp_id", part);
+    if (error) throw new Error(error.message);
+    total += count ?? 0;
+  }
+  return total;
 }
 
 export type HistoricalExecutorReplayResult = {
@@ -146,38 +171,33 @@ export async function runHistoricalExecutorReplay(
   if (assetIds.length !== 1) {
     throw new Error("Historical executor must have exactly one whitelisted asset.");
   }
+  const baseAssetId = assetIds[0]!;
+  const baseBalance = await fetchWalletBalanceForAsset(admin, { executorId: args.executorId, assetId: baseAssetId });
+  if (!Number.isFinite(baseBalance) || baseBalance <= 0) {
+    throw new Error(
+      "Add a positive wallet balance for the whitelisted base asset (same asset as the single filter) before running a historical replay.",
+    );
+  }
   const bitvavoId = await fetchExchangeIdByCode(admin, "bitvavo");
   if (String(ex.exchange_id) !== bitvavoId) {
     throw new Error("Historical replay requires a Bitvavo executor exchange.");
   }
 
-  const { data: mkt, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol")
-    .eq("exchange_id", bitvavoId)
-    .eq("asset_id", assetIds[0]!)
-    .eq("quote_code", quote)
-    .maybeSingle();
-  if (mErr) throw new Error(mErr.message);
-  if (!mkt?.id) {
+  const automatedUserId = await getAutomatedProcessUserId(admin);
+  if (!automatedUserId) {
+    throw new Error(
+      "Historical replay requires the automated_process user (automation_actor or user_profiles.username = automated_process).",
+    );
+  }
+
+  const paper = await fetchHistoricalExecutorPaperMarket(admin, {
+    executorExchangeId: String(ex.exchange_id),
+    filterBaseAssetId: baseAssetId,
+  });
+  if (!paper) {
     throw new Error("No Bitvavo EUR market found for the selected asset.");
   }
-  const marketId = mkt.id as string;
-  const marketSymbol = String(mkt.market_symbol ?? "");
-
-  const { data: rs, error: rsErr } = await admin
-    .schema("trading")
-    .from("risk_state")
-    .select("equity_eur")
-    .eq("executor_id", args.executorId)
-    .eq("user_id", args.userId)
-    .maybeSingle();
-  if (rsErr) throw new Error(rsErr.message);
-  const equity = Number(rs?.equity_eur ?? 0);
-  if (!Number.isFinite(equity) || equity <= 0) {
-    throw new Error("Add a positive EUR balance before running a historical replay.");
-  }
+  const { marketId, marketSymbol } = paper;
 
   const win = computeHistoricalCandleWindow({ startDate: hStart, endDate: hEnd, timeframe });
   if (win.kind !== "ok") {
@@ -214,13 +234,24 @@ export async function runHistoricalExecutorReplay(
       historicalEndDate: hEnd,
     });
 
-    await wipeHistoricalExecutorSimulationState(admin, {
-      userId: args.userId,
-      executorId: args.executorId,
+    const firstReplayCloseIso = new Date(firstReplayCloseMs).toISOString();
+    const candleCountInReplayWindow = await countCandlesForMarketByCloseTimeRange(admin, {
       marketId,
-      closeTimeGte: new Date(firstReplayCloseMs).toISOString(),
-      closeTimeLte: lastReplayCloseIso,
+      timeframe,
+      closeTimeGteIso: firstReplayCloseIso,
+      closeTimeLteIso: lastReplayCloseIso,
     });
+    const missingBars = win.barCount - candleCountInReplayWindow;
+    const largeIngestShortfall =
+      missingBars >= Math.max(50, Math.ceil(win.barCount * 0.02));
+    if (largeIngestShortfall) {
+      throw new Error(
+        `Historical candle ingest is severely incomplete: expected ${win.barCount} closed bars between ${hStart} and ${hEnd} ` +
+          `but only ${candleCountInReplayWindow} rows exist in catalog.candles for that close range (missing ${missingBars}). ` +
+          `Bitvavo omits intervals with no trades (see https://docs.bitvavo.com/docs/rest-api/get-candlestick-data/). ` +
+          `If the market should be liquid across the whole range, retry after verifying Bitvavo window sync and timestamp grid alignment.`,
+      );
+    }
 
     const sortedAll = await loadCandlesThroughRange(admin, {
       marketId,
@@ -236,7 +267,7 @@ export async function runHistoricalExecutorReplay(
       throw new Error("No candles in database for the historical range after ingest.");
     }
 
-    const signalUserOverride = [args.userId];
+    const signalUserIds = [automatedUserId];
     let signalsUpsertedTotal = 0;
     let decisionsUpsertedTotal = 0;
     let ordersInsertedTotal = 0;
@@ -251,7 +282,7 @@ export async function runHistoricalExecutorReplay(
         timeframe,
         closeTimeIso: targetClose,
         sortedBarsAsc: barsThrough,
-        signalUserIds: signalUserOverride,
+        signalUserIds,
         candleSyncRunId: null,
         signalsSyncRunId: null,
       });
@@ -262,8 +293,9 @@ export async function runHistoricalExecutorReplay(
         quote,
         onlyMarketId: marketId,
         onlyExecutorId: args.executorId,
-        signalUserIdsOverride: signalUserOverride,
+        signalQueryUserIds: signalUserIds,
         disableDownstreamEnqueue: true,
+        historicalReplayScaleInEnter: true,
       });
       decisionsUpsertedTotal += med.decisionsUpserted;
 
@@ -273,7 +305,6 @@ export async function runHistoricalExecutorReplay(
         quote,
         onlyMarketId: marketId,
         onlyExecutorId: args.executorId,
-        signalUserIdsOverride: signalUserOverride,
         disableDownstreamEnqueue: true,
       });
       ordersInsertedTotal += exo.ordersInserted;

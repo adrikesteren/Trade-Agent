@@ -1,6 +1,7 @@
 "use client";
 
 import { addExecutorBalance, removeExecutorBalance } from "@/app/(app)/executors/actions";
+import type { AssetOption } from "@/app/(app)/executors/executor-form";
 import {
   Alert,
   Button,
@@ -10,11 +11,20 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { useRouter } from "next/navigation";
-import { useId, useState, useTransition } from "react";
+import { useId, useMemo, useState, useTransition } from "react";
 
-export function ExecutorDetailBalanceActions({ executorId }: { executorId: string }) {
+export function ExecutorDetailBalanceActions({
+  executorId,
+  assetOptions,
+  preferredDepositAssetId,
+}: {
+  executorId: string;
+  assetOptions: AssetOption[];
+  /** When set and present in `assetOptions`, default Add/Remove asset (replay market quote). */
+  preferredDepositAssetId?: string | null;
+}) {
   const router = useRouter();
   const uid = useId();
   const [addOpen, setAddOpen] = useState(false);
@@ -23,6 +33,13 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
   const [removeErr, setRemoveErr] = useState<string | null>(null);
   const [pendingAdd, startAddTransition] = useTransition();
   const [pendingRemove, startRemoveTransition] = useTransition();
+
+  const defaultAssetId = useMemo(() => {
+    const pref = String(preferredDepositAssetId ?? "").trim();
+    if (pref && assetOptions.some((o) => o.id === pref)) return pref;
+    const eur = assetOptions.find((o) => o.code.toUpperCase() === "EUR");
+    return eur?.id ?? assetOptions[0]?.id ?? "";
+  }, [assetOptions, preferredDepositAssetId]);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -41,8 +58,10 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
         }}
       >
         <DialogContent>
-          <DialogTitle>Add balance (EUR)</DialogTitle>
-          <DialogDescription>Credit simulated EUR to this executor. Shown on the balance card after save.</DialogDescription>
+          <DialogTitle>Add wallet balance</DialogTitle>
+          <DialogDescription>
+            Credit quantity to this executor wallet for the selected catalog asset. Appears in wallet transactions after save.
+          </DialogDescription>
           {addErr ? <Alert tone="error">{addErr}</Alert> : null}
           <form
             className="bk-stack bk-stack_gap-sm mt-3"
@@ -63,15 +82,35 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
               });
             }}
           >
+            <label className="bk-form-label text-xs" htmlFor={`${uid}-add-asset`}>
+              Asset
+            </label>
+            <select
+              id={`${uid}-add-asset`}
+              name="asset_id"
+              required
+              className="bk-input w-full text-sm"
+              defaultValue={defaultAssetId || undefined}
+            >
+              {assetOptions.length === 0 ? (
+                <option value="">No assets loaded</option>
+              ) : (
+                assetOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.code}
+                  </option>
+                ))
+              )}
+            </select>
             <label className="bk-form-label text-xs" htmlFor={`${uid}-add-amt`}>
-              Amount
+              Quantity
             </label>
             <input
               id={`${uid}-add-amt`}
-              name="amount_eur"
+              name="quantity"
               type="number"
-              min="0.01"
-              step="0.01"
+              min="0.00000001"
+              step="any"
               required
               className="bk-input w-full font-mono text-sm"
             />
@@ -91,7 +130,7 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
                   Cancel
                 </Button>
               </DialogClose>
-              <Button type="submit" disabled={pendingAdd} variant="brand" size="sm">
+              <Button type="submit" disabled={pendingAdd || assetOptions.length === 0} variant="brand" size="sm">
                 Add balance
               </Button>
             </DialogFooter>
@@ -107,8 +146,10 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
         }}
       >
         <DialogContent>
-          <DialogTitle>Remove balance (EUR)</DialogTitle>
-          <DialogDescription>Debits simulated EUR from this executor, subject to available equity.</DialogDescription>
+          <DialogTitle>Remove wallet balance</DialogTitle>
+          <DialogDescription>
+            Debits quantity from this executor wallet for the selected asset. Cannot exceed the current wallet sum for that asset.
+          </DialogDescription>
           {removeErr ? <Alert tone="error">{removeErr}</Alert> : null}
           <form
             className="bk-stack bk-stack_gap-sm mt-3"
@@ -129,15 +170,35 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
               });
             }}
           >
+            <label className="bk-form-label text-xs" htmlFor={`${uid}-rm-asset`}>
+              Asset
+            </label>
+            <select
+              id={`${uid}-rm-asset`}
+              name="asset_id"
+              required
+              className="bk-input w-full text-sm"
+              defaultValue={defaultAssetId || undefined}
+            >
+              {assetOptions.length === 0 ? (
+                <option value="">No assets loaded</option>
+              ) : (
+                assetOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.code}
+                  </option>
+                ))
+              )}
+            </select>
             <label className="bk-form-label text-xs" htmlFor={`${uid}-rm-amt`}>
-              Amount
+              Quantity
             </label>
             <input
               id={`${uid}-rm-amt`}
-              name="amount_eur"
+              name="quantity"
               type="number"
-              min="0.01"
-              step="0.01"
+              min="0.00000001"
+              step="any"
               required
               className="bk-input w-full font-mono text-sm"
             />
@@ -157,7 +218,7 @@ export function ExecutorDetailBalanceActions({ executorId }: { executorId: strin
                   Cancel
                 </Button>
               </DialogClose>
-              <Button type="submit" disabled={pendingRemove} variant="neutral" size="sm">
+              <Button type="submit" disabled={pendingRemove || assetOptions.length === 0} variant="neutral" size="sm">
                 Remove balance
               </Button>
             </DialogFooter>

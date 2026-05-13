@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
 
 /** Escape `%`, `_`, and `\` for use as a literal in PostgREST `ilike` without wildcards. */
 export function escapeIlikeExactPattern(raw: string): string {
@@ -100,13 +101,21 @@ export async function resolvePrimaryMarketByCodes(
   const assetId = asset.id as string;
   const assetCode = String(asset.code);
 
+  const quoteAssetId = await resolveQuoteAssetId(supabase, quoteCode);
+  if (!quoteAssetId) {
+    throw new ResolvePrimaryMarketError(
+      "market_not_found_for_asset_exchange_quote",
+      `No catalog asset for quote ${quoteCode} (fiat ISO or crypto code)`,
+    );
+  }
+
   const { data: mRows, error: mErr } = await supabase
     .schema("catalog")
     .from("markets")
     .select("id, market_symbol")
     .eq("exchange_id", exchangeId)
     .eq("asset_id", assetId)
-    .eq("quote_code", quoteCode);
+    .eq("quote_asset_id", quoteAssetId);
 
   if (mErr) throw new Error(mErr.message);
   const markets = (mRows ?? []) as { id: string; market_symbol: string }[];

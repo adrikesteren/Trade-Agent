@@ -1,9 +1,9 @@
 import "server-only";
 
-import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
-
 import { executeMediatorCatalogCloseWithSyncRun } from "./run-mediator-catalog-close-with-sync-run";
 import type { MediatorCatalogCloseBody } from "./run-mediator-catalog-close";
+import { getCatalogPipelineUserIds } from "@/lib/signals/signal-user-ids";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 /** After the last `signals-catalog-close` batch for a bar, run one mediator pass (same close grid). */
 export async function enqueueMediatorCatalogCloseAfterSignals(params: {
@@ -13,7 +13,8 @@ export async function enqueueMediatorCatalogCloseAfterSignals(params: {
   signalsSyncRunId?: string | null;
 }): Promise<void> {
   if (process.env.MEDIATOR_AFTER_SIGNALS_DISABLE === "1") return;
-  if (!parseSignalUserIdsFromEnv().length) return;
+  const admin = createServiceRoleClient();
+  if (!(await getCatalogPipelineUserIds(admin)).length) return;
 
   const body: MediatorCatalogCloseBody = {
     closeTimeIso: params.closeTimeIso,

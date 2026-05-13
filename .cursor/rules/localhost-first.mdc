@@ -13,6 +13,12 @@ The maintainer builds, runs, and tests **only on localhost** (`next dev`, local 
 - Recurring catalog/candle jobs: call `GET`/`POST /api/workers/*` with `Authorization: Bearer ${CRON_SECRET}` from any scheduler (Task Scheduler, systemd, etc.), or use **Sync now** on the dashboard; workers run **inline** in the Next server. Optional in-process dev timers: `ENABLE_LOCAL_CANDLE_AUTO_SYNC` / CoinGecko locals only if someone re-imports those scheduler modules from `instrumentation`.
 - When documenting syncs or workers, lead with **CRON_SECRET + manual Sync now** (dashboard) for localhost.
 
+## Do not — database / Supabase (absolute)
+
+- **Never** run `supabase db reset`, `supabase db reset --yes`, or any command that **wipes or recreates** the local (or linked) Postgres database **unless the user explicitly asks for a full reset** in their own words (e.g. “reset my local DB”, “schone database”, “db reset is ok”).
+- To **apply migrations** without destroying data, use non-destructive flows only (e.g. `supabase migration up` / `migration list` for pending migrations, or the project’s documented migrate path). If unsure, **ask the user first** instead of guessing.
+- Treat **data loss** as unacceptable by default: no “I’ll just reset to fix migrations” shortcuts.
+
 ## Do not (unless the user explicitly asks about deploy or names a host)
 
 - Do **not** bring up **Vercel**, **Vercel Cron**, or “deploy to Vercel” as the default or implied next step.

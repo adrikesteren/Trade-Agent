@@ -19,7 +19,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {

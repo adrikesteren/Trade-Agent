@@ -3,7 +3,7 @@ import {
   ListViewPlaceholderToolbar,
   ListViewTitlePickerPlaceholder,
   PageHeader,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import type { ReactNode } from "react";
 
 export type ObjectListViewHeaderProps = {

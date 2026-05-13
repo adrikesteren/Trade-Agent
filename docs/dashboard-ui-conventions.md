@@ -1,6 +1,6 @@
 # Dashboard UI conventions (Salesforce-inspired)
 
-List and detail screens under `apps/web/src/app/(app)/**` follow **Salesforce Lightning-style** patterns implemented in `@repo/blocks`. New or refactored pages should stay consistent so the product feels coherent.
+List and detail screens under `apps/web/src/app/(app)/**` follow **Salesforce Lightning-style** patterns implemented in `@repo/adricore/blocks`. New or refactored pages should stay consistent so the product feels coherent.
 
 ## List views (object list / grid)
 
@@ -39,7 +39,7 @@ Treat each `*/[id]/page.tsx` (or similar dynamic segment) as a **Lightning recor
 
 ### Page shell: `DetailPageLayout`
 
-Wrap the whole screen in **`DetailPageLayout`** from `@repo/blocks`. It composes `RecordDetailLayout` (page background) and defines three slots:
+Wrap the whole screen in **`DetailPageLayout`** from `@repo/adricore/blocks`. It composes `RecordDetailLayout` (page background) and defines three slots:
 
 | Slot | Role |
 |------|--------|
@@ -70,7 +70,7 @@ Record IDs, tickers, exchange codes, job keys, etc. are **normal fields** → us
 
 ### Reference implementations
 
-- `apps/web/src/app/(app)/assets/[id]/page.tsx`
+- `apps/web/src/app/(app)/assets/[slug]/page.tsx`
 - `apps/web/src/app/(app)/exchanges/[id]/page.tsx`
 - `apps/web/src/app/(app)/markets/[id]/page.tsx`
 - `apps/web/src/app/(app)/sync-runs/[id]/page.tsx`
@@ -78,7 +78,7 @@ Record IDs, tickers, exchange codes, job keys, etc. are **normal fields** → us
 - `apps/web/src/app/(app)/signal-agents/[id]/page.tsx`
 - `apps/web/src/app/(app)/executors/[id]/page.tsx`
 
-Styling lives in `packages/blocks/src/styles/blocks.css` (search for `bk-listview`, `bk-record-detail`, `bk-detail-page-layout`, `bk-output`).
+Styling lives in `packages/adricore/src/blocks/styles/blocks.css` (search for `bk-listview`, `bk-record-detail`, `bk-detail-page-layout`, `bk-output`).
 
 ---
 
@@ -88,6 +88,6 @@ When adding or editing dashboard routes:
 
 1. **List route** → apply the list view checklist above; reuse `ObjectListViewHeader` when the page is a simple data dump.
 2. **Detail route** → wrap with `DetailPageLayout` (`header` / `content` / optional `sidebar`); apply the detail checklist; use `Output` + `record`/`lookup` for every foreign key that has a detail URL in this app.
-3. Prefer extending `@repo/blocks` over one-off Tailwind in pages when the pattern is reusable.
+3. Prefer extending `@repo/adricore/blocks` over one-off Tailwind in pages when the pattern is reusable.
 
-Point agents at this file when working under `apps/web/src/app/(app)/**` or `packages/blocks/**`.
+Point agents at this file when working under `apps/web/src/app/(app)/**` or `packages/adricore/src/blocks/**`.

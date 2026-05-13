@@ -6,4 +6,5 @@ export const DEFAULT_USER_LOCALE_PREFERENCES: UserLocalePreferences = {
   decimal_format: "comma_decimal",
   date_format: "dmy",
   time_format: "h24",
+  primary_asset: null,
 };

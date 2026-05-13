@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 import { enqueueMediatorCatalogCloseAfterSignals } from "@/lib/mediator/enqueue-mediator-catalog-close";
@@ -12,7 +13,7 @@ import { closeTimesMatch } from "@/lib/trading/close-time-match";
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval";
 import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval";
-import { filterSignalUserIdsToExistingAuthUsers, parseSignalUserIdsFromEnv } from "./signal-user-ids";
+import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids";
 
 export type SignalsCatalogCloseBody = {
   closeTimeIso: string;
@@ -27,7 +28,7 @@ export type SignalsCatalogCloseBody = {
   onlyMarketId?: string | null;
   /** When true, do not enqueue full-catalog mediator HTTP job after the last batch. */
   disableDownstreamEnqueue?: boolean;
-  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay for executor owner). */
+  /** When set, use these user ids instead of the default catalog pipeline users (historical replay for executor owner). */
   signalUserIdsOverride?: string[] | null;
 };
 
@@ -88,12 +89,14 @@ async function fetchCandlesForMarket(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; barLimit: number },
 ): Promise<CandleRow[]> {
+  // Newest bars first, then cap — unbounded LIMIT without ORDER can omit the latest close (wrong eval / missing target bar).
   const { data, error } = await admin
     .schema("catalog")
     .from("candles")
-    .select("id, open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
+    .select("id, open, high, low, close, volume, candle_timestamps!inner ( open_time, close_time )")
     .eq("market_id", args.marketId)
     .eq("timeframe", args.timeframe)
+    .order("close_time", { ascending: false, foreignTable: "candle_timestamps" })
     .limit(args.barLimit);
 
   if (error) throw new Error(error.message);
@@ -111,7 +114,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
   const disableDownstreamEnqueue = body.disableDownstreamEnqueue === true;
 
   const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
-  const configuredUserIds = override?.length ? override : parseSignalUserIdsFromEnv();
+  const configuredUserIds = override?.length ? override : await getCatalogPipelineUserIds(admin);
   if (!configuredUserIds.length) {
     return {
       ok: true,
@@ -126,6 +129,19 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
   const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
   if (exErr || !ex) throw new Error("Bitvavo exchange not found");
   const exchangeId = ex.id as string;
+
+  const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+  const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
+  if (quoteNorm && !quoteAssetIdFilter) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      signalsUpserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      skippedReason: "unknown_quote_asset",
+    };
+  }
 
   let effectiveTotal: number;
   let rows: { id: string; market_symbol: string }[];
@@ -169,8 +185,8 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       .from("markets")
       .select("id", { count: "exact", head: true })
       .eq("exchange_id", exchangeId);
-    if (quote != null && String(quote).trim() !== "") {
-      countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
+    if (quoteAssetIdFilter) {
+      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
     }
     const { count: totalMarkets, error: countErr } = await countQuery;
     if (countErr) throw new Error(countErr.message);
@@ -189,7 +205,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       };
     }
 
-    const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+    const quoteArg = quoteNorm;
     const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
       p_exchange_id: exchangeId,
       p_quote: quoteArg,
@@ -237,12 +253,14 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, configuredUserIds);
   if (!signalUserIds.length && configuredUserIds.length > 0) {
     console.warn(
-      "[signals-catalog-close] SIGNAL_DEFAULT_USER_ID / SIGNAL_USER_IDS: none of the configured UUIDs exist in this project's auth.users (local vs prod .env?). Skipping signal upserts for this batch; remaining market batches still advance.",
+      "[signals-catalog-close] No catalog pipeline user ids resolved (automated_process missing in automation_actor / user_profiles, or auth user missing). Skipping signal upserts for this batch; remaining market batches still advance.",
     );
   }
 
   const barLimit = barsForRetention(timeframe);
   let signalsUpserted = 0;
+
+  const noAgentsForTf = activeAgents.length === 0 && rows.length > 0;
 
   if (signalUserIds.length > 0) {
     for (const m of rows) {
@@ -252,7 +270,6 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       const barsAsc: MaCrossBar[] = sorted.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
       const targetRow = sorted.find((r) => closeTimesMatch(r.closeTimeIso, closeTimeIso));
       const candleId = targetRow?.id ?? null;
-      const closeTimeForRow = targetRow?.closeTimeIso ?? closeTimeIso;
 
       for (const agent of activeAgents) {
         const cfg = (agent.config ?? {}) as Record<string, unknown>;
@@ -299,13 +316,11 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
         }
 
         for (const userId of signalUserIds) {
+          if (!candleId) continue;
           const row = {
             user_id: userId,
             signal_agent_id: agent.id,
-            market_id: marketId,
             candle_id: candleId,
-            timeframe,
-            close_time: closeTimeForRow,
             intent: ev.intent,
             confidence: ev.confidence,
             reasons: ev.reasons,
@@ -319,7 +334,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
           };
 
           const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-            onConflict: "user_id,signal_agent_id,market_id,timeframe,close_time",
+            onConflict: "user_id,signal_agent_id,candle_id",
           });
           if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
           signalsUpserted += 1;
@@ -351,15 +366,20 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     }
   }
 
+  let skippedReason: RunSignalsCatalogCloseResult["skippedReason"];
+  if (configuredUserIds.length > 0 && signalUserIds.length === 0) {
+    skippedReason = "signal_user_ids_not_in_auth";
+  } else if (noAgentsForTf) {
+    skippedReason = "no_enabled_signal_agents_for_timeframe";
+  }
+
   return {
     ok: true,
     marketsProcessed: rows.length,
     signalsUpserted,
     nextMarketOffset,
     totalMarkets: effectiveTotal,
-    ...(configuredUserIds.length > 0 && signalUserIds.length === 0
-      ? { skippedReason: "signal_user_ids_not_in_auth" as const }
-      : {}),
+    ...(skippedReason ? { skippedReason } : {}),
   };
 }
 
@@ -369,6 +389,7 @@ export async function runSignalsCatalogCloseDrain(body: SignalsCatalogCloseBody)
   let totalSignals = 0;
   let totalMarkets = 0;
   let last: RunSignalsCatalogCloseResult | null = null;
+  let firstSkippedReason: RunSignalsCatalogCloseResult["skippedReason"];
   const maxIters = Number(process.env.SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS ?? 400);
   const cap = Math.min(Math.max(Math.floor(maxIters), 1), 2000);
 
@@ -378,6 +399,9 @@ export async function runSignalsCatalogCloseDrain(body: SignalsCatalogCloseBody)
     totalMarkets = last.totalMarkets;
     totalSignals += last.signalsUpserted;
     marketsSum += last.marketsProcessed;
+    if (firstSkippedReason == null && last.skippedReason) {
+      firstSkippedReason = last.skippedReason;
+    }
     if (last.nextMarketOffset == null) break;
     offset = last.nextMarketOffset;
   }
@@ -388,5 +412,6 @@ export async function runSignalsCatalogCloseDrain(body: SignalsCatalogCloseBody)
     signalsUpserted: totalSignals,
     nextMarketOffset: last?.nextMarketOffset ?? null,
     totalMarkets,
+    ...(totalSignals === 0 && firstSkippedReason ? { skippedReason: firstSkippedReason } : {}),
   };
 }

@@ -18,7 +18,7 @@ export async function wipeHistoricalExecutorSimulationState(
 ): Promise<void> {
   const { data: decs, error: dErr } = await admin
     .schema("trading")
-    .from("trade_decisions")
+    .from("decisions")
     .select("id")
     .eq("user_id", args.userId)
     .eq("executor_id", args.executorId)
@@ -28,6 +28,7 @@ export async function wipeHistoricalExecutorSimulationState(
   if (dErr) throw new Error(dErr.message);
   const decisionIds = (decs ?? []).map((r) => r.id as string).filter(Boolean);
   if (decisionIds.length) {
+    /** Keep PostgREST filter URLs under typical reverse-proxy limits (avoid `URI TOO LONG`). */
     const chunk = 80;
     for (let i = 0; i < decisionIds.length; i += chunk) {
       const part = decisionIds.slice(i, i + chunk);
@@ -39,14 +40,17 @@ export async function wipeHistoricalExecutorSimulationState(
       if (oSelErr) throw new Error(oSelErr.message);
       const orderIds = (ordRows ?? []).map((r) => r.id as string).filter(Boolean);
       if (orderIds.length) {
-        const { error: fDel } = await admin.schema("trading").from("fills").delete().in("order_id", orderIds);
-        if (fDel) throw new Error(fDel.message);
-        const { error: oDel } = await admin.schema("trading").from("orders").delete().in("id", orderIds);
-        if (oDel) throw new Error(oDel.message);
+        for (let j = 0; j < orderIds.length; j += chunk) {
+          const orderPart = orderIds.slice(j, j + chunk);
+          const { error: fDel } = await admin.schema("trading").from("fills").delete().in("order_id", orderPart);
+          if (fDel) throw new Error(fDel.message);
+          const { error: oDel } = await admin.schema("trading").from("orders").delete().in("id", orderPart);
+          if (oDel) throw new Error(oDel.message);
+        }
       }
+      const { error: tdDel } = await admin.schema("trading").from("decisions").delete().in("id", part);
+      if (tdDel) throw new Error(tdDel.message);
     }
-    const { error: tdDel } = await admin.schema("trading").from("trade_decisions").delete().in("id", decisionIds);
-    if (tdDel) throw new Error(tdDel.message);
   }
 
   const { error: posDel } = await admin
@@ -69,17 +73,17 @@ export async function wipeHistoricalExecutorSimulationState(
 
   const { error: rsUp } = await admin
     .schema("trading")
-    .from("risk_state")
+    .from("executors")
     .update({
-      open_position_count: 0,
-      exposure_by_market: {},
-      daily_pnl_eur: 0,
-      max_drawdown_eur: 0,
-      consecutive_losses: 0,
-      kill_switch: false,
+      risk_open_position_count: 0,
+      risk_exposure_by_market: {},
+      risk_daily_pnl_eur: 0,
+      risk_runtime_max_drawdown_eur: 0,
+      risk_consecutive_losses: 0,
+      risk_kill_switch: false,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId);
+    .eq("id", args.executorId);
   if (rsUp) throw new Error(rsUp.message);
 }

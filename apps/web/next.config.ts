@@ -28,7 +28,7 @@ const nextConfig: NextConfig = {
       { source: "/dashboard/:path*", destination: "/:path*", permanent: true },
     ];
   },
-  transpilePackages: ["@repo/blocks", "@repo/exchange", "@repo/risk", "@repo/trading"],
+  transpilePackages: ["@repo/adricore", "@repo/exchange", "@repo/risk", "@repo/trading"],
   /**
    * Inlines into Edge middleware and the browser bundle. `loadMonorepoDotenvOnce()` must run above
    * so these are non-empty when values only exist in the monorepo root `.env`.

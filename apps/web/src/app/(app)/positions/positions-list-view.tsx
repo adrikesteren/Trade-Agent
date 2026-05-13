@@ -8,7 +8,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@repo/blocks";
+import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 const CHUNK = 120;

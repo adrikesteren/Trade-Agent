@@ -2,7 +2,7 @@ import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overvi
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { OverviewSyncCoingeckoCoinIdsButton } from "@/app/(app)/overview/overview-sync-coingecko-coin-ids-button";
 import { OverviewSyncCoingeckoMetricsButton } from "@/app/(app)/overview/overview-sync-coingecko-metrics-button";
-import { Card, CardBody, ListViewLayout, PageHeader, Stack } from "@repo/blocks";
+import { Card, CardBody, ListViewLayout, PageHeader, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 export default async function OverviewPage() {

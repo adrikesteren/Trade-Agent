@@ -2,10 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
+import { executeFindCoingeckoIdWorker } from "@/lib/markets/execute-find-coingecko-id-worker";
 import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/markets/run-coingecko-coin-id-sync-with-sync-run";
 import { runCoingeckoMetricsSyncWithSyncRun } from "@/lib/markets/run-coingecko-sync-with-sync-run";
+import { buildFindCoingeckoIdAllWorkerUrl, isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { upsertCatalogCryptoAssetsFromBitvavo } from "@/lib/markets/sync-bitvavo-asset-data";
 import { upsertBitvavoMarketsForExistingAssets } from "@/lib/markets/sync-bitvavo-markets";
+import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -43,16 +46,29 @@ export async function retrieveBitvavoCatalogAssets(): Promise<RetrieveBitvavoCat
 export type SyncCoingeckoCoinIdsFromOverviewResult =
   | {
       ok: true;
+      via: "relay";
+      published: number;
+      distinctAssetCodes: string[];
+      relayMessageIds: string[];
+      relayMessageGroupIds?: string[];
+    }
+  | {
+      ok: true;
+      via: "inline";
       copiedFromMetadata: number;
       filledViaSearch: number;
       searchAttempts: number;
       stillMissingCoinId: number;
+      tasksCreated: number;
       failureCount: number;
       syncRunId: string | null;
     }
   | { ok: false; error: string };
 
-/** Same job as `POST /api/markets/coingecko/coin-id-sync?source=manual`: fills `coingecko_coin_id` where empty. */
+/**
+ * When Relay + worker env is configured, enqueues a Relay **message-group** (one job per eligible asset) for
+ * `POST /api/workers/assets/find-coingecko-id?assetCode=…`. Otherwise runs the capped inline sync in-process.
+ */
 export async function syncCoingeckoCoinIdsFromOverview(): Promise<SyncCoingeckoCoinIdsFromOverviewResult> {
   const supabase = await createClient();
   const {
@@ -62,18 +78,48 @@ export async function syncCoingeckoCoinIdsFromOverview(): Promise<SyncCoingeckoC
     return { ok: false, error: "You must be signed in." };
   }
 
+  if (await isRelayWorkerEnqueueConfigured()) {
+    try {
+      const appBase = getAppBaseUrl();
+      const url = buildFindCoingeckoIdAllWorkerUrl(appBase, "manual");
+      const body = await executeFindCoingeckoIdWorker(url);
+      if (!body.ok) {
+        return { ok: false, error: "error" in body ? body.error : "Relay enqueue failed." };
+      }
+      if (body.mode !== "relay_enqueued") {
+        return { ok: false, error: "Unexpected worker response (expected relay_enqueued)." };
+      }
+      revalidatePath("/overview");
+      revalidatePath("/assets");
+      return {
+        ok: true,
+        via: "relay",
+        published: body.published,
+        distinctAssetCodes: body.distinctAssetCodes,
+        relayMessageIds: body.relayMessageIds ?? [],
+        relayMessageGroupIds: body.relayMessageGroupIds,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error.";
+      return { ok: false, error: msg };
+    }
+  }
+
   try {
     const admin = createServiceRoleClient();
     const r = await runCoingeckoCoinIdSyncWithSyncRun(admin, "manual");
     revalidatePath("/overview");
     revalidatePath("/assets");
     revalidatePath("/sync-runs");
+    revalidatePath("/tasks");
     return {
       ok: true,
+      via: "inline",
       copiedFromMetadata: r.copiedFromMetadata,
       filledViaSearch: r.filledViaSearch,
       searchAttempts: r.searchAttempts,
       stillMissingCoinId: r.stillMissingCoinId,
+      tasksCreated: r.tasksCreated,
       failureCount: r.failures.length,
       syncRunId: r.syncRunId,
     };
@@ -93,6 +139,7 @@ export type SyncCoingeckoMetricsFromOverviewResult =
       searchAttemptsThisRun: number;
       searchFailureCount: number;
       syncRunId: string | null;
+      fiatDollarValuesUpdated: number;
     }
   | { ok: false; error: string };
 
@@ -122,6 +169,7 @@ export async function syncCoingeckoMetricsFromOverview(): Promise<SyncCoingeckoM
       searchAttemptsThisRun: r.searchAttemptsThisRun,
       searchFailureCount: r.searchFailures.length,
       syncRunId: r.syncRunId,
+      fiatDollarValuesUpdated: r.fiatDollarValuesUpdated,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
@@ -136,6 +184,7 @@ export type RetrieveBitvavoMarketsResult =
       tradingMarkets: number;
       marketsUpserted: number;
       skippedMissingAsset: number;
+      skippedMissingQuote: number;
     }
   | { ok: false; error: string };
 

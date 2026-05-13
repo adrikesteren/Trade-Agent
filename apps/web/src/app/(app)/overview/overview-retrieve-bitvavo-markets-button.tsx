@@ -1,7 +1,7 @@
 "use client";
 
 import { retrieveBitvavoMarketsLinkedToAssets } from "@/app/(app)/overview/actions";
-import { Alert, Button } from "@repo/blocks";
+import { Alert, Button } from "@repo/adricore/blocks";
 import { useState, useTransition } from "react";
 
 const DEFAULT_LABEL = "Retrieve Markets from Bitvavo";
@@ -34,7 +34,7 @@ export function OverviewRetrieveBitvavoMarketsButton({ label = DEFAULT_LABEL }: 
             if (r.ok) {
               setFeedback({
                 tone: "success",
-                text: `Bitvavo: ${r.fetchedFromApi} markets from API (${r.tradingMarkets} trading). Upserted ${r.marketsUpserted} rows linked to catalog assets; skipped ${r.skippedMissingAsset} (no matching asset.code).`,
+                text: `Bitvavo: ${r.fetchedFromApi} markets from API (${r.tradingMarkets} trading). Upserted ${r.marketsUpserted} rows linked to catalog assets; skipped ${r.skippedMissingAsset} (no matching base asset), ${r.skippedMissingQuote} (no matching quote asset).`,
               });
             } else {
               setFeedback({ tone: "error", text: r.error });

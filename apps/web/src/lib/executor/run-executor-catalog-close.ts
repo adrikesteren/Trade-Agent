@@ -7,12 +7,14 @@ import { placeBitvavoMarketBuyQuote, placeBitvavoMarketSellAmount } from "@/lib/
 import { bitvavoCredentialsFromExchangeApiFields } from "@/lib/bitvavo/private/signed-request";
 import { barsForRetention } from "@/lib/markets/candle-retention";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
-import { parseSignalUserIdsFromEnv } from "@/lib/signals/signal-user-ids";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
+import { getCatalogPipelineUserIds } from "@/lib/signals/signal-user-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 import {
   ensureDefaultExecutorsForUsers,
   executorAllowsMarketAsset,
+  fetchExecutorById,
   fetchExecutorsForUsers,
   fetchMarketAssetIds,
   type ExecutorRow,
@@ -52,7 +54,7 @@ export type ExecutorCatalogCloseBody = {
   disableDownstreamEnqueue?: boolean;
   /** When set, only this executor is evaluated (used for historical replay). */
   onlyExecutorId?: string | null;
-  /** When set, use these user ids instead of `SIGNAL_USER_IDS` (historical replay). */
+  /** When set, use these user ids instead of the default catalog pipeline users (historical replay). */
   signalUserIdsOverride?: string[] | null;
 };
 
@@ -138,9 +140,8 @@ function parseProposedSell(payload: Record<string, unknown> | null): { symbol: s
 type DecisionRow = {
   id: string;
   user_id: string;
-  market_id: string;
+  signal_id: string;
   approved: boolean;
-  close_time: string;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
 };
@@ -156,7 +157,7 @@ async function findClosePriceForBar(
   });
   const sorted = mapCandleRows(raw);
   const hit = sorted.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
-  if (!hit) return null;
+  if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
   return { price: hit.close, candleId: hit.id };
 }
 
@@ -266,8 +267,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     body.onlyExecutorId != null && String(body.onlyExecutorId).trim() !== "" ? String(body.onlyExecutorId).trim() : null;
 
   const override = body.signalUserIdsOverride?.filter((x) => String(x ?? "").trim() !== "") ?? null;
-  const userIds = override?.length ? override : parseSignalUserIdsFromEnv();
-  if (!userIds.length) {
+  const userIds = override?.length ? override : await getCatalogPipelineUserIds(admin);
+
+  if (!onlyExecutorId && !userIds.length) {
     return {
       ok: true,
       marketsProcessed: 0,
@@ -281,6 +283,19 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
   if (exErr || !ex) throw new Error("Bitvavo exchange not found");
   const exchangeId = ex.id as string;
+
+  const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+  const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
+  if (quoteNorm && !quoteAssetIdFilter) {
+    return {
+      ok: true,
+      marketsProcessed: 0,
+      ordersInserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      skippedReason: "unknown_quote_asset",
+    };
+  }
 
   let effectiveTotal: number;
   let rows: { id: string; market_symbol: string }[];
@@ -324,8 +339,8 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       .from("markets")
       .select("id", { count: "exact", head: true })
       .eq("exchange_id", exchangeId);
-    if (quote != null && String(quote).trim() !== "") {
-      countQuery = countQuery.eq("quote_code", String(quote).trim().toUpperCase());
+    if (quoteAssetIdFilter) {
+      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
     }
     const { count: totalMarkets, error: countErr } = await countQuery;
     if (countErr) throw new Error(countErr.message);
@@ -344,7 +359,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       };
     }
 
-    const quoteArg = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
+    const quoteArg = quoteNorm;
     const { data: markets, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
       p_exchange_id: exchangeId,
       p_quote: quoteArg,
@@ -368,12 +383,36 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     };
   }
 
-  const t = Date.parse(closeTimeIso);
-  const closeLow = Number.isFinite(t) ? new Date(t - 2000).toISOString() : closeTimeIso;
-  const closeHigh = Number.isFinite(t) ? new Date(t + 2000).toISOString() : closeTimeIso;
+  let executorRows: ExecutorRow[];
+  if (onlyExecutorId) {
+    const lone = await fetchExecutorById(admin, onlyExecutorId);
+    if (!lone) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        ordersInserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: effectiveTotal,
+        skippedReason: "only_executor_not_found",
+      };
+    }
+    await ensureDefaultExecutorsForUsers(admin, [lone.user_id]);
+    executorRows = [lone];
+  } else {
+    if (!userIds.length) {
+      return {
+        ok: true,
+        marketsProcessed: 0,
+        ordersInserted: 0,
+        nextMarketOffset: null,
+        totalMarkets: effectiveTotal,
+        skippedReason: "no_signal_user_ids",
+      };
+    }
+    await ensureDefaultExecutorsForUsers(admin, userIds);
+    executorRows = await fetchExecutorsForUsers(admin, userIds);
+  }
 
-  await ensureDefaultExecutorsForUsers(admin, userIds);
-  const executorRows = await fetchExecutorsForUsers(admin, userIds);
   const executorsByUser = new Map<string, ExecutorRow[]>();
   for (const uid of userIds) executorsByUser.set(uid, []);
   for (const ex of executorRows) {
@@ -411,40 +450,74 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
+    const { data: mQuoteRow, error: mqErr } = await admin
+      .schema("catalog")
+      .from("markets")
+      .select("quote_asset_id")
+      .eq("id", marketId)
+      .maybeSingle();
+    if (mqErr) throw new Error(mqErr.message);
+    const quoteAssetIdForMarket = mQuoteRow?.quote_asset_id as string | undefined;
+    if (!quoteAssetIdForMarket) {
+      throw new Error(`${marketSymbol}: market missing quote_asset_id`);
+    }
     const assetNameForSlack = resolveTradeFillAssetDisplayName(
       assetNameByMarketIdRaw.get(marketId),
       marketSymbol,
     );
 
-    for (const userId of userIds) {
-      const executors = (executorsByUser.get(userId) ?? []).filter((e) => e.enabled);
+    const executorsThisMarket = onlyExecutorId
+      ? executorRows.filter(
+          (e) =>
+            e.enabled &&
+            e.id === onlyExecutorId &&
+            executorAllowsMarketAsset(e, marketAssetId) &&
+            String(e.exchange_id) === exchangeId,
+        )
+      : userIds.flatMap((uid) => (executorsByUser.get(uid) ?? []).filter((e) => e.enabled));
 
-      for (const ex of executors) {
-        if (ex.execution_mode === "historical" && (!onlyExecutorId || ex.id !== onlyExecutorId)) continue;
-        if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
-        if (String(ex.exchange_id) !== exchangeId) continue;
+    for (const ex of executorsThisMarket) {
+      if (ex.execution_mode === "historical" && (!onlyExecutorId || ex.id !== onlyExecutorId)) continue;
+      if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
+      if (String(ex.exchange_id) !== exchangeId) continue;
 
-        const { data: decList, error: decErr } = await admin
-          .schema("trading")
-          .from("trade_decisions")
-          .select("id, user_id, market_id, approved, close_time, timeframe, decision_payload")
-          .eq("user_id", userId)
-          .eq("executor_id", ex.id)
-          .eq("market_id", marketId)
-          .eq("timeframe", timeframe)
-          .gte("close_time", closeLow)
-          .lte("close_time", closeHigh);
+      const ownerId = ex.user_id;
 
-        if (decErr) throw new Error(decErr.message);
+      const barPx = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
+      if (!barPx?.candleId) continue;
 
-        const decisions = ((decList ?? []) as DecisionRow[]).filter((d) => closeTimesMatch(d.close_time, closeTimeIso));
-        const dec = decisions[0];
-        if (!dec) continue;
-        if (!dec.approved) continue;
+      const { data: sigRows, error: sigErr } = await admin
+        .schema("trading")
+        .from("signals")
+        .select("id")
+        .eq("user_id", ownerId)
+        .eq("candle_id", barPx.candleId);
+      if (sigErr) throw new Error(sigErr.message);
+      const signalIds = [...new Set((sigRows ?? []).map((r) => String((r as { id: string }).id)))];
+      if (!signalIds.length) continue;
 
-        const proposedBuy = parseProposedBuy(dec.decision_payload);
-        const proposedSell = parseProposedSell(dec.decision_payload);
-        if (!proposedBuy && !proposedSell) continue;
+      const { data: decList, error: decErr } = await admin
+        .schema("trading")
+        .from("decisions")
+        .select("id, user_id, signal_id, approved, timeframe, decision_payload")
+        .eq("user_id", ownerId)
+        .eq("executor_id", ex.id)
+        .in("signal_id", signalIds);
+      if (decErr) throw new Error(decErr.message);
+
+      const candidates = (decList ?? []) as DecisionRow[];
+      const dec =
+        candidates
+          .filter(
+            (d) =>
+              d.approved && (Boolean(parseProposedBuy(d.decision_payload)) || Boolean(parseProposedSell(d.decision_payload))),
+          )
+          .sort((a, b) => a.id.localeCompare(b.id))[0] ?? null;
+      if (!dec) continue;
+
+      const proposedBuy = parseProposedBuy(dec.decision_payload);
+      const proposedSell = parseProposedSell(dec.decision_payload);
+      if (!proposedBuy && !proposedSell) continue;
 
         const { data: existingOrder, error: ordSelErr } = await admin
           .schema("trading")
@@ -460,19 +533,23 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         const notionalEur = proposedBuy?.notionalEur ?? 0;
 
         if (paperExecution && orderSide === "buy") {
-          const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
-          if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
+          if (!barPx || !Number.isFinite(barPx.price) || barPx.price <= 0) continue;
+          const px = barPx;
 
           const qty = baseQuantityFromNotionalEur(notionalEur, px.price);
           if (!Number.isFinite(qty) || qty <= 0) continue;
 
           const feeEur = executorPaperFeeEur(notionalEur);
           const debitEur = tradeBuyDebitEur(notionalEur, feeEur);
-          const equityPre = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
+          const equityPre = await fetchExecutorEquityEur(admin, {
+            userId: ownerId,
+            executorId: ex.id,
+            quoteAssetId: quoteAssetIdForMarket,
+          });
           if (equityPre < debitEur) continue;
 
           const posSnapshot = await fetchExecutorPositionSnapshot(admin, {
-            userId,
+            userId: ownerId,
             executorId: ex.id,
             marketId,
           });
@@ -481,10 +558,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             .schema("trading")
             .from("orders")
             .insert({
-              user_id: userId,
+              user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
-              market_id: marketId,
               side: "buy",
               quantity: qty,
               notional_eur: notionalEur,
@@ -498,7 +574,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           const orderId = inserted?.id as string;
 
           const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: userId,
+            user_id: ownerId,
             order_id: orderId,
             price: px.price,
             quantity: qty,
@@ -508,7 +584,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
           try {
             await upsertPositionAfterBuy(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               marketId,
               paper: paperExecution,
@@ -516,7 +592,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               price: px.price,
             });
             await applyExecutorTradeBuyDebit(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               orderId,
               debitEur,
@@ -524,7 +600,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           } catch (e) {
             await admin.schema("trading").from("orders").delete().eq("id", orderId);
             await restoreExecutorPositionSnapshot(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               marketId,
               snapshot: posSnapshot,
@@ -545,11 +621,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         }
 
         if (paperExecution && orderSide === "sell") {
-          const px = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
-          if (!px || !Number.isFinite(px.price) || px.price <= 0) continue;
+          if (!barPx || !Number.isFinite(barPx.price) || barPx.price <= 0) continue;
+          const px = barPx;
 
           const posSnapshot = await fetchExecutorPositionSnapshot(admin, {
-            userId,
+            userId: ownerId,
             executorId: ex.id,
             marketId,
           });
@@ -565,10 +641,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             .schema("trading")
             .from("orders")
             .insert({
-              user_id: userId,
+              user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
-              market_id: marketId,
               side: "sell",
               quantity: sellQty,
               notional_eur: grossNotional,
@@ -582,7 +657,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           const orderId = inserted?.id as string;
 
           const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: userId,
+            user_id: ownerId,
             order_id: orderId,
             price: px.price,
             quantity: sellQty,
@@ -592,13 +667,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
           try {
             await upsertPositionAfterSell(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               marketId,
               sellQty,
             });
             await applyExecutorTradeSellCredit(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               orderId,
               creditEur,
@@ -607,13 +682,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               .schema("trading")
               .from("executor_moving_floors")
               .delete()
-              .eq("user_id", userId)
+              .eq("user_id", ownerId)
               .eq("executor_id", ex.id)
               .eq("market_id", marketId);
           } catch (e) {
             await admin.schema("trading").from("orders").delete().eq("id", orderId);
             await restoreExecutorPositionSnapshot(admin, {
-              userId,
+              userId: ownerId,
               executorId: ex.id,
               marketId,
               snapshot: posSnapshot,
@@ -638,10 +713,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           const bitvavoCreds = bitvavoCredentialsFromExchangeApiFields(ex.exchange_api_key, ex.exchange_api_secret);
           if (!bitvavoCreds) {
             const { error: credRejErr } = await admin.schema("trading").from("orders").insert({
-              user_id: userId,
+              user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
-              market_id: marketId,
               side: orderSide,
               quantity: 0,
               notional_eur: notionalEur,
@@ -661,13 +735,16 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           if (orderSide === "buy") {
             const estFee = executorPaperFeeEur(notionalEur);
             const estDebit = tradeBuyDebitEur(notionalEur, estFee);
-            const liveEquity = await fetchExecutorEquityEur(admin, { userId, executorId: ex.id });
+            const liveEquity = await fetchExecutorEquityEur(admin, {
+              userId: ownerId,
+              executorId: ex.id,
+              quoteAssetId: quoteAssetIdForMarket,
+            });
             if (liveEquity < estDebit) {
               const { error: skipInsErr } = await admin.schema("trading").from("orders").insert({
-                user_id: userId,
+                user_id: ownerId,
                 executor_id: ex.id,
                 decision_id: dec.id,
-                market_id: marketId,
                 side: "buy",
                 quantity: 0,
                 notional_eur: notionalEur,
@@ -684,7 +761,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
 
           let sellQtyRequested = 0;
           if (orderSide === "sell") {
-            const pos = await fetchExecutorPositionSnapshot(admin, { userId, executorId: ex.id, marketId });
+            const pos = await fetchExecutorPositionSnapshot(admin, { userId: ownerId, executorId: ex.id, marketId });
             sellQtyRequested = Number(pos?.quantity ?? 0);
             if (!Number.isFinite(sellQtyRequested) || sellQtyRequested <= 0) continue;
           }
@@ -708,10 +785,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             .schema("trading")
             .from("orders")
             .insert({
-              user_id: userId,
+              user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
-              market_id: marketId,
               side: orderSide,
               quantity: 0,
               notional_eur: notionalEur,
@@ -743,7 +819,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             }
             if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
               await admin.schema("trading").from("fills").insert({
-                user_id: userId,
+                user_id: ownerId,
                 order_id: localOrderId,
                 price: fillPrice,
                 quantity: fillQty,
@@ -751,7 +827,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               });
               if (orderSide === "buy") {
                 await upsertPositionAfterBuy(admin, {
-                  userId,
+                  userId: ownerId,
                   executorId: ex.id,
                   marketId,
                   paper: paperExecution,
@@ -760,7 +836,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                 });
               } else {
                 await upsertPositionAfterSell(admin, {
-                  userId,
+                  userId: ownerId,
                   executorId: ex.id,
                   marketId,
                   sellQty: fillQty,
@@ -775,7 +851,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                 if (orderSide === "buy") {
                   const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
                   await applyExecutorTradeBuyDebit(admin, {
-                    userId,
+                    userId: ownerId,
                     executorId: ex.id,
                     orderId: localOrderId,
                     debitEur: debitLive,
@@ -784,7 +860,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                   const grossNotional = fillPrice * fillQty;
                   const creditLive = tradeSellCreditEur(grossNotional, Number.isFinite(fillFee) ? fillFee : 0);
                   await applyExecutorTradeSellCredit(admin, {
-                    userId,
+                    userId: ownerId,
                     executorId: ex.id,
                     orderId: localOrderId,
                     creditEur: creditLive,
@@ -793,7 +869,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                     .schema("trading")
                     .from("executor_moving_floors")
                     .delete()
-                    .eq("user_id", userId)
+                    .eq("user_id", ownerId)
                     .eq("executor_id", ex.id)
                     .eq("market_id", marketId);
                 }
@@ -815,10 +891,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           const { error: rejErr } = await admin.schema("trading").from("orders").insert({
-            user_id: userId,
+            user_id: ownerId,
             executor_id: ex.id,
             decision_id: dec.id,
-            market_id: marketId,
             side: orderSide,
             quantity: 0,
             notional_eur: notionalEur,
@@ -831,7 +906,6 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           }
           console.error(`executor live order failed ${marketSymbol}:`, msg);
         }
-      }
     }
   }
 

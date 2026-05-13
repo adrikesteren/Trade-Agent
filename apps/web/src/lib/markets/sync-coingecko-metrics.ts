@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { coingeckoFetchMarketsByIds, type CoinGeckoMarketRow } from "@/lib/markets/coingecko-client";
+import { syncFiatAssetDollarValues } from "@/lib/markets/sync-fiat-dollar-values";
 
 function parsePositiveInt(envVal: string | undefined, fallback: number): number {
   if (envVal === undefined || envVal === "") return fallback;
@@ -20,11 +21,15 @@ function marketRowToAssetPatch(row: CoinGeckoMarketRow) {
   const now = new Date().toISOString();
   const displayName =
     typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : null;
+  const price = row.current_price;
+  const dollarValue =
+    price != null && Number.isFinite(price) && price > 0 ? price : undefined;
   return {
     ...(displayName != null ? { name: displayName } : {}),
     coingecko_fetched_at: now,
     coingecko_coin_id: row.id,
     coingecko_price_usd: row.current_price,
+    ...(dollarValue != null ? { dollar_value: dollarValue } : {}),
     coingecko_market_cap_usd: row.market_cap,
     coingecko_fdv_usd: row.fully_diluted_valuation,
     coingecko_total_volume_usd: row.total_volume,
@@ -180,9 +185,17 @@ export async function syncCoingeckoAssetMetrics(supabase: SupabaseClient): Promi
   searchFailures: string[];
   stillMissingCoingeckoId: number;
   searchAttemptsThisRun: number;
+  fiatDollarValuesUpdated: number;
 }> {
   const p1 = await syncCoingeckoAssetMetricsResolvePhase(supabase);
   const p2 = await syncCoingeckoAssetMetricsMarketsPhase(supabase, p1.idByCoingecko);
+  let fiatDollarValuesUpdated = 0;
+  try {
+    const f = await syncFiatAssetDollarValues(supabase);
+    fiatDollarValuesUpdated = f.updated;
+  } catch {
+    /* soft-fail */
+  }
   return {
     assetsConsidered: p1.assetsConsidered,
     resolvedThisRun: p1.resolvedThisRun,
@@ -190,5 +203,6 @@ export async function syncCoingeckoAssetMetrics(supabase: SupabaseClient): Promi
     searchFailures: p1.searchFailures,
     stillMissingCoingeckoId: p1.stillMissingCoingeckoId,
     searchAttemptsThisRun: p1.searchAttemptsThisRun,
+    fiatDollarValuesUpdated,
   };
 }

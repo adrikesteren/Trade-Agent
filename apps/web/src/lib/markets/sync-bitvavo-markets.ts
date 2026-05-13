@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchBitvavoMarkets } from "@/lib/bitvavo/public/markets";
+import { fetchQuoteAssetIdsByCodes } from "@/lib/markets/resolve-quote-asset";
 
 export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 
@@ -12,7 +13,7 @@ export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 export async function syncBitvavoMarkets(
   supabase: SupabaseClient,
   quoteFilter: string | null = "EUR",
-): Promise<{ upsertedAssets: number; upsertedListings: number }> {
+): Promise<{ upsertedAssets: number; upsertedListings: number; skippedMissingQuote: number }> {
   const markets = await fetchBitvavoMarkets();
 
   const { data: ex, error: exErr } = await supabase
@@ -35,6 +36,9 @@ export async function syncBitvavoMarkets(
   });
 
   const uniqueBases = [...new Set(filtered.map((m) => m.base.toUpperCase()))];
+  const uniqueQuotes = [...new Set(filtered.map((m) => String(m.quote).toUpperCase()))];
+
+  const quoteIdByCode = await fetchQuoteAssetIdsByCodes(supabase, uniqueQuotes);
 
   const { data: existingAssets, error: existingErr } = await supabase
     .schema("catalog")
@@ -86,25 +90,34 @@ export async function syncBitvavoMarkets(
     assetRowsDb.map((a) => [String(a.code).toUpperCase(), a.id as string]),
   );
 
-  const listingRows = filtered.map((m) => {
+  let skippedMissingQuote = 0;
+  const listingRows = filtered.flatMap((m) => {
     const base = m.base.toUpperCase();
     const assetId = codeToAssetId.get(base);
     if (!assetId) {
       throw new Error(`Missing asset id for base ${base}`);
     }
-    return {
-      exchange_id: exchangeId,
-      asset_id: assetId,
-      market_symbol: m.market.toUpperCase(),
-      quote_code: m.quote.toUpperCase(),
-      status: m.status,
-      metadata: {
-        minOrderInQuoteAsset: m.minOrderInQuoteAsset,
-        minOrderInBaseAsset: m.minOrderInBaseAsset,
-        tickSize: m.tickSize,
-        orderTypes: m.orderTypes,
+    const quoteUpper = String(m.quote).toUpperCase();
+    const quoteAssetId = quoteIdByCode.get(quoteUpper);
+    if (!quoteAssetId) {
+      skippedMissingQuote += 1;
+      return [];
+    }
+    return [
+      {
+        exchange_id: exchangeId,
+        asset_id: assetId,
+        market_symbol: m.market.toUpperCase(),
+        quote_asset_id: quoteAssetId,
+        status: m.status,
+        metadata: {
+          minOrderInQuoteAsset: m.minOrderInQuoteAsset,
+          minOrderInBaseAsset: m.minOrderInBaseAsset,
+          tickSize: m.tickSize,
+          orderTypes: m.orderTypes,
+        },
       },
-    };
+    ];
   });
 
   const chunkSize = 200;
@@ -122,6 +135,7 @@ export async function syncBitvavoMarkets(
     /** New `catalog.assets` rows inserted this run; existing assets are never updated by Bitvavo sync. */
     upsertedAssets: insertedAssets,
     upsertedListings: listingRows.length,
+    skippedMissingQuote,
   };
 }
 
@@ -130,6 +144,7 @@ export type UpsertBitvavoMarketsForExistingAssetsResult = {
   tradingMarkets: number;
   marketsUpserted: number;
   skippedMissingAsset: number;
+  skippedMissingQuote: number;
 };
 
 const ASSET_CODES_CHUNK = 500;
@@ -168,6 +183,9 @@ export async function upsertBitvavoMarketsForExistingAssets(
   });
 
   const uniqueBases = [...new Set(filtered.map((m) => String(m.base).toUpperCase()))];
+  const uniqueQuotes = [...new Set(filtered.map((m) => String(m.quote).toUpperCase()))];
+
+  const quoteIdByCode = await fetchQuoteAssetIdsByCodes(supabase, uniqueQuotes);
 
   const codeToAssetId = new Map<string, string>();
   for (let i = 0; i < uniqueBases.length; i += ASSET_CODES_CHUNK) {
@@ -191,7 +209,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
     exchange_id: string;
     asset_id: string;
     market_symbol: string;
-    quote_code: string;
+    quote_asset_id: string;
     status: string;
     metadata: {
       minOrderInQuoteAsset?: string;
@@ -202,6 +220,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
   }[] = [];
 
   let skippedMissingAsset = 0;
+  let skippedMissingQuote = 0;
   for (const m of filtered) {
     const base = String(m.base).toUpperCase();
     const assetId = codeToAssetId.get(base);
@@ -209,11 +228,17 @@ export async function upsertBitvavoMarketsForExistingAssets(
       skippedMissingAsset += 1;
       continue;
     }
+    const quoteUpper = String(m.quote).toUpperCase();
+    const quoteAssetId = quoteIdByCode.get(quoteUpper);
+    if (!quoteAssetId) {
+      skippedMissingQuote += 1;
+      continue;
+    }
     listingRows.push({
       exchange_id: exchangeId,
       asset_id: assetId,
       market_symbol: String(m.market).toUpperCase(),
-      quote_code: String(m.quote).toUpperCase(),
+      quote_asset_id: quoteAssetId,
       status: m.status,
       metadata: {
         minOrderInQuoteAsset: m.minOrderInQuoteAsset,
@@ -239,5 +264,6 @@ export async function upsertBitvavoMarketsForExistingAssets(
     tradingMarkets: filtered.length,
     marketsUpserted: listingRows.length,
     skippedMissingAsset,
+    skippedMissingQuote,
   };
 }

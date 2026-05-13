@@ -90,6 +90,25 @@ describe("evaluateTradeDecision", () => {
     expect(d.reasonCodes).toContain("already_in_position");
   });
 
+  it("allows ENTER while in position when enterScaleInWhenLong (historical replay scale-in)", () => {
+    const d = evaluateTradeDecision({
+      rails,
+      risk: {
+        ...risk,
+        openPositionCount: 1,
+        exposureBySymbolEur: { "BTC-EUR": 100 },
+      },
+      marketSymbol: "BTC-EUR",
+      signalIntents: ["ENTER"],
+      inPosition: true,
+      enterScaleInWhenLong: true,
+      notionalEurSuggested: 50,
+    });
+    expect(d.approved).toBe(true);
+    expect(d.reasonCodes).toEqual([]);
+    expect(d.proposedOrder?.side).toBe("buy");
+  });
+
   it("denies ADD by default when in position", () => {
     const d = evaluateTradeDecision({
       rails,

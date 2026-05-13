@@ -1,4 +1,5 @@
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -10,7 +11,7 @@ import {
   RecordDetailCard,
   RecordDetailGrid,
   RecordDetailSection,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -53,6 +54,7 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
           meta={`id: ${row.id}`}
         />
       }
+      sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signal_agents" relatedId={id} />}
       content={
         <RecordDetailTabs
           details={
@@ -73,7 +75,6 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
               </RecordDetailSection>
             </RecordDetailCard>
           }
-          related={<p className="bk-text-muted text-sm">No related lists for this signal agent yet.</p>}
         />
       }
     />

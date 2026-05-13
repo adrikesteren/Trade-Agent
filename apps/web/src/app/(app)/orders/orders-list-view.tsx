@@ -6,6 +6,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -20,7 +21,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 
 type OrderRow = {
@@ -37,12 +38,44 @@ type OrderRow = {
   created_at: string;
 };
 
+type OrderRowRaw = Omit<OrderRow, "market_id"> & {
+  decisions?: {
+    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+  } | null;
+};
+
 type CatalogMarketRow = {
   id: string;
   market_symbol?: string | null;
 };
 
 const MARKET_ID_CHUNK = 120;
+
+function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+function toOrderRow(r: OrderRowRaw, candleById: Map<string, CatalogCandleBar>): OrderRow {
+  const td = unwrapOne(r.decisions);
+  const sig = unwrapOne(td?.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const c = cid ? candleById.get(cid) : undefined;
+  const market_id = c?.market_id ? c.market_id.trim() : "";
+  return {
+    id: r.id,
+    decision_id: r.decision_id,
+    executor_id: r.executor_id,
+    market_id,
+    side: r.side,
+    quantity: r.quantity,
+    notional_eur: r.notional_eur,
+    status: r.status,
+    paper: r.paper,
+    external_id: r.external_id,
+    created_at: r.created_at,
+  };
+}
 
 function statusClass(status: string): string {
   const s = status.toLowerCase();
@@ -135,7 +168,7 @@ export async function OrdersListView({
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, market_id, side, quantity, notional_eur, status, paper, external_id, created_at",
+      "id, decision_id, executor_id, side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
     )
     .order("created_at", { ascending: false })
     .range(from, to);
@@ -144,8 +177,17 @@ export async function OrdersListView({
   }
   const { data: rows, error } = await q;
 
-  const list = (rows ?? []) as OrderRow[];
-  const marketIds = [...new Set(list.map((r) => r.market_id))];
+  const raw = (rows ?? []) as OrderRowRaw[];
+  const candleIds = raw
+    .map((r) => {
+      const td = unwrapOne(r.decisions);
+      const sig = unwrapOne(td?.signals);
+      return String(sig?.candle_id ?? "").trim();
+    })
+    .filter(Boolean);
+  const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
+  const list = raw.map((r) => toOrderRow(r, candleById));
+  const marketIds = [...new Set(list.map((r) => r.market_id).filter(Boolean))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
@@ -214,7 +256,12 @@ export async function OrdersListView({
                 </thead>
                 <tbody>
                   {list.map((row) => {
-                    const label = symbolByMarketId.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
+                    const label =
+                      row.market_id && symbolByMarketId.has(row.market_id)
+                        ? symbolByMarketId.get(row.market_id)!
+                        : row.market_id
+                          ? `${row.market_id.slice(0, 8)}…`
+                          : "—";
                     const ext = row.external_id?.trim() || "—";
                     const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
                     return (
@@ -225,9 +272,13 @@ export async function OrdersListView({
                           </Link>
                         </Td>
                         <Td>
-                          <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
-                            {label}
-                          </Link>
+                          {row.market_id ? (
+                            <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
+                              {label}
+                            </Link>
+                          ) : (
+                            <span className="bk-table-muted font-mono">{label}</span>
+                          )}
                         </Td>
                         <Td>
                           <Link href={`/executors/${row.executor_id}`} className="bk-link font-mono">

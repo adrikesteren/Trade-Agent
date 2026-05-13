@@ -2,7 +2,7 @@ import { ExecutorForm, type AssetOption, type ExchangeOption, type ExecutorFormI
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Alert, PageHeader, Stack } from "@repo/blocks";
+import { Alert, PageHeader, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 

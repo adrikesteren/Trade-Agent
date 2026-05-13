@@ -35,31 +35,66 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+export type CoinGeckoSearchCoin = {
+  id: string;
+  name: string;
+  symbol: string;
+  market_cap_rank?: number | null;
+};
+
 /**
- * Resolve CoinGecko coin `id` (e.g. `bitcoin`) from our asset ticker (e.g. `BTC`).
- * Uses /search and picks the best-ranked coin whose symbol matches (case-insensitive).
+ * Pure pick logic for `/search` results: symbol filter, then optional **name** disambiguation
+ * when multiple coins share the ticker symbol.
  */
-export async function coingeckoSearchCoinId(ticker: string): Promise<string | null> {
-  const q = ticker.trim();
-  if (!q) return null;
+export function resolveCoinGeckoIdFromSearchCoins(
+  coins: CoinGeckoSearchCoin[],
+  code: string,
+  assetName: string | null | undefined,
+): string | null {
+  const want = code.trim().toUpperCase();
+  if (!want) return null;
+  const matches = coins.filter((c) => (c.symbol ?? "").toUpperCase() === want);
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0]!.id;
+
+  const nameTrim = (assetName ?? "").trim().toLowerCase();
+  if (!nameTrim) return null;
+
+  const nameMatches = matches.filter((c) => (c.name ?? "").trim().toLowerCase() === nameTrim);
+  if (nameMatches.length === 1) return nameMatches[0]!.id;
+  return null;
+}
+
+async function coingeckoFetchSearchCoins(query: string): Promise<CoinGeckoSearchCoin[]> {
+  const q = query.trim();
+  if (!q) return [];
   const url = `${BASE}/search?query=${encodeURIComponent(q)}`;
   const res = await fetch(url, { headers: cgHeaders(), cache: "no-store" });
   if (!res.ok) {
     throw new Error(`CoinGecko search HTTP ${res.status}`);
   }
-  const body = (await res.json()) as {
-    coins?: { id: string; name: string; symbol: string; market_cap_rank?: number | null }[];
-  };
-  const coins = body.coins ?? [];
-  const want = q.toUpperCase();
-  const matches = coins.filter((c) => (c.symbol ?? "").toUpperCase() === want);
-  if (!matches.length) return null;
-  matches.sort((a, b) => {
-    const ra = a.market_cap_rank ?? 999_999;
-    const rb = b.market_cap_rank ?? 999_999;
-    return ra - rb;
-  });
-  return matches[0]!.id;
+  const body = (await res.json()) as { coins?: CoinGeckoSearchCoin[] };
+  return body.coins ?? [];
+}
+
+/**
+ * Resolve CoinGecko coin `id` (e.g. `bitcoin`) from asset `code` (e.g. `BTC`) and optional catalog `name`.
+ * Uses `/search`; multiple symbol matches require a unique **case-insensitive name** hit.
+ */
+export async function coingeckoResolveCoinIdForAsset(
+  code: string,
+  assetName: string | null | undefined,
+): Promise<{ coinId: string | null; coins: CoinGeckoSearchCoin[] }> {
+  const coins = await coingeckoFetchSearchCoins(code);
+  return { coinId: resolveCoinGeckoIdFromSearchCoins(coins, code, assetName), coins };
+}
+
+/**
+ * @deprecated Prefer {@link coingeckoResolveCoinIdForAsset} with catalog `name` for ambiguous tickers.
+ */
+export async function coingeckoSearchCoinId(ticker: string): Promise<string | null> {
+  const { coinId } = await coingeckoResolveCoinIdForAsset(ticker, null);
+  return coinId;
 }
 
 const MAX_IDS_PER_MARKETS_CALL = 200;

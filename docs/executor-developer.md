@@ -28,6 +28,13 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 ---
 
+## Catalog markets (quote leg)
+
+- `catalog.markets` links **`asset_id`** (base, typically a crypto asset) to **`quote_asset_id`** (the settlement asset for that pair: seeded **fiat** ISO rows such as EUR/USD, or a **crypto** row for quotes like BTC on cross pairs).
+- Bitvavo catalog sync skips listings whose quote symbol does not resolve to an existing `catalog.assets` row (see [`apps/web/src/lib/markets/resolve-quote-asset.ts`](../apps/web/src/lib/markets/resolve-quote-asset.ts)).
+
+---
+
 ## Executor balance (EUR) — assigned capital
 
 - **`trading.risk_state.equity_eur`** (per `executor_id`) is the **only in-app spendable balance** for that executor: it starts at **0** when `risk_state` is created; users add or remove EUR on the executor detail page (**Add balance** / **Remove balance**), which calls `trading.apply_executor_balance_change` and appends rows to **`trading.executor_balance_ledger`**.

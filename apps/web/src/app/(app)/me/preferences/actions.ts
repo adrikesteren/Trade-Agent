@@ -36,6 +36,15 @@ function parseTimeFmt(raw: unknown): UserTimeFormat {
   return TIME_SET.has(v as UserTimeFormat) ? (v as UserTimeFormat) : "h24";
 }
 
+function parsePrimaryAssetId(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) throw new Error("Primary asset is required.");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
+    throw new Error("Primary asset is invalid.");
+  }
+  return s;
+}
+
 export async function updateUserLocalePreferences(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const {
@@ -47,6 +56,17 @@ export async function updateUserLocalePreferences(formData: FormData): Promise<v
   const decimal_format = parseDecimal(formData.get("decimal_format"));
   const date_format = parseDateFmt(formData.get("date_format"));
   const time_format = parseTimeFmt(formData.get("time_format"));
+  const primary_asset_id = parsePrimaryAssetId(formData.get("primary_asset_id"));
+
+  const { data: fiatOk, error: fiatErr } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("id")
+    .eq("id", primary_asset_id)
+    .eq("kind", "fiat")
+    .maybeSingle();
+  if (fiatErr) throw new Error(fiatErr.message);
+  if (!fiatOk?.id) throw new Error("Primary asset must be a fiat catalog asset.");
 
   const { error } = await supabase
     .from("user_preferences")
@@ -55,6 +75,7 @@ export async function updateUserLocalePreferences(formData: FormData): Promise<v
       decimal_format,
       date_format,
       time_format,
+      primary_asset_id,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", user.id);
@@ -63,4 +84,5 @@ export async function updateUserLocalePreferences(formData: FormData): Promise<v
 
   revalidatePath("/me/preferences");
   revalidatePath("/overview");
+  revalidatePath("/executors");
 }

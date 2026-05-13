@@ -59,7 +59,6 @@ export async function upsertSignalsForMarketCloseFromBars(
   const barsAsc: MaCrossBar[] = body.sortedBarsAsc.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
   const targetRow = body.sortedBarsAsc.find((r) => closeTimesMatch(r.closeTimeIso, body.closeTimeIso));
   const candleId = targetRow?.id ?? null;
-  const closeTimeForRow = targetRow?.closeTimeIso ?? body.closeTimeIso;
 
   let signalsUpserted = 0;
   for (const agent of activeAgents) {
@@ -107,13 +106,11 @@ export async function upsertSignalsForMarketCloseFromBars(
     }
 
     for (const userId of signalUserIds) {
+      if (!candleId) continue;
       const row = {
         user_id: userId,
         signal_agent_id: agent.id,
-        market_id: body.marketId,
         candle_id: candleId,
-        timeframe: body.timeframe,
-        close_time: closeTimeForRow,
         intent: ev.intent,
         confidence: ev.confidence,
         reasons: ev.reasons,
@@ -128,7 +125,7 @@ export async function upsertSignalsForMarketCloseFromBars(
       };
 
       const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-        onConflict: "user_id,signal_agent_id,market_id,timeframe,close_time",
+        onConflict: "user_id,signal_agent_id,candle_id",
       });
       if (upErr) throw new Error(`${body.marketSymbol}: signals upsert: ${upErr.message}`);
       signalsUpserted += 1;

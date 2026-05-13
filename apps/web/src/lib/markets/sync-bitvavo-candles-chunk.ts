@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter, type Candle } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/markets/bitvavo-list-candles-end-ms";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/markets/candle-retention";
+import { fetchAllCandleTimestampRowsForCandleWindow } from "@/lib/markets/candle-sync-window";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
 
 export type CandleSyncMode = "full" | "incremental" | "window";
 
@@ -57,9 +59,12 @@ const BITVAVO_MAX_LIMIT = 1440;
 /**
  * Fetches up to `totalBars` candles ending at or before `windowEndCloseMs`, oldest-first.
  * Splits into multiple Bitvavo calls when `totalBars` exceeds 1440.
+ *
+ * Bitvavo requires `end` to align exactly to the **end** of an interval; the oldest candle's
+ * `openTime` equals the prior bar's close boundary, so it is a valid next `end` anchor (unlike `open - 1`).
  */
-async function listCandlesForWindow(
-  adapter: BitvavoAdapter,
+export async function listCandlesForWindow(
+  adapter: Pick<BitvavoAdapter, "listCandles">,
   params: {
     symbol: string;
     timeframe: string;
@@ -71,6 +76,7 @@ async function listCandlesForWindow(
   let endMs = windowEndCloseMs;
   let remaining = Math.max(totalBars, 1);
   const chunks: Candle[][] = [];
+  let prevOldestOpenMs: number | null = null;
 
   while (remaining > 0) {
     const limit = Math.min(remaining, BITVAVO_MAX_LIMIT);
@@ -81,14 +87,18 @@ async function listCandlesForWindow(
       endTime: String(Math.trunc(endMs)),
     });
     if (!batch.length) break;
-    chunks.unshift(batch);
-    remaining -= batch.length;
     const oldest = batch[0]!;
     const oldestOpenMs = Date.parse(oldest.openTime);
     if (!Number.isFinite(oldestOpenMs)) {
       throw new Error(`${symbol}: invalid openTime from Bitvavo`);
     }
-    endMs = oldestOpenMs - 1;
+    if (prevOldestOpenMs !== null && oldestOpenMs >= prevOldestOpenMs) {
+      break;
+    }
+    prevOldestOpenMs = oldestOpenMs;
+    chunks.unshift(batch);
+    remaining -= batch.length;
+    endMs = oldestOpenMs;
     if (batch.length < limit) break;
   }
 
@@ -119,14 +129,30 @@ export async function syncBitvavoCandlesChunk(
 
   const exchangeId = ex.id as string;
 
+  const quoteFilter =
+    opts.quote != null && String(opts.quote).trim() !== "" ? String(opts.quote).trim().toUpperCase() : null;
+  const quoteAssetId = quoteFilter ? await resolveQuoteAssetId(supabase, quoteFilter) : null;
+  if (quoteFilter && !quoteAssetId) {
+    return {
+      marketsProcessed: 0,
+      candleRowsUpserted: 0,
+      nextMarketOffset: null,
+      totalMarkets: 0,
+      timeframe: opts.timeframe,
+      barsPerMarket: 0,
+      retentionMaxBars: barsForRetention(opts.timeframe),
+      syncMode: opts.syncMode ?? "full",
+    };
+  }
+
   let countQuery = supabase
     .schema("catalog")
     .from("markets")
     .select("id", { count: "exact", head: true })
     .eq("exchange_id", exchangeId);
 
-  if (opts.quote) {
-    countQuery = countQuery.eq("quote_code", opts.quote.toUpperCase());
+  if (quoteAssetId) {
+    countQuery = countQuery.eq("quote_asset_id", quoteAssetId);
   }
 
   const { count: totalMarkets, error: countErr } = await countQuery;
@@ -156,10 +182,7 @@ export async function syncBitvavoCandlesChunk(
   }
 
   const from = opts.marketOffset;
-  const quoteArg =
-    opts.quote != null && String(opts.quote).trim() !== ""
-      ? String(opts.quote).trim().toUpperCase()
-      : null;
+  const quoteArg = quoteFilter;
 
   const { data: markets, error: listErr } = await supabase
     .schema("catalog")
@@ -179,20 +202,18 @@ export async function syncBitvavoCandlesChunk(
   let candleRowsUpserted = 0;
 
   let idByKey = new Map<string, string>();
+  const idByCloseMs = new Map<number, string>();
   if (windowMode) {
     const startIso = String(opts.windowStartOpen);
     const endIso = String(opts.windowEndClose);
-    const { data: tsRows, error: tsErr } = await supabase
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id, open_time, close_time")
-      .gte("open_time", startIso)
-      .lte("close_time", endIso);
-    if (tsErr) {
-      throw new Error(`candle_timestamps: ${tsErr.message}`);
-    }
-    for (const r of tsRows ?? []) {
-      idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id as string);
+    const tsRows = await fetchAllCandleTimestampRowsForCandleWindow(supabase, {
+      openTimeGteIso: startIso,
+      closeTimeLteIso: endIso,
+    });
+    for (const r of tsRows) {
+      idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id);
+      const closeMs = Date.parse(String(r.close_time));
+      if (Number.isFinite(closeMs)) idByCloseMs.set(closeMs, r.id);
     }
   }
 
@@ -252,13 +273,18 @@ export async function syncBitvavoCandlesChunk(
 
     if (windowMode) {
       rowsToWrite = [];
+      let unmappedBitvavoInWindow = 0;
       for (const c of candles) {
         const openMs = Date.parse(c.openTime);
         const closeMs = Date.parse(c.closeTime);
         if (!Number.isFinite(openMs) || !Number.isFinite(closeMs)) continue;
         if (openMs < windowStartOpenMs - 1 || closeMs > windowEndCloseMs + 1) continue;
-        const id = idByKey.get(keyForTs(c.openTime, c.closeTime));
-        if (!id) continue;
+        let id = idByKey.get(keyForTs(c.openTime, c.closeTime));
+        if (!id) id = idByCloseMs.get(closeMs);
+        if (!id) {
+          unmappedBitvavoInWindow += 1;
+          continue;
+        }
         rowsToWrite.push({
           market_id: marketId,
           timeframe: c.timeframe,
@@ -269,6 +295,12 @@ export async function syncBitvavoCandlesChunk(
           volume: c.volume,
           candle_timestamp_id: id,
         });
+      }
+      if (unmappedBitvavoInWindow > 0) {
+        throw new Error(
+          `${marketSymbol}: ${unmappedBitvavoInWindow} Bitvavo candle(s) fall inside the sync window but could not be matched to ` +
+            `catalog.candle_timestamps (open/close grid or ISO mismatch vs pre-seeded timestamps).`,
+        );
       }
     } else if (incremental) {
       const tsId = opts.candleTimestampId as string;
@@ -353,7 +385,9 @@ export async function syncBitvavoCandlesChunk(
   const nextStart = from + processed;
   const nextMarketOffset = nextStart < total ? nextStart : null;
 
-  await deleteExpiredCandleTimestamps(supabase);
+  if (!windowMode) {
+    await deleteExpiredCandleTimestamps(supabase);
+  }
 
   const resultMode: CandleSyncMode = windowMode ? "window" : incremental ? "incremental" : "full";
 

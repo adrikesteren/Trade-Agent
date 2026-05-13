@@ -22,7 +22,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 
 type AssetRow = {
@@ -118,7 +118,7 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
                 {sortedRows.map((r) => (
                   <tr key={r.id}>
                     <Td>
-                      <Link href={`/assets/${r.id}`} className="bk-link">
+                      <Link href={`/assets/${encodeURIComponent(String(r.code))}`} className="bk-link">
                         {r.name?.trim() ? r.name : r.code}
                       </Link>
                     </Td>

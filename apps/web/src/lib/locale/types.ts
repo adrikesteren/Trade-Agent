@@ -23,4 +23,10 @@ export type UserLocalePreferences = {
   decimal_format: UserDecimalFormat;
   date_format: UserDateFormat;
   time_format: UserTimeFormat;
+  /** User-chosen display fiat; null when unauthenticated or asset row missing. */
+  primary_asset: {
+    id: string;
+    code: string;
+    dollar_value: number | null;
+  } | null;
 };

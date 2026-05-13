@@ -6,20 +6,52 @@ export function executorPaperFeeEur(notionalEur: number): number {
   return Math.round(notionalEur * 0.0025 * 1e8) / 1e8;
 }
 
-export async function fetchExecutorEquityEur(
+/** Spendable units for one wallet + asset from `trading.wallet_asset_balance` (kept in sync on each `wallet_transactions` insert). */
+export async function fetchWalletBalanceForAsset(
   admin: SupabaseClient,
-  args: { userId: string; executorId: string },
+  args: { executorId: string; assetId: string },
 ): Promise<number> {
-  const { data, error } = await admin
+  const { data: ex, error: exErr } = await admin
     .schema("trading")
-    .from("risk_state")
-    .select("equity_eur")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
+    .from("executors")
+    .select("wallet_id")
+    .eq("id", args.executorId)
+    .maybeSingle();
+  if (exErr) throw new Error(exErr.message);
+  let walletId = String((ex as { wallet_id?: string | null } | null)?.wallet_id ?? "").trim();
+
+  if (!walletId) {
+    const { data: w, error: wErr } = await admin
+      .schema("trading")
+      .from("wallets")
+      .select("id")
+      .eq("executor_id", args.executorId)
+      .maybeSingle();
+    if (wErr) throw new Error(wErr.message);
+    walletId = String((w as { id?: string } | null)?.id ?? "").trim();
+  }
+  if (!walletId) return 0;
+
+  const { data: bal, error } = await admin
+    .schema("trading")
+    .from("wallet_asset_balance")
+    .select("amount")
+    .eq("wallet_id", walletId)
+    .eq("asset_id", args.assetId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  const n = Number(data?.equity_eur ?? 0);
+  const raw = (bal as { amount?: unknown } | null)?.amount;
+  const n = raw == null ? 0 : Number(raw);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** @deprecated name — returns wallet balance for the quote asset (same numeric role as former `equity_eur`). */
+export async function fetchExecutorEquityEur(
+  admin: SupabaseClient,
+  args: { userId: string; executorId: string; quoteAssetId: string },
+): Promise<number> {
+  void args.userId;
+  return fetchWalletBalanceForAsset(admin, { executorId: args.executorId, assetId: args.quoteAssetId });
 }
 
 export function tradeBuyDebitEur(notionalEur: number, feeEur: number): number {
@@ -38,12 +70,12 @@ export function tradeSellCreditEur(notionalEur: number, feeEur: number): number 
   return Math.max(0, nn - ff);
 }
 
-/** Service role: idempotent ledger + equity debit for a filled buy order. */
+/** Service role: idempotent wallet debit for a filled buy order (quote asset). */
 export async function applyExecutorTradeBuyDebit(
   admin: SupabaseClient,
   args: { userId: string; executorId: string; orderId: string; debitEur: number },
 ): Promise<{ newEquityEur: number }> {
-  const { data, error } = await admin.schema("trading").rpc("apply_executor_trade_buy_debit", {
+  const { data, error } = await admin.schema("trading").rpc("apply_wallet_trade_buy_debit", {
     p_user_id: args.userId,
     p_executor_id: args.executorId,
     p_order_id: args.orderId,
@@ -51,16 +83,16 @@ export async function applyExecutorTradeBuyDebit(
   });
   if (error) throw new Error(error.message);
   const newEquityEur = typeof data === "number" ? data : Number(data);
-  if (!Number.isFinite(newEquityEur)) throw new Error("apply_executor_trade_buy_debit: invalid return");
+  if (!Number.isFinite(newEquityEur)) throw new Error("apply_wallet_trade_buy_debit: invalid return");
   return { newEquityEur };
 }
 
-/** Service role: idempotent ledger + equity credit for a filled sell order. */
+/** Service role: idempotent wallet credit for a filled sell order (quote asset). */
 export async function applyExecutorTradeSellCredit(
   admin: SupabaseClient,
   args: { userId: string; executorId: string; orderId: string; creditEur: number },
 ): Promise<{ newEquityEur: number }> {
-  const { data, error } = await admin.schema("trading").rpc("apply_executor_trade_sell_credit", {
+  const { data, error } = await admin.schema("trading").rpc("apply_wallet_trade_sell_credit", {
     p_user_id: args.userId,
     p_executor_id: args.executorId,
     p_order_id: args.orderId,
@@ -68,7 +100,7 @@ export async function applyExecutorTradeSellCredit(
   });
   if (error) throw new Error(error.message);
   const newEquityEur = typeof data === "number" ? data : Number(data);
-  if (!Number.isFinite(newEquityEur)) throw new Error("apply_executor_trade_sell_credit: invalid return");
+  if (!Number.isFinite(newEquityEur)) throw new Error("apply_wallet_trade_sell_credit: invalid return");
   return { newEquityEur };
 }
 

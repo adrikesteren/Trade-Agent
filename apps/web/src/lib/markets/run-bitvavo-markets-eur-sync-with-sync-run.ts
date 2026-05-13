@@ -13,6 +13,7 @@ import { syncBitvavoMarkets } from "@/lib/markets/sync-bitvavo-markets";
 export type BitvavoMarketsSyncResult = {
   upsertedAssets: number;
   upsertedListings: number;
+  skippedMissingQuote: number;
   quoteFilter: string | null;
   syncRunId: string | null;
   /** `true` when an automated run was skipped because another `running` row exists. */
@@ -39,6 +40,7 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
         return {
           upsertedAssets: 0,
           upsertedListings: 0,
+          skippedMissingQuote: 0,
           quoteFilter,
           syncRunId: begun.runId,
           skipped: true,
@@ -47,13 +49,13 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
       runId = begun.runId;
     } catch {
       if (source === "automated") {
-        return { upsertedAssets: 0, upsertedListings: 0, quoteFilter, syncRunId: null, skipped: false };
+        return { upsertedAssets: 0, upsertedListings: 0, skippedMissingQuote: 0, quoteFilter, syncRunId: null, skipped: false };
       }
     }
   }
 
   if (source === "automated" && trackRun && !runId) {
-    return { upsertedAssets: 0, upsertedListings: 0, quoteFilter, syncRunId: null, skipped: false };
+    return { upsertedAssets: 0, upsertedListings: 0, skippedMissingQuote: 0, quoteFilter, syncRunId: null, skipped: false };
   }
 
   try {
@@ -67,6 +69,7 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
           metadata: {
             upsertedListings: stats.upsertedListings,
             upsertedAssets: stats.upsertedAssets,
+            skippedMissingQuote: stats.skippedMissingQuote,
             ...(quoteFilter != null ? { quoteFilter } : {}),
           },
         });
@@ -77,6 +80,7 @@ export async function runBitvavoMarketsEurSyncWithSyncRun(
     return {
       upsertedAssets: stats.upsertedAssets,
       upsertedListings: stats.upsertedListings,
+      skippedMissingQuote: stats.skippedMissingQuote,
       quoteFilter,
       syncRunId: runId,
       skipped: false,

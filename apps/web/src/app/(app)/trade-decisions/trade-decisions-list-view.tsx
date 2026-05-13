@@ -11,6 +11,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { formatDatetime } from "@/lib/locale/format";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -24,12 +25,13 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 
 type DecisionRow = {
   id: string;
   executor_id: string;
+  signal_id: string;
   market_id: string;
   approved: boolean;
   reason_codes: string[] | null;
@@ -37,6 +39,10 @@ type DecisionRow = {
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
   created_at: string;
+};
+
+type DecisionRowDb = Omit<DecisionRow, "market_id" | "close_time"> & {
+  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
 };
 
 type CatalogMarketRow = {
@@ -74,6 +80,37 @@ function approvedClass(approved: boolean): string {
 function formatReasonCodes(codes: string[] | null | undefined): string {
   if (!codes?.length) return "—";
   return codes.join(", ");
+}
+
+function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+function normalizeTradeDecisionRow(r: DecisionRowDb, candleById: Map<string, CatalogCandleBar>): DecisionRow {
+  const { signals: _sig, ...base } = r;
+  const p = base.decision_payload;
+  const barFromPayload =
+    p && typeof p === "object" && typeof (p as Record<string, unknown>).barCloseTimeIso === "string"
+      ? String((p as Record<string, unknown>).barCloseTimeIso).trim()
+      : "";
+  const sig = unwrapOne(r.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const candle = cid ? candleById.get(cid) : undefined;
+  const closeFromCandle = candle?.close_time ? candle.close_time.trim() : "";
+  const marketId = candle?.market_id ? candle.market_id.trim() : "";
+  return {
+    id: base.id,
+    executor_id: base.executor_id,
+    signal_id: base.signal_id,
+    market_id: marketId,
+    approved: base.approved,
+    reason_codes: base.reason_codes,
+    timeframe: base.timeframe,
+    decision_payload: base.decision_payload,
+    created_at: base.created_at,
+    close_time: barFromPayload || closeFromCandle || base.created_at,
+  };
 }
 
 async function fetchMarketSymbolsById(
@@ -125,7 +162,8 @@ async function fetchExecutorNamesById(
 function marketLabel(row: DecisionRow, symbolByMarketId: Map<string, string>): string {
   const fromPayload = payloadString(row.decision_payload, "market_symbol");
   if (fromPayload) return fromPayload;
-  return symbolByMarketId.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
+  if (!row.market_id) return "—";
+  return symbolByMarketId.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`;
 }
 
 export type TradeDecisionsListViewProps = {
@@ -151,18 +189,23 @@ export async function TradeDecisionsListView({
 
   let q = supabase
     .schema("trading")
-    .from("trade_decisions")
+    .from("decisions")
     .select(
-      "id, executor_id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
+      "id, executor_id, signal_id, approved, reason_codes, timeframe, decision_payload, created_at, signals ( candle_id )",
     )
-    .order("close_time", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(TRADE_DECISIONS_FETCH_POOL);
   if (executorIdFilter) {
     q = q.eq("executor_id", executorIdFilter);
   }
   const { data: rows, error } = await q;
 
-  const raw = (rows ?? []) as DecisionRow[];
+  const rawDb = (rows ?? []) as DecisionRowDb[];
+  const candleIds = rawDb
+    .map((r) => String(unwrapOne(r.signals)?.candle_id ?? "").trim())
+    .filter(Boolean);
+  const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
+  const raw = rawDb.map((r) => normalizeTradeDecisionRow(r, candleById));
   const deduped = dedupeTradeDecisionsForListView(raw);
   const totalCount = deduped.length;
   const pages = totalPages(totalCount, pageSize);
@@ -170,7 +213,7 @@ export async function TradeDecisionsListView({
   const { from, to } = rangeForPage(page, pageSize);
   const list = deduped.slice(from, to + 1);
 
-  const marketIds = [...new Set(list.map((r) => r.market_id))];
+  const marketIds = [...new Set(list.map((r) => r.market_id).filter(Boolean))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
@@ -251,9 +294,13 @@ export async function TradeDecisionsListView({
                           </Link>
                         </Td>
                         <Td>
-                          <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
-                            {label}
-                          </Link>
+                          {row.market_id ? (
+                            <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
+                              {label}
+                            </Link>
+                          ) : (
+                            <span className="bk-table-muted font-mono">{label}</span>
+                          )}
                         </Td>
                         <Td>
                           <Link href={`/executors/${row.executor_id}`} className="bk-link font-mono">

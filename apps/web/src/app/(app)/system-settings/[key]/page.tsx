@@ -16,7 +16,7 @@ import {
   RecordDetailCard,
   RecordDetailGrid,
   RecordDetailSection,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ key: string }> };

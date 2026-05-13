@@ -35,7 +35,7 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 
 - **Geen orders** — geen Bitvavo-calls, geen inserts in `trading.orders` / `trading.fills` vanuit mediator-code.
 - **Geen signalen schrijven** — geen wijzigingen aan `trading.signals` vanuit de mediator-worker.
-- **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit server-trusted env (`SIGNAL_DEFAULT_USER_ID` eerst; `SIGNAL_USER_IDS` alleen als default leeg is). Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
+- **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit **vertrouwde serverbron**: `public.automation_actor` (**Automated Process**) plus optioneel **`SIGNAL_USER_IDS`**. Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
 - **EXIT** / **REDUCE** met positie (v1): worden **geweigerd** met redencodes `exit_not_implemented` / `reduce_not_implemented` tot de executor exits ondersteunt. Zonder positie: `no_position`.
 
 ---
@@ -67,7 +67,7 @@ Kort overzicht van uitkomsten (niet exhaustief):
 ## Wanneer draait de mediator?
 
 - Na de **laatste batch** van `POST /api/workers/signals-catalog-close` voor een gegeven `closeTimeIso`, **als** in die laatste batch minstens één signal-upsert is gelukt (`signalsUpserted > 0`), start de app automatisch de mediator-run (tenzij `MEDIATOR_AFTER_SIGNALS_DISABLE=1`).
-- Zonder `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` worden geen beslissingen geschreven (zelfde users als signalen).
+- Zonder geldige pipeline-gebruikers (geen **Automated Process** in `automation_actor` én geen bruikbare `SIGNAL_USER_IDS`) worden geen beslissingen geschreven (zelfde users als signalen).
 - Na de **laatste batch** van `mediator-catalog-close` met `decisionsUpserted > 0` start de **executor** (`POST /api/workers/executor-catalog-close`), tenzij `EXECUTOR_AFTER_MEDIATOR_DISABLE=1`. Zie [executor-developer.md](./executor-developer.md).
 
 Zelfde **batch + inline drain** als signalen: `[apps/web/src/lib/mediator/run-mediator-catalog-close.ts](../apps/web/src/lib/mediator/run-mediator-catalog-close.ts)` verwerkt alle markten in hetzelfde proces (let op timeouts bij grote universums; zie `SIGNALS_CATALOG_CLOSE_*` env).
@@ -95,7 +95,7 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 
 | Variabele                                                                                                                      | Doel                                                                                                                                |
 | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS`                                                                                   | Voor welke gebruikers beslissingen worden weggeschreven (zelfde als signal agents).                                                 |
+| `SIGNAL_USER_IDS`                                                                                                              | Optioneel: extra `auth.users`-UUID’s naast **Automated Process** uit `automation_actor` (zelfde pipeline als signalen).          |
 | `MEDIATOR_AFTER_SIGNALS_DISABLE`                                                                                               | Zet op `1` om de mediator **niet** te starten na de signal-pass.                                                                    |
 | ~~`MEDIATOR_RISK_RAILS_JSON`~~ / ~~`MEDIATOR_DEFAULT_NOTIONAL_EUR`~~                                                           | **Verouderd** — rails en default-notional staan op **`trading.executors`** (app **Executors**).                               |
 | `SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE`, `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS`, `SIGNALS_CATALOG_CLOSE_INLINE_MAX_ITERS` | Zelfde batch-limieten als de signal-worker.                                                                                         |
@@ -112,7 +112,7 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 
 ## Troubleshooting
 
-- **Geen rijen in `trading.trade_decisions`:** controleer `SIGNAL_`* env, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, of er minstens één **enabled** `trading.executors`-rij is voor die gebruiker, en of migraties t/m `20260530120000_trading_executors.sql` zijn toegepast (unique met `executor_id`).
+- **Geen rijen in `trading.trade_decisions`:** controleer `public.automation_actor` / optioneel `SIGNAL_USER_IDS`, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, of er minstens één **enabled** `trading.executors`-rij is voor die gebruiker, en of migraties t/m `20260530120000_trading_executors.sql` zijn toegepast (unique met `executor_id`).
 - **Alleen denied beslissingen met `non_positive_equity` / `invalid_notional`:** controleer `trading.risk_state` voor **die executor** (`equity_eur` > 0) en `default_notional_eur` / `max_risk_per_trade` op `trading.executors`.
 - **Upsert-fouten op unique:** `onConflict` moet overeenkomen met `(user_id, executor_id, market_id, timeframe, close_time)`.
 

@@ -10,7 +10,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@repo/blocks": "workspace:*",
+    "@repo/adricore": "workspace:*",
     "@repo/exchange": "workspace:*",
     "@repo/risk": "workspace:*",
     "@repo/trading": "workspace:*",

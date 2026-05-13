@@ -6,82 +6,64 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   menuTriggerPlainClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
+import { getTabHref } from "@repo/adricore/platform";
+import type { TabMetadata } from "@/models/types";
 import Link from "next/link";
 
-export function AppSchemaNav() {
+type NavBlock =
+  | { kind: "link"; tab: TabMetadata }
+  | { kind: "dropdown"; section: string; tabs: TabMetadata[] };
+
+function buildNavBlocks(tabs: TabMetadata[]): NavBlock[] {
+  const sorted = [...tabs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const blocks: NavBlock[] = [];
+  for (const tab of sorted) {
+    if (tab.section) {
+      const last = blocks[blocks.length - 1];
+      if (last?.kind === "dropdown" && last.section === tab.section) {
+        last.tabs.push(tab);
+      } else {
+        blocks.push({ kind: "dropdown", section: tab.section, tabs: [tab] });
+      }
+    } else {
+      blocks.push({ kind: "link", tab });
+    }
+  }
+  return blocks;
+}
+
+export type AppSchemaNavProps = {
+  tabs: TabMetadata[];
+};
+
+export function AppSchemaNav({ tabs }: AppSchemaNavProps) {
+  const blocks = buildNavBlocks(tabs);
+
   return (
     <nav className="flex flex-wrap items-center gap-3 text-xs">
-      <Link href="/overview" className={menuTriggerPlainClass}>
-        Overview
-      </Link>
-      <Link href="/me/preferences" className={menuTriggerPlainClass}>
-        Preferences
-      </Link>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger className={menuTriggerPlainClass}>Catalog</DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem asChild>
-            <Link href="/assets">Assets</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/markets">Markets</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/exchanges">Exchanges</Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger className={menuTriggerPlainClass}>Trading</DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem asChild>
-            <Link href="/signals">Signals</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/signal-agents">Signal Agents</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/trade-decisions">Trading Decisions</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/orders">Orders</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/fills">Fills</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/positions">Positions</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/risk-state">Risk State</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/executors">Executors</Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Link href="/system-settings" className={menuTriggerPlainClass}>
-        System settings
-      </Link>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger className={menuTriggerPlainClass}>Automation</DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem asChild>
-            <Link href="/sync-runs">Sync Runs</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/signal-jobs">Signal Jobs</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/signal-runs">Signal Runs</Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {blocks.map((block, i) => {
+        if (block.kind === "link") {
+          const href = getTabHref(block.tab);
+          return (
+            <Link key={`${block.tab.slug}-${i}`} href={href} className={menuTriggerPlainClass}>
+              {block.tab.label}
+            </Link>
+          );
+        }
+        return (
+          <DropdownMenu key={`${block.section}-${i}`}>
+            <DropdownMenuTrigger className={menuTriggerPlainClass}>{block.section}</DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {block.tabs.map((tab) => (
+                <DropdownMenuItem key={tab.slug} asChild>
+                  <Link href={getTabHref(tab)}>{tab.label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      })}
     </nav>
   );
 }

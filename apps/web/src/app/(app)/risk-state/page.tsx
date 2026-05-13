@@ -9,7 +9,8 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody } from "@repo/blocks";
+import { Alert, Card, CardBody } from "@repo/adricore/blocks";
+import { redirect } from "next/navigation";
 
 type RiskStatePageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -21,13 +22,19 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
   const pageRaw = parseListPage(sp);
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
   let countQ = supabase
     .schema("trading")
-    .from("risk_state")
+    .from("executors")
     .select("*", { count: "exact", head: true });
   if (executorIdFilter) {
-    countQ = countQ.eq("executor_id", executorIdFilter);
+    countQ = countQ.eq("id", executorIdFilter).eq("user_id", user.id);
+  } else {
+    countQ = countQ.eq("user_id", user.id);
   }
   const { count: totalRaw, error: countError } = await countQ;
   const totalCount = totalRaw ?? 0;
@@ -37,14 +44,16 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
 
   let q = supabase
     .schema("trading")
-    .from("risk_state")
+    .from("executors")
     .select(
-      "id, user_id, executor_id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
+      "id, user_id, name, updated_at, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
     )
     .order("updated_at", { ascending: false })
     .range(from, to);
   if (executorIdFilter) {
-    q = q.eq("executor_id", executorIdFilter);
+    q = q.eq("id", executorIdFilter).eq("user_id", user.id);
+  } else {
+    q = q.eq("user_id", user.id);
   }
   const { data: rows, error } = await q;
 
@@ -56,7 +65,7 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
         eyebrow="Trading"
-        title="Risk State"
+        title="Executor runtime risk"
         iconLetter="R"
         rowCount={list.length}
         sortLine={

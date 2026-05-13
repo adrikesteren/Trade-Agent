@@ -36,6 +36,12 @@ export type ExecutorRow = {
   exchange_api_secret: string;
   historical_start_date?: string | null;
   historical_end_date?: string | null;
+  risk_open_position_count?: number;
+  risk_exposure_by_market?: Record<string, unknown> | null;
+  risk_daily_pnl_eur?: string | number;
+  risk_runtime_max_drawdown_eur?: string | number;
+  risk_kill_switch?: boolean;
+  risk_consecutive_losses?: number;
 };
 
 /** Prefer "Default" by name, then oldest created. */
@@ -48,6 +54,20 @@ export function sortExecutorsForDefaultPick(rows: ExecutorRow[]): ExecutorRow[] 
   });
 }
 
+const EXECUTOR_ROW_SELECT =
+  "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses";
+
+export async function fetchExecutorById(admin: SupabaseClient, executorId: string): Promise<ExecutorRow | null> {
+  const { data, error } = await admin
+    .schema("trading")
+    .from("executors")
+    .select(EXECUTOR_ROW_SELECT)
+    .eq("id", executorId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data ?? null) as ExecutorRow | null;
+}
+
 export async function fetchExecutorsForUsers(
   admin: SupabaseClient,
   userIds: string[],
@@ -56,9 +76,7 @@ export async function fetchExecutorsForUsers(
   const { data, error } = await admin
     .schema("trading")
     .from("executors")
-    .select(
-      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, created_at, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
-    )
+    .select(EXECUTOR_ROW_SELECT)
     .in("user_id", userIds);
   if (error) throw new Error(error.message);
   return (data ?? []) as ExecutorRow[];
@@ -75,34 +93,11 @@ export async function fetchExchangeIdByCode(admin: SupabaseClient, code: string)
   return data.id as string;
 }
 
-/** Idempotent: one `risk_state` row per executor (paper defaults). */
+/** No-op: wallets are created by DB trigger `executors_create_wallet` after executor insert. */
 export async function ensureRiskStateForExecutor(
-  admin: SupabaseClient,
-  args: { userId: string; executorId: string },
-): Promise<void> {
-  const { data: existing, error: selErr } = await admin
-    .schema("trading")
-    .from("risk_state")
-    .select("id")
-    .eq("executor_id", args.executorId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
-  if (existing) return;
-
-  const { error } = await admin.schema("trading").from("risk_state").insert({
-    user_id: args.userId,
-    executor_id: args.executorId,
-    equity_eur: 0,
-    open_position_count: 0,
-    exposure_by_market: {},
-    daily_pnl_eur: 0,
-    max_drawdown_eur: 0,
-    kill_switch: false,
-    consecutive_losses: 0,
-    updated_at: new Date().toISOString(),
-  });
-  if (error) throw new Error(`ensureRiskStateForExecutor: ${error.message}`);
-}
+  _admin: SupabaseClient,
+  _args: { userId: string; executorId: string },
+): Promise<void> {}
 
 export async function ensureDefaultExecutorsForUsers(
   admin: SupabaseClient,
@@ -155,7 +150,7 @@ export async function fetchMarketAssetIds(
 export type EnsureUserExecutorExistsOptions = {
   /**
    * When the caller already ran a list query that returned no rows for this user,
-   * skip the extra COUNT round trip and go straight to insert + risk_state.
+   * skip the extra COUNT round trip and go straight to insert (wallet is created by trigger).
    */
   verifiedEmptyExecutorList?: boolean;
 };

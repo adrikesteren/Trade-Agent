@@ -1,23 +1,26 @@
 import type { ExecutorAssetFilterMode } from "@/app/(app)/executors/actions";
 import { ExecutorDetailBalanceActions } from "@/app/(app)/executors/[id]/executor-detail-balance-actions";
-import { ExecutorHistoricalRunPanel } from "@/app/(app)/executors/[id]/executor-historical-run-panel";
-import { fetchSignalsLinkedViaDecisions, formatExecutorSignalSummary } from "@/app/(app)/executors/[id]/executor-related-load";
+import { ExecutorHistoricalRunHeaderAction } from "@/app/(app)/executors/[id]/executor-historical-run-header-action";
 import { ExecutorEditDialog } from "@/app/(app)/executors/[id]/executor-edit-dialog";
 import type { AssetOption, ExchangeOption } from "@/app/(app)/executors/executor-form";
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import {
   DASHBOARD_LIST_VIEW_LIMIT,
   EXECUTOR_LEDGER_FULL_FETCH_CAP,
   RECORD_RELATED_LIST_PREVIEW_ROWS,
 } from "@/lib/dashboard/list-view-limit";
-import {
-  EXECUTOR_DETAIL_TRADE_DECISION_POOL,
-  buildTradeDecisionListViewRows,
-} from "@/lib/dashboard/trade-decision-list";
+import { EXECUTOR_DETAIL_TRADE_DECISION_POOL } from "@/lib/dashboard/trade-decision-list";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
+import { valueInPrimaryUnits } from "@/lib/catalog/asset-dollar-value";
 import { loadExecutorPnlSnapshot } from "@/lib/trading/executor-pnl";
+import { fetchWalletBalanceForAsset } from "@/lib/trading/executor-wallet";
+import { fetchHistoricalExecutorPaperMarket } from "@/lib/historical/historical-executor-paper-market";
+import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -33,7 +36,7 @@ import {
   RecordDetailSection,
   RecordRelatedList,
   listViewOutlineActionClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -42,7 +45,7 @@ async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[
     .schema("catalog")
     .from("assets")
     .select("id, code")
-    .eq("kind", "crypto")
+    .in("kind", ["crypto", "fiat"])
     .order("code", { ascending: true })
     .limit(400);
   if (error) {
@@ -79,45 +82,138 @@ async function marketSymbolMap(supabase: SupabaseClient, ids: string[]): Promise
   return map;
 }
 
+function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+async function fetchLatestCloseByMarketIds(
+  supabase: SupabaseClient,
+  marketIds: string[],
+  timeframe: string,
+): Promise<Map<string, { close: number; closeTimeIso: string }>> {
+  const map = new Map<string, { close: number; closeTimeIso: string }>();
+  const uniq = [...new Set(marketIds)].filter(Boolean);
+  for (let i = 0; i < uniq.length; i += 120) {
+    const chunk = uniq.slice(i, i + 120);
+    const { data, error } = await supabase
+      .schema("catalog")
+      .from("candles")
+      .select("market_id, close, candle_timestamps ( close_time )")
+      .eq("timeframe", timeframe)
+      .in("market_id", chunk);
+    if (error) {
+      console.error("executor detail: latest closes batch:", error.message);
+      continue;
+    }
+    for (const row of (data ?? []) as {
+      market_id: string;
+      close: unknown;
+      candle_timestamps?: { close_time?: string | null } | { close_time?: string | null }[] | null;
+    }[]) {
+      const mid = String(row.market_id ?? "").trim();
+      if (!mid) continue;
+      const ct = unwrapOne(row.candle_timestamps);
+      const closeTimeIso = typeof ct?.close_time === "string" ? ct.close_time.trim() : "";
+      const closeRaw = typeof row.close === "string" ? Number.parseFloat(row.close) : Number(row.close);
+      const close = Number.isFinite(closeRaw) ? closeRaw : Number.NaN;
+      const prev = map.get(mid);
+      const t = closeTimeIso ? Date.parse(closeTimeIso) : Number.NaN;
+      const prevT = prev?.closeTimeIso ? Date.parse(prev.closeTimeIso) : Number.NaN;
+      if (!prev || (Number.isFinite(t) && (!Number.isFinite(prevT) || t >= prevT))) {
+        map.set(mid, {
+          close,
+          closeTimeIso: closeTimeIso || prev?.closeTimeIso || "",
+        });
+      }
+    }
+  }
+  return map;
+}
+
+type OrderRowDb = {
+  id: string;
+  side: string;
+  quantity: string | number | null;
+  notional_eur: string | number | null;
+  status: string;
+  created_at: string;
+  decisions?: {
+    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+  } | {
+    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
+  }[] | null;
+};
+
 type OrderRow = {
   id: string;
   market_id: string;
+  bar_close_iso: string | null;
   side: string;
+  quantity: string | number | null;
   notional_eur: string | number | null;
   status: string;
   created_at: string;
 };
 
+function normalizeExecutorOrderRow(r: OrderRowDb, candleById: Map<string, CatalogCandleBar>): OrderRow {
+  const td = unwrapOne(r.decisions);
+  const sig = unwrapOne(td?.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const candle = cid ? candleById.get(cid) : undefined;
+  const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
+  return {
+    id: r.id,
+    market_id: candle?.market_id ? candle.market_id.trim() : "",
+    bar_close_iso: barClose,
+    side: r.side,
+    quantity: r.quantity,
+    notional_eur: r.notional_eur,
+    status: r.status,
+    created_at: r.created_at,
+  };
+}
+
 type LedgerRow = {
   id: string;
   kind: string;
-  amount_eur: string | number | null;
-  balance_after_eur: string | number | null;
+  quantity: string | number | null;
+  asset_id: string;
   note: string | null;
   created_at: string;
+};
+
+type TradeDecisionRowDb = {
+  id: string;
+  signal_id: string | null;
+  approved: boolean;
+  created_at: string;
+  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
 };
 
 type TradeDecisionRow = {
   id: string;
   market_id: string;
+  signal_id: string;
   approved: boolean;
-  reason_codes: string[] | null;
-  close_time: string;
-  timeframe: string;
-  decision_payload: Record<string, unknown> | null;
   created_at: string;
+  bar_close_iso: string | null;
 };
 
-type RiskStateRow = {
-  id: string;
-  equity_eur: string | number | null;
-  open_position_count: number;
-  daily_pnl_eur: string | number | null;
-  max_drawdown_eur: string | number | null;
-  kill_switch: boolean;
-  consecutive_losses: number;
-  updated_at: string;
-};
+function normalizeExecutorTradeDecisionRow(r: TradeDecisionRowDb, candleById: Map<string, CatalogCandleBar>): TradeDecisionRow {
+  const sig = unwrapOne(r.signals);
+  const cid = String(sig?.candle_id ?? "").trim();
+  const candle = cid ? candleById.get(cid) : undefined;
+  const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
+  return {
+    id: r.id,
+    market_id: candle?.market_id ? candle.market_id.trim() : "",
+    signal_id: String(r.signal_id ?? "").trim(),
+    approved: r.approved,
+    created_at: r.created_at,
+    bar_close_iso: barClose,
+  };
+}
 
 type PositionRow = {
   id: string;
@@ -143,47 +239,46 @@ function ledgerKindLabel(kind: string): string {
   }
 }
 
-function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
-  if (!payload) return null;
-  const v = payload[key];
-  return typeof v === "string" && v.trim() ? v.trim() : null;
+function shortId(uuid: string): string {
+  return uuid.length > 10 ? `${uuid.slice(0, 8)}…` : uuid;
 }
 
-function resolvedIntentFromRow(row: TradeDecisionRow): string {
-  const fromPayload = payloadString(row.decision_payload, "resolvedIntent");
-  if (fromPayload) return fromPayload;
-  return "—";
+function sidePillClass(side: string): string {
+  const s = side.toLowerCase();
+  const base =
+    "inline-flex shrink-0 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium capitalize tabular-nums";
+  if (s === "buy") return `${base} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`;
+  if (s === "sell") return `${base} bg-red-500/15 text-red-800 dark:text-red-300`;
+  return `${base} bg-zinc-500/10 text-zinc-700 dark:text-zinc-300`;
 }
 
-function intentClassSignal(intent: string): string {
-  if (intent === "ENTER") return "font-medium text-emerald-700 dark:text-emerald-400";
-  if (intent === "EXIT") return "font-medium text-red-700 dark:text-red-400";
-  if (intent === "HOLD") return "bk-text-muted";
-  return "";
-}
-
-function intentClassDecision(intent: string): string {
-  if (intent === "ENTER") return "font-medium text-emerald-700 dark:text-emerald-400";
-  if (intent === "EXIT" || intent === "REDUCE") return "font-medium text-amber-700 dark:text-amber-400";
-  if (intent === "HOLD") return "bk-text-muted";
-  return "";
-}
-
-function approvedClass(approved: boolean): string {
-  return approved ? "font-medium text-emerald-700 dark:text-emerald-400" : "bk-text-muted";
-}
-
-function formatReasonCodes(codes: string[] | null | undefined): string {
-  if (!codes?.length) return "—";
-  return codes.join(", ");
-}
-
-function orderStatusClass(status: string): string {
+function orderFilledPill(status: string): { label: string; className: string } {
+  const base =
+    "inline-flex shrink-0 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums";
   const s = status.toLowerCase();
-  if (s === "filled") return "font-medium text-emerald-700 dark:text-emerald-400";
-  if (s === "open" || s === "pending") return "font-medium text-amber-700 dark:text-amber-400";
-  if (s === "rejected" || s === "cancelled") return "bk-text-muted";
-  return "";
+  if (s === "filled") {
+    return { label: "Yes", className: `${base} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300` };
+  }
+  if (s === "open" || s === "pending") {
+    return { label: "Partially", className: `${base} bg-amber-500/15 text-amber-900 dark:text-amber-200` };
+  }
+  return { label: "No", className: `${base} bg-red-500/15 text-red-800 dark:text-red-300` };
+}
+
+function approvedPillClass(approved: boolean): string {
+  const base =
+    "inline-flex shrink-0 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums";
+  if (approved) return `${base} bg-emerald-500/15 text-emerald-800 dark:text-emerald-300`;
+  return `${base} bg-red-500/15 text-red-800 dark:text-red-300`;
+}
+
+/** Long spot: avg below mark reads as better entry (green); above mark as worse (red). */
+function avgVsMarkClass(avg: number, mark: number | null): string {
+  const base = "shrink-0 font-mono tabular-nums";
+  if (mark == null || !Number.isFinite(avg) || !Number.isFinite(mark)) return `bk-text-muted ${base}`;
+  if (avg < mark) return `text-emerald-700 dark:text-emerald-400 ${base}`;
+  if (avg > mark) return `text-red-700 dark:text-red-400 ${base}`;
+  return `bk-text-muted ${base}`;
 }
 
 function executionModeLabel(m: string): string {
@@ -221,13 +316,17 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtQty = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+  const fmtPrimaryApprox = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v)
+      ? "—"
+      : formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
 
   const { data: ex, error: exErr } = await supabase
     .schema("trading")
     .from("executors")
     .select(
-      "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
+      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -250,59 +349,34 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     assetOptions,
     exchangeOptions,
     pnl,
-    rsSingle,
-    ledgerPack,
+    walletPack,
     ordPack,
     tdPack,
-    rsListPack,
     posPack,
-    signalPack,
   ] = await Promise.all([
     fetchAssetOptions(supabase),
     fetchExchangeOptions(supabase),
     loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
-    supabase
-      .schema("trading")
-      .from("risk_state")
-      .select("equity_eur, updated_at")
-      .eq("executor_id", id)
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    supabase
-      .schema("trading")
-      .from("executor_balance_ledger")
-      .select("id, kind, amount_eur, balance_after_eur, note, created_at", { count: "exact" })
-      .eq("executor_id", id)
-      .order("created_at", { ascending: false })
-      .limit(ledgerFetchLimit),
+    supabase.schema("trading").from("wallets").select("id").eq("executor_id", id).maybeSingle(),
     supabase
       .schema("trading")
       .from("orders")
-      .select("id, market_id, side, notional_eur, status, created_at", { count: "exact" })
+      .select(
+        "id, side, quantity, notional_eur, status, created_at, decisions ( signals ( candle_id ) )",
+        { count: "exact" },
+      )
       .eq("executor_id", id)
       .order("created_at", { ascending: false })
       .limit(DASHBOARD_LIST_VIEW_LIMIT),
     supabase
       .schema("trading")
-      .from("trade_decisions")
-      .select(
-        "id, market_id, approved, reason_codes, close_time, timeframe, decision_payload, created_at",
-        { count: "exact" },
-      )
+      .from("decisions")
+      .select("id, signal_id, approved, created_at, signals ( candle_id )", {
+        count: "exact",
+      })
       .eq("executor_id", id)
-      .order("close_time", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(EXECUTOR_DETAIL_TRADE_DECISION_POOL),
-    supabase
-      .schema("trading")
-      .from("risk_state")
-      .select(
-        "id, equity_eur, open_position_count, daily_pnl_eur, max_drawdown_eur, kill_switch, consecutive_losses, updated_at",
-        { count: "exact" },
-      )
-      .eq("executor_id", id)
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT),
     supabase
       .schema("trading")
       .from("positions")
@@ -311,39 +385,148 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .limit(DASHBOARD_LIST_VIEW_LIMIT),
-    fetchSignalsLinkedViaDecisions(supabase, id),
   ]);
 
-  const rsRow = rsSingle.data;
-  const rsErr = rsSingle.error;
+  const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
+  const walletIdFromTable = String((walletPack.data as { id?: string } | null)?.id ?? "").trim();
+  const walletId = walletIdFromExecutor || walletIdFromTable || null;
+  const ledgerPack = walletId
+    ? await supabase
+        .schema("trading")
+        .from("wallet_transactions")
+        .select("id, kind, quantity, asset_id, note, created_at", { count: "exact" })
+        .eq("wallet_id", walletId)
+        .order("created_at", { ascending: false })
+        .limit(ledgerFetchLimit)
+    : { data: [] as LedgerRow[], count: 0, error: null };
 
-  const { data: ledgerRows, count: ledgerCount, error: lgErr } = ledgerPack;
+  const eurFallbackQuoteId = await resolveQuoteAssetId(supabase, "EUR");
+  const historicalPaperMarket =
+    String(ex.execution_mode) === "historical" && filterIds.length === 1
+      ? await fetchHistoricalExecutorPaperMarket(supabase, {
+          executorExchangeId: String(ex.exchange_id ?? "").trim(),
+          filterBaseAssetId: filterIds[0]!,
+        })
+      : null;
+  /** Risk card / EUR line: quote balance on the replay market when historical + one filter; otherwise catalog EUR. */
+  const replayQuoteAssetId =
+    String(ex.execution_mode) === "historical"
+      ? (historicalPaperMarket?.quoteAssetId ?? null)
+      : eurFallbackQuoteId;
+  const eurWalletBalance =
+    replayQuoteAssetId != null
+      ? await fetchWalletBalanceForAsset(supabase, { executorId: id, assetId: replayQuoteAssetId })
+      : 0;
+  const historicalWhitelistBaseWalletBalance =
+    String(ex.execution_mode) === "historical" && filterIds.length === 1
+      ? await fetchWalletBalanceForAsset(supabase, { executorId: id, assetId: filterIds[0]! })
+      : 0;
+  const eurAssetId = replayQuoteAssetId ?? eurFallbackQuoteId;
+
+  const rsRow = {
+    equity_eur: eurWalletBalance,
+    updated_at: String(ex?.updated_at ?? ""),
+  };
+
+  const rsErr = walletPack.error;
+
+  const { data: ledgerRows, count: ledgerCount, error: ledgerPackErr } = ledgerPack;
+  const lgErr = ledgerPackErr ?? null;
   const ledger = (ledgerRows ?? []) as LedgerRow[];
   const ledgerTotal = typeof ledgerCount === "number" ? ledgerCount : ledger.length;
 
   const { data: ordRows, count: orderCount, error: ordErr } = ordPack;
-  const orders = (ordRows ?? []) as OrderRow[];
+  const ordRowsRaw = (ordRows ?? []) as OrderRowDb[];
+  const { data: tdRows, count: tdCount, error: tdErr } = tdPack;
+  const tdRowsRaw = (tdRows ?? []) as TradeDecisionRowDb[];
+
+  const candleIdsForEmbed = [
+    ...ordRowsRaw.map((r) => {
+      const td = unwrapOne(r.decisions);
+      const sig = unwrapOne(td?.signals);
+      return String(sig?.candle_id ?? "").trim();
+    }),
+    ...tdRowsRaw.map((r) => {
+      const sig = unwrapOne(r.signals);
+      return String(sig?.candle_id ?? "").trim();
+    }),
+  ].filter(Boolean);
+  const candleById = await fetchCatalogCandlesByIds(supabase, candleIdsForEmbed);
+
+  const orders = ordRowsRaw.map((r) => normalizeExecutorOrderRow(r, candleById));
   const orderTotal = typeof orderCount === "number" ? orderCount : orders.length;
 
-  const { data: tdRows, count: tdCount, error: tdErr } = tdPack;
-  const tradeDecisionsSorted = buildTradeDecisionListViewRows((tdRows ?? []) as TradeDecisionRow[], 10);
-  const tradeDecisionTotal = typeof tdCount === "number" ? tdCount : tradeDecisionsSorted.length;
+  const tradeDecisionsRaw = tdRowsRaw
+    .map((r) => normalizeExecutorTradeDecisionRow(r, candleById))
+    .sort(
+      (a, b) =>
+        Date.parse(b.bar_close_iso ?? b.created_at) - Date.parse(a.bar_close_iso ?? a.created_at),
+    );
+  const tradeDecisionTotal = typeof tdCount === "number" ? tdCount : tradeDecisionsRaw.length;
 
-  const { data: rsListRows, count: rsCount, error: rsListErr } = rsListPack;
-  const riskStates = (rsListRows ?? []) as RiskStateRow[];
-  const riskStateTotal = typeof rsCount === "number" ? rsCount : riskStates.length;
+  const assetCodeById = new Map(assetOptions.map((o) => [o.id, o.code]));
+
+  function parseDollarCell(v: unknown): number | null {
+    if (v == null) return null;
+    const n = typeof v === "number" ? v : Number.parseFloat(String(v));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  const primaryPref = prefs.primary_asset;
+  const dollarIdSet = new Set<string>();
+  if (eurAssetId) dollarIdSet.add(eurAssetId);
+  for (const r of ledger) dollarIdSet.add(r.asset_id);
+  if (primaryPref?.id) dollarIdSet.add(primaryPref.id);
+  const dollarIdList = [...dollarIdSet].filter(Boolean);
+  const dollarById = new Map<string, number | null>();
+  if (dollarIdList.length) {
+    const { data: dvRows } = await supabase
+      .schema("catalog")
+      .from("assets")
+      .select("id, dollar_value")
+      .in("id", dollarIdList);
+    for (const row of (dvRows ?? []) as { id: string; dollar_value: unknown }[]) {
+      dollarById.set(row.id, parseDollarCell(row.dollar_value));
+    }
+  }
+
+  const eurWalletInPrimary =
+    primaryPref && eurAssetId
+      ? valueInPrimaryUnits({
+          quantity: eurWalletBalance,
+          fromDollarValue: dollarById.get(eurAssetId) ?? null,
+          primaryDollarValue: primaryPref.dollar_value,
+          primaryAssetCode: primaryPref.code,
+        })
+      : null;
+
+  const runtimeRiskSnapshot = {
+    id: ex.id,
+    open_position_count: Number((ex as { risk_open_position_count?: number }).risk_open_position_count ?? 0),
+    daily_pnl_eur: (ex as { risk_daily_pnl_eur?: string | number | null }).risk_daily_pnl_eur ?? 0,
+    max_drawdown_eur: (ex as { risk_runtime_max_drawdown_eur?: string | number | null }).risk_runtime_max_drawdown_eur ?? 0,
+    kill_switch: Boolean((ex as { risk_kill_switch?: boolean }).risk_kill_switch),
+    consecutive_losses: Number((ex as { risk_consecutive_losses?: number }).risk_consecutive_losses ?? 0),
+    updated_at: String(ex.updated_at ?? ""),
+    eur_wallet: eurWalletBalance,
+    eur_wallet_in_primary: eurWalletInPrimary,
+    primary_asset_code: primaryPref?.code ?? null,
+  };
 
   const { data: posRows, count: posCount, error: posErr } = posPack;
   const positions = (posRows ?? []) as PositionRow[];
   const positionTotal = typeof posCount === "number" ? posCount : positions.length;
 
-  const { rows: signalRows, error: sigErrMsg } = signalPack;
+  const markByMarket = await fetchLatestCloseByMarketIds(
+    supabase,
+    positions.map((p) => p.market_id),
+    CATALOG_STORAGE_TIMEFRAME,
+  );
 
   const marketIdsForLabels = [
     ...orders.map((o) => o.market_id),
-    ...tradeDecisionsSorted.map((d) => d.market_id),
+    ...tradeDecisionsRaw.map((d) => d.market_id),
     ...positions.map((p) => p.market_id),
-    ...signalRows.map((s) => s.market_id),
   ];
   const symMap = await marketSymbolMap(supabase, marketIdsForLabels);
 
@@ -394,14 +577,31 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 <Link href={`/executors/new?from=${encodeURIComponent(id)}`} className={listViewOutlineActionClass}>
                   Clone
                 </Link>
-                <ExecutorDetailBalanceActions executorId={id} />
+                <ExecutorDetailBalanceActions
+                  executorId={id}
+                  assetOptions={assetOptions}
+                  preferredDepositAssetId={
+                    String(ex.execution_mode) === "historical" && filterIds.length === 1
+                      ? filterIds[0]!
+                      : (historicalPaperMarket?.quoteAssetId ?? null)
+                  }
+                />
+                {String(ex.execution_mode) === "historical" ? (
+                  <ExecutorHistoricalRunHeaderAction
+                    executorId={id}
+                    whitelistBaseWalletBalance={historicalWhitelistBaseWalletBalance}
+                    historicalStartDate={(ex as { historical_start_date?: string | null }).historical_start_date ?? null}
+                    historicalEndDate={(ex as { historical_end_date?: string | null }).historical_end_date ?? null}
+                    enabled={Boolean(ex.enabled)}
+                  />
+                ) : null}
                 <ExecutorEditDialog executorId={id} assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={initial} />
               </div>
             }
           />
           {ledgerFull ? (
             <Alert tone="info">
-              Showing expanded balance ledger (newest first, cap {EXECUTOR_LEDGER_FULL_FETCH_CAP} rows).
+              Showing expanded wallet transactions (newest first, cap {EXECUTOR_LEDGER_FULL_FETCH_CAP} rows).
               {ledgerTotal > ledger.length
                 ? ` ${ledgerTotal - ledger.length} older row(s) exist in the database but are not loaded here.`
                 : null}{" "}
@@ -413,11 +613,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
           ) : null}
           {ordErr ? <Alert tone="error">{ordErr.message}</Alert> : null}
           {rsErr ? <Alert tone="error">{rsErr.message}</Alert> : null}
-          {rsListErr ? <Alert tone="error">{rsListErr.message}</Alert> : null}
           {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
           {tdErr ? <Alert tone="error">{tdErr.message}</Alert> : null}
           {posErr ? <Alert tone="error">{posErr.message}</Alert> : null}
-          {sigErrMsg ? <Alert tone="error">{sigErrMsg}</Alert> : null}
         </div>
       }
       content={
@@ -450,6 +648,15 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     ) : (
                       <Output label="Exchange" type="text" value="—" />
                     )}
+                    {walletId ? (
+                      <Output
+                        label="Wallet"
+                        record={{ pathPrefix: "/wallets", id: walletId, name: shortId(walletId) }}
+                        value={shortId(walletId)}
+                      />
+                    ) : (
+                      <Output label="Wallet" type="text" value="—" />
+                    )}
                     <Output label="Asset filter" type="text" value={assetFilterModeLabel(ex.asset_filter_mode as ExecutorAssetFilterMode)} />
                     <Output
                       label="Filter assets (base)"
@@ -479,17 +686,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     ) : null}
                   </RecordDetailGrid>
                 </RecordDetailSection>
-                {String(ex.execution_mode) === "historical" ? (
-                  <RecordDetailSection title="Historical backtest">
-                    <ExecutorHistoricalRunPanel
-                      executorId={id}
-                      equityEur={Number(rsRow?.equity_eur ?? 0)}
-                      historicalStartDate={(ex as { historical_start_date?: string | null }).historical_start_date ?? null}
-                      historicalEndDate={(ex as { historical_end_date?: string | null }).historical_end_date ?? null}
-                      enabled={Boolean(ex.enabled)}
-                    />
-                  </RecordDetailSection>
-                ) : null}
                 <RecordDetailSection title="Mediator / risk rails">
                   <RecordDetailGrid>
                     <Output label="Default order size (EUR)" type="text" value={fmtEur(ex.default_notional_eur)} />
@@ -518,56 +714,98 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             <Card>
               <CardBody className="bk-stack bk-stack_gap-md !pt-4">
                 <RecordRelatedList
-                  title="Positions"
-                  description="Sorted by updated date (newest first)."
-                  items={positions}
-                  getKey={(p) => p.id}
-                  totalCount={positionTotal}
-                  viewAllHref={`/executors/${id}/positions`}
-                  emptyMessage="No open positions for this executor yet."
-                  renderRow={(p) => {
-                    const sym = symMap.get(p.market_id) ?? p.market_id.slice(0, 8) + "…";
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <Link href={`/markets/${p.market_id}`} className="bk-link font-mono">
-                          {sym}
-                        </Link>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          qty {fmtQty(p.quantity)} · avg{" "}
-                          {p.avg_price != null && String(p.avg_price).trim() !== "" ? fmtQty(p.avg_price) : "—"} ·{" "}
-                          {p.paper ? "paper" : "live"} ·{" "}
-                          <span className="whitespace-nowrap font-mono">{fmtDt(p.updated_at)}</span>
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
-
-                <RecordRelatedList
                   title="Orders"
-                  description="Sorted by created time (newest first)."
+                  description="Id, market, side, bar close (via signal candle), filled. Newest first."
                   items={orders}
                   getKey={(o) => o.id}
                   totalCount={orderTotal}
                   viewAllHref={`/executors/${id}/orders`}
                   emptyMessage="No orders for this executor yet."
                   renderRow={(o) => {
-                    const sym = symMap.get(o.market_id) ?? o.market_id.slice(0, 8) + "…";
+                    const sym = o.market_id
+                      ? (symMap.get(o.market_id) ?? `${o.market_id.slice(0, 8)}…`)
+                      : "—";
+                    const closeIso = o.bar_close_iso;
+                    const filled = orderFilledPill(o.status);
+                    const rawSide = String(o.side ?? "").trim();
+                    const sideLabel = rawSide
+                      ? `${rawSide.charAt(0).toUpperCase()}${rawSide.slice(1).toLowerCase()}`
+                      : "—";
                     return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <Link href={`/orders/${o.id}`} className="bk-link font-mono" title={o.id}>
-                            {o.id.slice(0, 8)}…
-                          </Link>
-                          <span className="bk-text-muted">·</span>
-                          <Link href={`/markets/${o.market_id}`} className="bk-link font-mono">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8125rem]">
+                        <Link href={`/orders/${o.id}`} className="bk-link shrink-0 font-mono" title={o.id}>
+                          {shortId(o.id)}
+                        </Link>
+                        {o.market_id ? (
+                          <Link href={`/markets/${o.market_id}`} className="bk-link shrink-0 font-mono">
                             {sym}
                           </Link>
+                        ) : (
+                          <span className="bk-text-muted shrink-0 font-mono">{sym}</span>
+                        )}
+                        <span className={sidePillClass(o.side)}>{sideLabel}</span>
+                        <span
+                          className="bk-text-muted shrink-0 whitespace-nowrap font-mono text-[0.75rem]"
+                          title={closeIso ?? undefined}
+                        >
+                          {fmtDt(closeIso)}
                         </span>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          <span className="font-mono">{o.side}</span> · {fmtEur(o.notional_eur)} ·{" "}
-                          <span className={orderStatusClass(o.status)}>{o.status}</span> ·{" "}
-                          <span className="whitespace-nowrap font-mono">{fmtDt(o.created_at)}</span>
+                        <span className={filled.className}>{filled.label}</span>
+                      </div>
+                    );
+                  }}
+                />
+
+                <RecordRelatedList
+                  title="Positions"
+                  description="Market, qty, mark (latest catalog close), PnL (EUR), avg vs mark. Newest first."
+                  items={positions}
+                  getKey={(p) => p.id}
+                  totalCount={positionTotal}
+                  viewAllHref={`/executors/${id}/positions`}
+                  emptyMessage="No open positions for this executor yet."
+                  renderRow={(p) => {
+                    const sym = symMap.get(p.market_id) ?? `${p.market_id.slice(0, 8)}…`;
+                    const markEntry = markByMarket.get(p.market_id);
+                    const markPx = markEntry?.close;
+                    const qtyN = Number(p.quantity);
+                    const avgN =
+                      p.avg_price != null && String(p.avg_price).trim() !== "" ? Number(p.avg_price) : Number.NaN;
+                    const pnlEur =
+                      Number.isFinite(qtyN) && Number.isFinite(avgN) && markPx != null && Number.isFinite(markPx)
+                        ? qtyN * (markPx - avgN)
+                        : null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8125rem]">
+                        <Link href={`/executors/${id}/positions`} className="bk-link shrink-0 font-mono" title={p.id}>
+                          {shortId(p.id)}
+                        </Link>
+                        <Link href={`/markets/${p.market_id}`} className="bk-link shrink-0 font-mono">
+                          {sym}
+                        </Link>
+                        <span className="bk-text-muted shrink-0 font-mono tabular-nums">{fmtQty(p.quantity)}</span>
+                        <span className="bk-text-muted shrink-0 font-mono tabular-nums" title="Latest catalog close">
+                          {markPx != null && Number.isFinite(markPx) ? fmtQty(markPx) : "—"}
+                        </span>
+                        <span
+                          className={
+                            pnlEur == null || !Number.isFinite(pnlEur)
+                              ? "bk-text-muted shrink-0 font-mono tabular-nums"
+                              : pnlEur >= 0
+                                ? "shrink-0 font-mono tabular-nums text-emerald-700 dark:text-emerald-400"
+                                : "shrink-0 font-mono tabular-nums text-red-700 dark:text-red-400"
+                          }
+                        >
+                          {pnlEur != null && Number.isFinite(pnlEur) ? fmtEur(pnlEur) : "—"}
+                        </span>
+                        <span
+                          className={avgVsMarkClass(
+                            avgN,
+                            markPx != null && Number.isFinite(markPx) ? markPx : null,
+                          )}
+                          title="Average entry vs mark"
+                        >
+                          {p.avg_price != null && String(p.avg_price).trim() !== "" ? fmtQty(p.avg_price) : "—"}
                         </span>
                       </div>
                     );
@@ -576,41 +814,39 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
 
                 <RecordRelatedList
                   title="Trade decisions"
-                  description="Approved first · bar close desc · one row per market · preview 10."
-                  items={tradeDecisionsSorted}
+                  description="Id, signal, market, approved, bar close. Sorted by bar close (newest first)."
+                  items={tradeDecisionsRaw}
                   getKey={(r) => r.id}
                   totalCount={tradeDecisionTotal}
                   viewAllHref={`/executors/${id}/trade-decisions`}
                   emptyMessage="No trade decisions for this executor yet."
                   renderRow={(row) => {
-                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
-                    const resolved = resolvedIntentFromRow(row);
-                    const reasons = formatReasonCodes(row.reason_codes);
+                    const mLabel = row.market_id
+                      ? (symMap.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`)
+                      : "—";
+                    const sid = row.signal_id;
                     return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <Link href={`/trade-decisions/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8125rem]">
+                        <Link href={`/trade-decisions/${row.id}`} className="bk-link shrink-0 font-mono" title={row.id}>
+                          {shortId(row.id)}
+                        </Link>
+                        {sid ? (
+                          <Link href={`/signals/${sid}`} className="bk-link shrink-0 font-mono" title={sid}>
+                            {shortId(sid)}
                           </Link>
-                          <span className="bk-text-muted">·</span>
-                          <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
+                        ) : (
+                          <span className="bk-text-muted shrink-0 text-[0.75rem]">—</span>
+                        )}
+                        {row.market_id ? (
+                          <Link href={`/markets/${row.market_id}`} className="bk-link shrink-0 font-mono">
                             {mLabel}
                           </Link>
-                        </span>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          <span className={intentClassDecision(resolved)}>{resolved}</span>
-                          {" · "}
-                          <span className={approvedClass(row.approved)}>{row.approved ? "approved" : "rejected"}</span>
-                          {" · "}
-                          {row.timeframe} · <span className="font-mono">{fmtDt(row.close_time)}</span>
-                          {reasons !== "—" ? (
-                            <>
-                              {" · "}
-                              <span className="max-w-[12rem] truncate font-mono" title={reasons}>
-                                {reasons}
-                              </span>
-                            </>
-                          ) : null}
+                        ) : (
+                          <span className="bk-text-muted shrink-0 font-mono">{mLabel}</span>
+                        )}
+                        <span className={approvedPillClass(row.approved)}>{row.approved ? "Yes" : "No"}</span>
+                        <span className="bk-text-muted shrink-0 whitespace-nowrap font-mono text-[0.75rem]">
+                          {fmtDt(row.bar_close_iso)}
                         </span>
                       </div>
                     );
@@ -618,53 +854,24 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 />
 
                 <RecordRelatedList
-                  title="Signals"
-                  description="Linked via trade decisions · one row per market+agent (newest bar first, then ENTER → EXIT → other)."
-                  items={signalRows}
+                  title="Runtime risk"
+                  description="Counters stored on the executor (mediator / catalog close). Wallet line shows EUR catalog balance and an approximation in your primary fiat when rates exist."
+                  items={[runtimeRiskSnapshot]}
                   getKey={(r) => r.id}
-                  totalCount={signalRows.length}
-                  viewAllHref="/signals"
-                  emptyMessage="No linked signals yet (no trade decisions with signal_id for this executor)."
-                  renderRow={(row) => {
-                    const mLabel = symMap.get(row.market_id) ?? row.market_id.slice(0, 8) + "…";
-                    const summary = formatExecutorSignalSummary(row, mLabel);
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <Link href={`/signals/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
-                          </Link>
-                          <span className="bk-text-muted">·</span>
-                          <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
-                            {mLabel}
-                          </Link>
-                        </span>
-                        <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                          <span className={intentClassSignal(row.intent)}>{row.intent}</span>
-                          {" · "}
-                          {summary}
-                          {" · "}
-                          <span className="whitespace-nowrap font-mono">{fmtDt(row.close_time)}</span>
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
-
-                <RecordRelatedList
-                  title="Risk states"
-                  description="Risk book rows for this executor."
-                  items={riskStates}
-                  getKey={(r) => r.id}
-                  totalCount={riskStateTotal}
+                  totalCount={1}
                   viewAllHref={`/risk-state?executorId=${encodeURIComponent(id)}`}
-                  emptyMessage="No risk state row for this executor."
+                  emptyMessage="—"
                   renderRow={(r) => (
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                      <span className="font-mono">Equity {fmtEur(r.equity_eur)}</span>
+                      <span className="font-mono">
+                        {r.primary_asset_code
+                          ? `${r.primary_asset_code} ≈ ${fmtPrimaryApprox(r.eur_wallet_in_primary)} (EUR ${fmtEur(r.eur_wallet)})`
+                          : `EUR ${fmtEur(r.eur_wallet)}`}{" "}
+                        · Open {r.open_position_count}
+                      </span>
                       <span className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                        Open {r.open_position_count} · daily PnL {fmtEur(r.daily_pnl_eur)} · kill {r.kill_switch ? "on" : "off"}{" "}
-                        · updated {fmtDt(r.updated_at)}
+                        daily PnL {fmtEur(r.daily_pnl_eur)} · max DD {fmtEur(r.max_drawdown_eur)} · kill {r.kill_switch ? "on" : "off"} ·
+                        losses {r.consecutive_losses} · updated {fmtDt(r.updated_at)}
                       </span>
                     </div>
                   )}
@@ -676,13 +883,21 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       }
       sidebar={
         <div className="bk-stack bk-stack_gap-md">
+          <RecordTasksRelatedCard relatedSchema="trading" relatedTable="executors" relatedId={id} />
           <p className="bk-text-muted text-xs font-medium uppercase tracking-wide">Reports</p>
           <Card>
             <CardBody>
-              <p className="bk-text-muted text-xs">Balance (EUR)</p>
-              <p className="mt-1 font-mono text-lg">{fmtEur(rsRow?.equity_eur ?? 0)}</p>
+              <p className="bk-text-muted text-xs">
+                EUR wallet (Bitvavo quote) — approx. in {prefs.primary_asset?.code ?? "—"}
+              </p>
+              <p className="mt-1 font-mono text-lg">{fmtPrimaryApprox(eurWalletInPrimary)}</p>
+              <p className="bk-text-muted mt-1 text-xs font-mono">Native EUR: {fmtEur(rsRow?.equity_eur ?? 0)}</p>
               <p className="bk-text-muted mt-2 text-xs">
-                Assigned in this app (Add balance). Buys debit notional plus fee. Not your Bitvavo exchange balance.
+                Simulated balance for the EUR asset in this executor wallet. Approximation uses catalog `dollar_value` (USD per unit) and your primary fiat from{" "}
+                <Link href="/me/preferences" className="bk-link">
+                  My preferences
+                </Link>
+                . Buys debit the market quote asset. Not your exchange balance.
               </p>
               <p className="bk-text-muted mt-1 text-xs font-mono">Updated {fmtDt(rsRow?.updated_at ?? null)}</p>
             </CardBody>
@@ -712,7 +927,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
           <Card className="mt-4">
             <CardBody className="!pt-4">
               <RecordRelatedList
-                title="Executor balance ledger"
+                title="Wallet transactions"
                 description={
                   ledgerFull && ledgerTotal > ledger.length
                     ? `Sorted by created date (newest first) · loaded ${ledger.length} of ${ledgerTotal} (in-page cap ${EXECUTOR_LEDGER_FULL_FETCH_CAP}).`
@@ -726,20 +941,37 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 previewLimit={ledgerUiPreviewLimit}
                 viewAllHref={ledgerViewAll}
                 alwaysShowViewAll={!ledgerFull && Boolean(ledgerViewAll)}
-                emptyMessage="No ledger entries yet. Use Add balance in the header to fund this executor."
-                renderRow={(row) => (
+                emptyMessage="No wallet transactions yet. Use Add balance in the header to credit an asset."
+                renderRow={(row) => {
+                  const q = Number(row.quantity);
+                  const approxPrimary =
+                    primaryPref && Number.isFinite(q)
+                      ? valueInPrimaryUnits({
+                          quantity: q,
+                          fromDollarValue: dollarById.get(row.asset_id) ?? null,
+                          primaryDollarValue: primaryPref.dollar_value,
+                          primaryAssetCode: primaryPref.code,
+                        })
+                      : null;
+                  return (
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
                     <span>{ledgerKindLabel(row.kind)}</span>
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1 bk-text-muted" style={{ fontSize: "0.75rem" }}>
-                      <span className="font-mono">{fmtEur(row.amount_eur)}</span>
-                      <span>after {fmtEur(row.balance_after_eur)}</span>
+                      <span className="font-mono">
+                        {fmtQty(row.quantity)} {assetCodeById.get(row.asset_id) ?? row.asset_id.slice(0, 8) + "…"}
+                      </span>
+                      <span className="font-mono" title={primaryPref ? `Approx. in ${primaryPref.code}` : undefined}>
+                        ≈ {fmtPrimaryApprox(approxPrimary)}
+                        {primaryPref ? ` ${primaryPref.code}` : ""}
+                      </span>
                       <span className="max-w-[200px] truncate" title={row.note ?? undefined}>
                         {row.note ?? "—"}
                       </span>
                       <span className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</span>
                     </span>
                   </div>
-                )}
+                  );
+                }}
               />
             </CardBody>
           </Card>

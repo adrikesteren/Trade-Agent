@@ -1,6 +1,6 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
-import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
+import { DASHBOARD_LIST_VIEW_LIMIT, SIGNALS_LIST_RAW_FETCH_CAP } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
   parseListPage,
@@ -8,6 +8,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
+import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -21,7 +22,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/blocks";
+} from "@repo/adricore/blocks";
 import Link from "next/link";
 
 type SignalRow = {
@@ -36,6 +37,31 @@ type SignalRow = {
   metadata?: Record<string, unknown> | null;
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
+
+type SignalRowRaw = Omit<SignalRow, "market_id" | "timeframe" | "close_time"> & {
+  candle_id: string;
+};
+
+function normalizeSignalRow(r: SignalRowRaw, candleById: Map<string, CatalogCandleBar>): SignalRow {
+  const cid = String(r.candle_id ?? "").trim();
+  const candle = cid ? candleById.get(cid) : undefined;
+  const close_time =
+    candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : r.created_at;
+  const market_id = candle?.market_id ? candle.market_id.trim() : "";
+  const timeframe = candle?.timeframe ? candle.timeframe.trim() || "—" : "—";
+  return {
+    id: r.id,
+    signal_agent_id: r.signal_agent_id,
+    market_id,
+    timeframe,
+    close_time,
+    intent: r.intent,
+    confidence: r.confidence,
+    created_at: r.created_at,
+    metadata: r.metadata,
+    signal_agents: r.signal_agents,
+  };
+}
 
 type CatalogMarketRow = {
   id: string;
@@ -89,6 +115,11 @@ function mcapFromExtras(marketId: string, catalogByMarketId: Map<string, MarketC
 
 /** Label: market table symbol first, then base asset code from the same row, then worker metadata, then id. */
 function resolveMarketLabel(row: SignalRow, catalogByMarketId: Map<string, MarketCatalogExtra>): string {
+  if (!row.market_id) {
+    const meta = marketSymbolFromMetadata(row);
+    if (meta) return meta;
+    return row.id.slice(0, 8) + "…";
+  }
   const c = catalogByMarketId.get(row.market_id);
   if (c?.marketSymbol) return c.marketSymbol;
   if (c?.assetCode) return c.assetCode;
@@ -147,7 +178,7 @@ async function fetchCatalogExtrasByMarketId(
     const { data, error } = await supabase
       .schema("catalog")
       .from("markets")
-      .select("id, market_symbol, assets ( code, coingecko_market_cap_usd )")
+      .select("id, market_symbol, assets!markets_asset_id_fkey ( code, coingecko_market_cap_usd )")
       .in("id", chunk);
     if (error) {
       console.error("signals page: markets batch:", error.message);
@@ -187,12 +218,15 @@ export default async function SignalsPage({
     .schema("trading")
     .from("signals")
     .select(
-      "id, signal_agent_id, market_id, timeframe, close_time, intent, confidence, created_at, metadata, signal_agents ( agent_id )",
+      "id, signal_agent_id, candle_id, intent, confidence, created_at, metadata, signal_agents ( agent_id )",
     )
-    .order("close_time", { ascending: false })
-    .limit(2500);
+    .order("created_at", { ascending: false })
+    .limit(SIGNALS_LIST_RAW_FETCH_CAP);
 
-  const raw = (rows ?? []) as SignalRow[];
+  const rawDb = (rows ?? []) as SignalRowRaw[];
+  const candleIds = rawDb.map((r) => String(r.candle_id ?? "").trim()).filter(Boolean);
+  const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
+  const raw = rawDb.map((r) => normalizeSignalRow(r, candleById));
   const marketIds = [...new Set(raw.map((r) => r.market_id))];
   const catalogByMarketId = await fetchCatalogExtrasByMarketId(supabase, marketIds);
 
@@ -268,9 +302,13 @@ export default async function SignalsPage({
                         </Link>
                       </Td>
                       <Td>
-                        <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
-                          {label}
-                        </Link>
+                        {row.market_id ? (
+                          <Link href={`/markets/${row.market_id}`} className="bk-link font-mono">
+                            {label}
+                          </Link>
+                        ) : (
+                          <span className="bk-table-muted font-mono">{label}</span>
+                        )}
                       </Td>
                       <Td className="text-right font-mono">{formatUsdMetric(mcapDisplay, prefs)}</Td>
                       <Td className="max-w-[10rem] truncate" title={agentSlug ?? row.signal_agent_id}>

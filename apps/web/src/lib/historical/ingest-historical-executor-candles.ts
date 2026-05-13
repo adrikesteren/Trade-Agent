@@ -36,13 +36,24 @@ export async function ingestHistoricalExecutorCandles(
   const { data: mrow, error: mErr } = await admin
     .schema("catalog")
     .from("markets")
-    .select("id, market_symbol, quote_code, exchange_id")
+    .select("id, market_symbol, quote_asset_id, exchange_id")
     .eq("id", args.marketId)
     .maybeSingle();
   if (mErr) throw new Error(mErr.message);
   if (!mrow) throw new Error("market not found");
 
-  const quote = String(mrow.quote_code ?? args.quote).toUpperCase();
+  const { data: quoteRow, error: qErr } = await admin
+    .schema("catalog")
+    .from("assets")
+    .select("code")
+    .eq("id", mrow.quote_asset_id as string)
+    .maybeSingle();
+  if (qErr) throw new Error(qErr.message);
+  const quote = String(quoteRow?.code ?? args.quote).toUpperCase();
+  if (!quote) {
+    throw new Error("market missing quote asset code");
+  }
+
   const { data: ordered, error: listErr } = await admin.schema("catalog").rpc("bitvavo_markets_for_candle_sync_slice", {
     p_exchange_id: mrow.exchange_id as string,
     p_quote: quote,

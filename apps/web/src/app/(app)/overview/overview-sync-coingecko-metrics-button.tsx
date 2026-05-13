@@ -1,7 +1,7 @@
 "use client";
 
 import { syncCoingeckoMetricsFromOverview } from "@/app/(app)/overview/actions";
-import { Alert, Button } from "@repo/blocks";
+import { Alert, Button } from "@repo/adricore/blocks";
 import { useState, useTransition } from "react";
 
 export function OverviewSyncCoingeckoMetricsButton() {
@@ -27,6 +27,7 @@ export function OverviewSyncCoingeckoMetricsButton() {
             if (r.ok) {
               const bits = [
                 `${r.assetsUpdated} assets updated`,
+                `${r.fiatDollarValuesUpdated} fiat dollar_value rows`,
                 `${r.assetsConsidered} considered`,
                 `${r.stillMissingCoingeckoId} skipped (no coin id)`,
               ];

@@ -45,8 +45,8 @@ After a successful Bitvavo EUR catalog candle sweep (`15m`) with new candle rows
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `SIGNAL_DEFAULT_USER_ID` | Yes (recommended) | Your `auth.users` UUID for `trading.signals` (trusted server env; typical single-user setup). |
-| `SIGNAL_USER_IDS` | Optional | Comma-separated UUIDs; used **only** when `SIGNAL_DEFAULT_USER_ID` is unset (legacy multi-user). |
+| *(none for default actor)* | — | After migrations, **`public.automation_actor`** supplies the **Automated Process** `auth.users.id` as the first pipeline user for signals, mediator, and executor workers. |
+| `SIGNAL_USER_IDS` | Optional | Comma-separated extra trusted `auth.users` UUIDs merged **after** the automated actor (deduped). |
 | `SIGNALS_AFTER_CANDLE_DISABLE` | Optional | Set to `1` to skip enqueueing signal runs after candle sync. |
 | `SIGNALS_CATALOG_CLOSE_MARKET_BATCH_SIZE` | Optional | Markets processed per worker invocation (default `40`). |
 | `SIGNALS_CATALOG_CLOSE_MAX_TOTAL_MARKETS` | Optional | Cap total markets across the whole run (default: all EUR Bitvavo markets). |
@@ -69,7 +69,7 @@ After the **last** batch of `signals-catalog-close` for a closed catalog bar (wh
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users for whom decisions are written (trusted env only). |
+| `SIGNAL_USER_IDS` | Same as signal agents | Optional extra pipeline users beyond **Automated Process** from `automation_actor`. |
 | `MEDIATOR_AFTER_SIGNALS_DISABLE` | Optional | Set to `1` to skip enqueueing the mediator after the signal pass. |
 | `SIGNALS_CATALOG_CLOSE_*` | Optional | Same batch caps as the signal worker (`MARKET_BATCH_SIZE`, `MAX_TOTAL_MARKETS`, `INLINE_MAX_ITERS`). |
 
@@ -90,7 +90,7 @@ After the **last** batch of `mediator-catalog-close` for a bar (when `decisionsU
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `SIGNAL_DEFAULT_USER_ID` / `SIGNAL_USER_IDS` | Same as signal agents | Users whose decisions are executed (trusted env only). |
+| `SIGNAL_USER_IDS` | Same as signal agents | Optional extra pipeline users beyond **Automated Process** from `automation_actor`. |
 | `EXECUTOR_AFTER_MEDIATOR_DISABLE` | Optional | Set to `1` to skip enqueueing the executor after the mediator pass. |
 | `exchange_api_key` / `exchange_api_secret` (per executor) | Required for **live** orders + reconcile | Set in **Executors → Edit**; used for Bitvavo signed REST (RLS-scoped; never commit). |
 | `BITVAVO_API_KEY` / `BITVAVO_API_SECRET` | Unused by app live paths | Legacy `.env` names only; prefer executor fields. |
@@ -121,7 +121,7 @@ Background jobs for **daily risk reset** and **live order reconciliation**, plus
 
 ## Relay (optional)
 
-When `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues an ordered **`symbol-close-pipeline`** job per distinct catalog asset (mcap descending) on your **Relay** instance via `POST /api/v1/message-group` using `origin` + `paths` (or `/api/v1/messages` using `origin` + `path` when there is only one asset). See the Relay repository’s `AGENTS.md` for ingress auth and payload shape. Relay’s **dispatcher** must run periodically (`GET` or `POST` `{RELAY_APP_URL}/api/internal/dispatch` with dispatcher auth, or Relay’s bundled worker); otherwise jobs stay pending. Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`) is passed through as `maxRetries`.
+When `RELAY_APP_URL`, `RELAY_APP_SECRET`, `APP_URL`, and `CRON_SECRET` are set, `GET`/`POST /api/workers/exchange-close-pipeline` enqueues an ordered **`symbol-close-pipeline`** job per distinct catalog asset (mcap descending) on your **Relay** instance via `POST /api/v1/message-group` using `origin` + `paths` (or `/api/v1/messages` using `origin` + `path` when there is only one asset). The same pattern applies to **CoinGecko coin id discovery**: `GET`/`POST /api/workers/assets/find-coingecko-id?all=true` enqueues one **`find-coingecko-id?assetCode=…`** job per eligible asset (dashboard **Sync Assets With Coingecko Id** and the legacy `coingecko-coin-id-sync` route use this path). See the Relay repository’s `AGENTS.md` for ingress auth and payload shape. Relay’s **dispatcher** must run periodically (`GET` or `POST` `{RELAY_APP_URL}/api/internal/dispatch` with dispatcher auth, or Relay’s bundled worker); otherwise jobs stay pending. Optional `RELAY_EXCHANGE_CLOSE_MAX_RETRIES` (default `2`) is passed through as `maxRetries`.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |

@@ -1,0 +1,11 @@
+delete from catalog.candles;
+delete from catalog.candle_timestamps;
+delete from trading.positions;
+delete from trading.fills;
+delete from trading.orders;
+delete from trading.trade_decisions;
+delete from trading.signals;
+delete from trading.executor_balance_ledger;
+delete from trading.risk_state;
+delete from trading.executor_moving_floors;
+delete from trading.executor_historical_runs;

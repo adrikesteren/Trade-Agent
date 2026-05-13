@@ -5,18 +5,28 @@ import {
   USER_TIMEZONE_CHOICES,
 } from "@/lib/locale/choices";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
-import { Button, Card, CardBody, PageHeader, Stack } from "@repo/blocks";
+import { createClient } from "@/lib/supabase/server";
+import { Button, Card, CardBody, PageHeader, Stack } from "@repo/adricore/blocks";
 import { updateUserLocalePreferences } from "./actions";
 
 export default async function MePreferencesPage() {
   const prefs = await getUserLocalePreferences();
+  const supabase = await createClient();
+  const { data: fiatRows } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("id, code")
+    .eq("kind", "fiat")
+    .order("code", { ascending: true })
+    .limit(400);
+  const fiatOptions = (fiatRows ?? []) as { id: string; code: string }[];
 
   return (
     <div className="bk-container bk-container_md bk-stack bk-stack_gap-md">
       <PageHeader
         eyebrow="Account"
         title="My preferences"
-        subtitle="How dates, times, and numbers appear in the app."
+        subtitle="How dates, times, numbers, and primary fiat appear in the app."
       />
 
       <Card>
@@ -96,7 +106,35 @@ export default async function MePreferencesPage() {
               </div>
 
               <div>
-                <Button type="submit" variant="brand">
+                <label htmlFor="pref-primary-asset" className="bk-form-label">
+                  Primary currency (fiat)
+                </label>
+                <select
+                  id="pref-primary-asset"
+                  name="primary_asset_id"
+                  className="bk-input mt-1 w-full max-w-md text-sm"
+                  required
+                  defaultValue={prefs.primary_asset?.id ?? ""}
+                >
+                  {fiatOptions.length === 0 ? (
+                    <option value="" disabled>
+                      No fiat assets in catalog
+                    </option>
+                  ) : (
+                    fiatOptions.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.code}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <p className="bk-text-muted mt-1 text-xs">
+                  Wallet balances use catalog <span className="font-mono">dollar_value</span> (USD per unit) to show an approximation in this currency when rates exist.
+                </p>
+              </div>
+
+              <div>
+                <Button type="submit" variant="brand" disabled={fiatOptions.length === 0}>
                   Save
                 </Button>
               </div>

@@ -36,8 +36,8 @@ export async function enqueueMarketSymbolCloseRelay(marketId: string): Promise<E
     .from("markets")
     .select(
       `
-      quote_code,
-      assets ( code ),
+      quote_asset_id,
+      assets!markets_asset_id_fkey ( code ),
       exchanges ( code )
     `,
     )
@@ -62,7 +62,24 @@ export async function enqueueMarketSymbolCloseRelay(marketId: string): Promise<E
     return { ok: false, error: "Market is missing base asset or exchange code." };
   }
 
-  const quote = String(market.quote_code ?? "EUR").trim().toUpperCase() || "EUR";
+  const qid = String(market.quote_asset_id ?? "").trim();
+  if (!qid) {
+    return { ok: false, error: "Market is missing quote_asset_id." };
+  }
+
+  const { data: quoteRow, error: qErr } = await supabase
+    .schema("catalog")
+    .from("assets")
+    .select("code")
+    .eq("id", qid)
+    .maybeSingle();
+  if (qErr) {
+    return { ok: false, error: qErr.message };
+  }
+  const quote = String(quoteRow?.code ?? "").trim().toUpperCase();
+  if (!quote) {
+    return { ok: false, error: "Quote asset not found for this market." };
+  }
 
   try {
     const relayBase = normalizeRelayBaseUrl();
@@ -71,7 +88,7 @@ export async function enqueueMarketSymbolCloseRelay(marketId: string): Promise<E
     const relayMessageId = await postRelaySingleMessage(
       relayBase,
       url,
-      downstreamWorkerHeaders(),
+      await downstreamWorkerHeaders(),
       relayMaxRetries(),
     );
     return { ok: true, relayMessageId };

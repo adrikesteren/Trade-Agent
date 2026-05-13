@@ -1,17 +1,22 @@
 "use client";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/blocks";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/adricore/blocks";
 import * as React from "react";
 
 export type RecordDetailTabsProps = {
   details: React.ReactNode;
-  related: React.ReactNode;
-  /** Initial tab. Defaults to `related` for backward compatibility. */
+  /** When omitted or `null`, only the Details column is shown (no Related tab). */
+  related?: React.ReactNode | null;
+  /** Initial tab when `related` is present. Defaults to `related` for backward compatibility. */
   defaultTab?: "details" | "related";
 };
 
 /** Salesforce-style Details / Related tabs for record pages (used inside `DetailPageLayout` `content`). */
 export function RecordDetailTabs({ details, related, defaultTab = "related" }: RecordDetailTabsProps) {
+  if (related == null) {
+    return <div className="bk-stack bk-stack_gap-md w-full min-w-0">{details}</div>;
+  }
+
   return (
     <Tabs defaultValue={defaultTab} className="w-full min-w-0">
       <TabsList>
