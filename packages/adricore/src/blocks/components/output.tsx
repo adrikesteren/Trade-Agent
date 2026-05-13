@@ -32,7 +32,7 @@ type OutputBaseProps = {
   record?: OutputRecordLink;
   /** Icon before lookup link (Salesforce-style). */
   lookupIcon?: "record" | "user" | "none";
-  /** Span both columns inside `RecordDetailGrid`. */
+  /** Span both columns inside `RecordPageGrid`. */
   span?: "full";
   className?: string;
 };
@@ -72,7 +72,7 @@ function stringifyCodeValue(value: React.ReactNode): string {
 }
 
 function LookupGlyph({ kind }: { kind: "record" | "user" }) {
-  const cls = "bk-output_lookup-icon";
+  const cls = "adri-output_lookup-icon";
   return kind === "user" ? <User className={cls} size={14} strokeWidth={2} aria-hidden /> : <Building2 className={cls} size={14} strokeWidth={2} aria-hidden />;
 }
 
@@ -95,7 +95,7 @@ export function Output(props: OutputProps) {
   if (showLookup && resolvedLookup) {
     const icon = lookupIcon !== "none" ? <LookupGlyph kind={lookupIcon === "user" ? "user" : "record"} /> : null;
     body = (
-      <span className="bk-output_lookup">
+      <span className="adri-output_lookup">
         {icon}
         <LinkText href={resolvedLookup.href}>{resolvedLookup.name}</LinkText>
       </span>
@@ -118,7 +118,7 @@ export function Output(props: OutputProps) {
     body = isEmptyValue(value) ? (
       "—"
     ) : (
-      <pre className="bk-output_pre">
+      <pre className="adri-output_pre">
         <code>{stringifyCodeValue(value)}</code>
       </pre>
     );
@@ -127,12 +127,12 @@ export function Output(props: OutputProps) {
   }
 
   return (
-    <div className={cx("bk-output", span === "full" && "bk-output_span-full", className)}>
-      <div className="bk-output_label">{label}</div>
+    <div className={cx("adri-output", span === "full" && "adri-output_span-full", className)}>
+      <div className="adri-output_label">{label}</div>
       <div
         className={cx(
-          "bk-output_value",
-          effectiveType === "codeblock" && !isEmptyValue(value) && "bk-output_value_codeblock",
+          "adri-output_value",
+          effectiveType === "codeblock" && !isEmptyValue(value) && "adri-output_value_codeblock",
         )}
       >
         {body}

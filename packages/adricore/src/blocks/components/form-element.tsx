@@ -15,14 +15,14 @@ export type FormElementProps = {
 
 export function FormElement({ id, label, htmlFor = id, help, error, children, className, required }: FormElementProps) {
   return (
-    <div className={cx("bk-form-element", className)}>
-      <Label.Root className="bk-form-label" htmlFor={htmlFor}>
+    <div className={cx("adri-form-element", className)}>
+      <Label.Root className="adri-form-label" htmlFor={htmlFor}>
         {label}
-        {required ? <span className="bk-text-muted"> *</span> : null}
+        {required ? <span className="adri-text-muted"> *</span> : null}
       </Label.Root>
       {children}
-      {help && !error ? <p className="bk-form-help">{help}</p> : null}
-      {error ? <p className="bk-form-error">{error}</p> : null}
+      {help && !error ? <p className="adri-form-help">{help}</p> : null}
+      {error ? <p className="adri-form-error">{error}</p> : null}
     </div>
   );
 }

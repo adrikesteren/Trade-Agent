@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { RecordDetailCard, RecordRelatedList } from "@repo/adricore/blocks";
+import { RecordPageCard, RecordRelatedList } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 export type RecordTasksRelatedCardProps = {
@@ -43,7 +43,7 @@ export async function RecordTasksRelatedCard({
   const errMsg = error?.message;
 
   return (
-    <RecordDetailCard>
+    <RecordPageCard>
       <RecordRelatedList
         title={title}
         items={rows}
@@ -64,6 +64,6 @@ export async function RecordTasksRelatedCard({
         )}
       />
       {errMsg ? <p className="bk-text-muted mt-2 text-xs">{errMsg}</p> : null}
-    </RecordDetailCard>
+    </RecordPageCard>
   );
 }

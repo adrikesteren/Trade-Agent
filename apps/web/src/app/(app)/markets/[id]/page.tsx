@@ -1,6 +1,6 @@
 import { MarketHeaderSyncButton } from "@/app/(app)/markets/[id]/market-header-sync-button";
 import { MarketCandleChart } from "@/components/market-candle-chart";
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -15,9 +15,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -288,13 +288,13 @@ export default async function MarketDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           defaultTab="related"
           details={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
-                <RecordDetailSection title="Details">
-                  <RecordDetailGrid>
+              <RecordPageCard>
+                <RecordPageSection title="Details">
+                  <RecordPageGrid>
                     <Output label="Record ID" type="text" value={market.id} span="full" />
                     <Output label="Symbol" type="text" value={market.market_symbol} />
                     {quoteAsset?.id ? (
@@ -332,14 +332,14 @@ export default async function MarketDetailPage({ params }: PageProps) {
                       <Output label="Base asset" type="text" value="—" />
                     )}
                     <Output label="Metadata" type="codeblock" value={metadataJson} span="full" />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
+                  </RecordPageGrid>
+                </RecordPageSection>
+              </RecordPageCard>
             </div>
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
+              <RecordPageCard>
                 <RecordRelatedList
                   title="Signals"
                   description={
@@ -373,7 +373,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 />
-              </RecordDetailCard>
+              </RecordPageCard>
             </div>
           }
         />

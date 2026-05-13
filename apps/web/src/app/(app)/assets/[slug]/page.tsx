@@ -2,7 +2,7 @@ import { AssetCoingeckoHeaderActions } from "@/app/(app)/assets/[slug]/asset-set
 import { AssetDetailDeleteHeaderActions } from "@/app/(app)/assets/[slug]/asset-detail-delete-header-actions";
 import { AssetCoingeckoDetailOutputs } from "@/components/asset-coingecko-detail-outputs";
 import { type AssetLiveCoingeckoDb } from "@/components/asset-coingecko-metrics-block";
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { isCatalogAssetDetailRouteUuid, normalizeCatalogAssetRouteSlug } from "@/lib/catalog/asset-detail-route-slug";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -18,9 +18,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -152,12 +152,12 @@ export default async function AssetDetailPage({ params }: PageProps) {
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="assets" relatedId={assetId} />}
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           defaultTab="details"
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Record ID" type="text" value={asset.id} span="full" />
                   <Output label="Code" type="text" value={asset.code} />
                   <Output label="Kind" type="text" value={asset.kind} />
@@ -178,13 +178,13 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     />
                   )}
                   <Output label="Created" type="datetime" value={asset.created_at} formatDatetime={formatDt} />
-                </RecordDetailGrid>
-              </RecordDetailSection>
-            </RecordDetailCard>
+                </RecordPageGrid>
+              </RecordPageSection>
+            </RecordPageCard>
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
+              <RecordPageCard>
                 <RecordRelatedList
                   title="Markets (pairs)"
                   description={
@@ -234,7 +234,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     );
                   }}
                 />
-              </RecordDetailCard>
+              </RecordPageCard>
             </div>
           }
         />

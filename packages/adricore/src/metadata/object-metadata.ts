@@ -1,6 +1,7 @@
 import { AdriObjectMetadata } from "./adri-object-metadata";
 import { ObjectLabelMetadata } from "./object-label-metadata";
 import { IconMetadata } from "./icon-metadata";
+import { RouteMetadata } from "./route-metadata";
 import { ObjectFieldMetadataRegistry, ObjectRelationshipMetadataRegistry } from "./registries";
 import { standardObjectFieldRegistry } from "./standard-fields";
 import { 
@@ -22,6 +23,7 @@ export abstract class ObjectMetadata implements AdriObjectMetadata {
   public readonly apiName: string;
   public readonly label: ObjectLabelMetadata;
   public readonly icon: IconMetadata;
+  public readonly route: RouteMetadata;
   public readonly fieldRegistry: ObjectFieldMetadataRegistry;
   public readonly childRelationships: ObjectRelationshipMetadataRegistry = new ObjectRelationshipMetadataRegistry();
 
@@ -56,6 +58,9 @@ export abstract class ObjectMetadata implements AdriObjectMetadata {
     this.apiName = apiName;
     this.label = label;
     this.icon = icon;
+    
+    // Automatically setup the route metadata using apiName for href and plural label
+    this.route = new RouteMetadata(this.icon, `/${apiName}`, this.label.plural);
     
     // Default fallback for slug/idColumn based on apiName
     this.slug = apiName;

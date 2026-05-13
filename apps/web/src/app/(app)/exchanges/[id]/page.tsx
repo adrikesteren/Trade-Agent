@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
@@ -9,9 +9,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -68,22 +68,22 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="exchanges" relatedId={id} />}
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Record ID" type="text" value={ex.id} span="full" />
                   <Output label="Code" type="text" value={ex.code} />
                   <Output label="Name" type="text" value={ex.name?.trim() ? ex.name : "—"} />
                   <Output label="Created" type="datetime" value={ex.created_at} formatDatetime={formatDt} />
-                </RecordDetailGrid>
-              </RecordDetailSection>
-            </RecordDetailCard>
+                </RecordPageGrid>
+              </RecordPageSection>
+            </RecordPageCard>
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
+              <RecordPageCard>
                 <RecordRelatedList
                   title="Markets"
                   description={
@@ -114,7 +114,7 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
                     );
                   }}
                 />
-              </RecordDetailCard>
+              </RecordPageCard>
             </div>
           }
         />

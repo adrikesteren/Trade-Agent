@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -8,9 +8,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
@@ -56,24 +56,24 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signal_agents" relatedId={id} />}
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Record ID" type="text" value={row.id} span="full" />
                   <Output label="Agent key" type="text" value={row.agent_id} />
                   <Output label="Allowed timeframes" type="text" value={allowedLabel} span="full" />
                   <Output label="Description" type="text" value={row.description?.trim() ? row.description : "—"} span="full" />
                   <Output label="Created" type="datetime" value={row.created_at} formatDatetime={formatDt} />
                   <Output label="Updated" type="datetime" value={row.updated_at} formatDatetime={formatDt} />
-                </RecordDetailGrid>
-              </RecordDetailSection>
+                </RecordPageGrid>
+              </RecordPageSection>
 
-              <RecordDetailSection title="Config (JSON)">
+              <RecordPageSection title="Config (JSON)">
                 <Output label="config" type="codeblock" value={JSON.stringify(row.config ?? {}, null, 2)} span="full" />
-              </RecordDetailSection>
-            </RecordDetailCard>
+              </RecordPageSection>
+            </RecordPageCard>
           }
         />
       }

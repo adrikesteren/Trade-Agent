@@ -7,5 +7,5 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function 
   { className, ...props },
   ref,
 ) {
-  return <select ref={ref} className={cx("bk-select", className)} {...props} />;
+  return <select ref={ref} className={cx("adri-select", className)} {...props} />;
 });

@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -7,9 +7,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
@@ -75,24 +75,24 @@ export async function LogsDetailView({ recordId }: LogsDetailViewProps) {
         />
       }
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Log ID" type="text" value={log.id} span="full" />
                   <Output label="User ID" type="text" value={log.user_id} span="full" />
                   <Output label="Level" type="text" value={log.level} />
                   <Output label="Context" type="text" value={log.context ?? "—"} />
                   <Output label="Created" type="datetime" value={log.created_at} formatDatetime={formatDt} />
                   <Output label="Message" type="text" value={log.message} span="full" />
-                </RecordDetailGrid>
-              </RecordDetailSection>
+                </RecordPageGrid>
+              </RecordPageSection>
 
-              <RecordDetailSection title="Metadata">
+              <RecordPageSection title="Metadata">
                 <pre className="bk-pre">{metadataJson}</pre>
-              </RecordDetailSection>
-            </RecordDetailCard>
+              </RecordPageSection>
+            </RecordPageCard>
           }
         />
       }

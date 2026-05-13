@@ -15,8 +15,8 @@ export const Checkbox = React.forwardRef<React.ElementRef<typeof CheckboxPrimiti
     const inputId = id ?? autoId;
 
     const control = (
-      <CheckboxPrimitive.Root ref={ref} id={inputId} className={cx("bk-checkbox-root", className)} {...props}>
-        <CheckboxPrimitive.Indicator className="bk-checkbox-indicator">
+      <CheckboxPrimitive.Root ref={ref} id={inputId} className={cx("adri-checkbox-root", className)} {...props}>
+        <CheckboxPrimitive.Indicator className="adri-checkbox-indicator">
           <Check size={12} strokeWidth={3} aria-hidden />
         </CheckboxPrimitive.Indicator>
       </CheckboxPrimitive.Root>
@@ -24,9 +24,9 @@ export const Checkbox = React.forwardRef<React.ElementRef<typeof CheckboxPrimiti
 
     if (label) {
       return (
-        <div className="bk-checkbox-row">
+        <div className="adri-checkbox-row">
           {control}
-          <label htmlFor={inputId} className="bk-form-label" style={{ margin: 0, fontWeight: 500 }}>
+          <label htmlFor={inputId} className="adri-form-label" style={{ margin: 0, fontWeight: 500 }}>
             {label}
           </label>
         </div>

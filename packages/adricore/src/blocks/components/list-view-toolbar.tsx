@@ -11,9 +11,9 @@ export type ListViewToolbarProps = {
 
 export function ListViewToolbar({ leading, trailing, className }: ListViewToolbarProps) {
   return (
-    <div className={cx("bk-listview-toolbar", className)}>
-      <div className="bk-listview-toolbar_leading">{leading}</div>
-      <div className="bk-listview-toolbar_trailing">{trailing}</div>
+    <div className={cx("adri-listview-toolbar", className)}>
+      <div className="adri-listview-toolbar_leading">{leading}</div>
+      <div className="adri-listview-toolbar_trailing">{trailing}</div>
     </div>
   );
 }

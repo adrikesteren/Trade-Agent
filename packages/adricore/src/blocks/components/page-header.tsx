@@ -55,13 +55,13 @@ function PageHeaderList({
   const topRowEnd = Boolean(back && !breadcrumb);
 
   return (
-    <header className={cx("bk-page-header", "bk-listview", className)} data-variant="list">
+    <header className={cx("adri-page-header", "adri-listview", className)} data-variant="list">
       {showTop ? (
-        <div className="bk-page-header_top bk-listview-breadcrumb-wrap">
-          <div className={cx("bk-page-header_top_row", topRowEnd && "bk-page-header_top_row_end")}>
-            {breadcrumb ? <div className="bk-page-header_breadcrumb">{breadcrumb}</div> : null}
+        <div className="adri-page-header_top adri-listview-breadcrumb-wrap">
+          <div className={cx("adri-page-header_top_row", topRowEnd && "adri-page-header_top_row_end")}>
+            {breadcrumb ? <div className="adri-page-header_breadcrumb">{breadcrumb}</div> : null}
             {back ? (
-              <a href={back.href} className={cx("bk-link", "bk-page-header_back")}>
+              <a href={back.href} className={cx("adri-link", "adri-page-header_back")}>
                 {back.label}
               </a>
             ) : null}
@@ -69,22 +69,22 @@ function PageHeaderList({
         </div>
       ) : null}
 
-      <div className="bk-listview-main">
-        {icon ? <div className="bk-listview-main_icon">{icon}</div> : null}
-        <div className={cx("bk-listview-main_text", !icon && "bk-listview-main_text_full")}>
-          {eyebrow ? <div className="bk-listview-eyebrow">{eyebrow}</div> : null}
-          <div className="bk-listview-title-row">
-            <h1 className={cx("bk-listview-title", titleClassName)}>{title}</h1>
-            {titleAddon ? <span className="bk-listview-title-addon">{titleAddon}</span> : null}
+      <div className="adri-listview-main">
+        {icon ? <div className="adri-listview-main_icon">{icon}</div> : null}
+        <div className={cx("adri-listview-main_text", !icon && "adri-listview-main_text_full")}>
+          {eyebrow ? <div className="adri-listview-eyebrow">{eyebrow}</div> : null}
+          <div className="adri-listview-title-row">
+            <h1 className={cx("adri-listview-title", titleClassName)}>{title}</h1>
+            {titleAddon ? <span className="adri-listview-title-addon">{titleAddon}</span> : null}
           </div>
-          {subtitle ? <div className="bk-listview-description">{subtitle}</div> : null}
-          {meta ? <p className="bk-page-header_meta bk-listview-meta">{meta}</p> : null}
+          {subtitle ? <div className="adri-listview-description">{subtitle}</div> : null}
+          {meta ? <p className="adri-page-header_meta adri-listview-meta">{meta}</p> : null}
         </div>
-        {actions ? <div className="bk-listview-primary-actions">{actions}</div> : null}
+        {actions ? <div className="adri-listview-primary-actions">{actions}</div> : null}
       </div>
 
-      {summary ? <div className="bk-listview-summary">{summary}</div> : null}
-      {toolbar ? <div className="bk-listview-toolbar-host">{toolbar}</div> : null}
+      {summary ? <div className="adri-listview-summary">{summary}</div> : null}
+      {toolbar ? <div className="adri-listview-toolbar-host">{toolbar}</div> : null}
     </header>
   );
 }
@@ -133,15 +133,15 @@ export function PageHeader({
 
   return (
     <header
-      className={cx("bk-page-header", isDetail && "bk-page-header_detail", className)}
+      className={cx("adri-page-header", isDetail && "adri-page-header_detail", className)}
       data-variant={variant}
     >
       {showTop ? (
-        <div className="bk-page-header_top">
-          <div className={cx("bk-page-header_top_row", topRowEnd && "bk-page-header_top_row_end")}>
-            {breadcrumb ? <div className="bk-page-header_breadcrumb">{breadcrumb}</div> : null}
+        <div className="adri-page-header_top">
+          <div className={cx("adri-page-header_top_row", topRowEnd && "adri-page-header_top_row_end")}>
+            {breadcrumb ? <div className="adri-page-header_breadcrumb">{breadcrumb}</div> : null}
             {back ? (
-              <a href={back.href} className={cx("bk-link", "bk-page-header_back")}>
+              <a href={back.href} className={cx("adri-link", "adri-page-header_back")}>
                 {back.label}
               </a>
             ) : null}
@@ -149,26 +149,26 @@ export function PageHeader({
         </div>
       ) : null}
 
-      <div className={cx("bk-page-header_row", Boolean(isDetail && icon) && "bk-page-header_row_detail")}>
-        {isDetail && icon ? <div className="bk-page-header_detail_icon">{icon}</div> : null}
-        <div className="bk-page-header_body">
-          {eyebrow ? <div className="bk-page-header_eyebrow">{eyebrow}</div> : null}
+      <div className={cx("adri-page-header_row", Boolean(isDetail && icon) && "adri-page-header_row_detail")}>
+        {isDetail && icon ? <div className="adri-page-header_detail_icon">{icon}</div> : null}
+        <div className="adri-page-header_body">
+          {eyebrow ? <div className="adri-page-header_eyebrow">{eyebrow}</div> : null}
           <h1
             className={cx(
-              "bk-page-header_title",
-              isDetail && "bk-page-header_title_detail",
+              "adri-page-header_title",
+              isDetail && "adri-page-header_title_detail",
               titleClassName,
             )}
           >
             {title}
           </h1>
           {isDetail && highlights ? (
-            <div className="bk-page-header_detail_highlights">{highlights}</div>
+            <div className="adri-page-header_detail_highlights">{highlights}</div>
           ) : null}
-          {subtitle ? <p className="bk-page-header_subtitle">{subtitle}</p> : null}
-          {meta ? <p className="bk-page-header_meta">{meta}</p> : null}
+          {subtitle ? <p className="adri-page-header_subtitle">{subtitle}</p> : null}
+          {meta ? <p className="adri-page-header_meta">{meta}</p> : null}
         </div>
-        {actions ? <div className="bk-page-header_actions">{actions}</div> : null}
+        {actions ? <div className="adri-page-header_actions">{actions}</div> : null}
       </div>
     </header>
   );

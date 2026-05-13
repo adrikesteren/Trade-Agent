@@ -1,8 +1,8 @@
 import * as React from "react";
 import { cx } from "../lib/cx";
-import { RecordDetailLayout, type RecordDetailLayoutProps } from "./record-detail-layout";
+import { RecordPageLayout, type RecordPageLayoutProps } from "./record-page-layout";
 
-export type DetailPageLayoutProps = Omit<RecordDetailLayoutProps, "children" | "content"> & {
+export type DetailPageLayoutProps = Omit<RecordPageLayoutProps, "children" | "content"> & {
   header: React.ReactNode;
   content: React.ReactNode;
   /** Right column (40% from md up). Omit or pass null for an empty aside until you add widgets. */
@@ -18,18 +18,18 @@ export function DetailPageLayout({ header, content, sidebar, className, ...rest 
   const hasSidebarContent = sidebar != null;
 
   return (
-    <RecordDetailLayout className={cx(className)} {...rest}>
-      <div className="bk-detail-page-layout_inner bk-stack bk-stack_gap-md">
-        <div className="bk-detail-page-layout_header">{header}</div>
-        <div className="bk-detail-page-layout_row">
-          <div className="bk-detail-page-layout_main">{content}</div>
+    <RecordPageLayout className={cx(className)} {...rest}>
+      <div className="adri-detail-page-layout_inner adri-stack adri-stack_gap-md">
+        <div className="adri-detail-page-layout_header">{header}</div>
+        <div className="adri-detail-page-layout_row">
+          <div className="adri-detail-page-layout_main">{content}</div>
           <aside
-            className={cx("bk-detail-page-layout_aside", !hasSidebarContent && "bk-detail-page-layout_aside_empty")}
+            className={cx("adri-detail-page-layout_aside", !hasSidebarContent && "adri-detail-page-layout_aside_empty")}
           >
             {hasSidebarContent ? sidebar : null}
           </aside>
         </div>
       </div>
-    </RecordDetailLayout>
+    </RecordPageLayout>
   );
 }

@@ -8,5 +8,5 @@ export const LinkText = React.forwardRef<HTMLAnchorElement, LinkTextProps>(funct
   { className, ...props },
   ref,
 ) {
-  return <a ref={ref} className={cx("bk-link", className)} {...props} />;
+  return <a ref={ref} className={cx("adri-link", className)} {...props} />;
 });

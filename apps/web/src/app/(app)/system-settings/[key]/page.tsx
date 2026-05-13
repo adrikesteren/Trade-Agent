@@ -13,9 +13,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
@@ -59,13 +59,13 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
           />
         }
         content={
-          <RecordDetailCard>
-            <RecordDetailSection title="Access">
+          <RecordPageCard>
+            <RecordPageSection title="Access">
               <p className="text-sm text-neutral-600 dark:text-neutral-400">
                 Promote your user in SQL (see docs/ops-developer.md) or ask an administrator.
               </p>
-            </RecordDetailSection>
-          </RecordDetailCard>
+            </RecordPageSection>
+          </RecordPageCard>
         }
       />
     );
@@ -110,9 +110,9 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailCard>
-          <RecordDetailSection title="Details">
-            <RecordDetailGrid>
+        <RecordPageCard>
+          <RecordPageSection title="Details">
+            <RecordPageGrid>
               <Output label="Key" type="text" value={settingKey} span="full" />
               <Output label="Label" type="text" value={def.label} span="full" />
               <Output label="Stored value (DB)" type="text" value={db ? parseStoredNumeric(db.value) : "— (no row)"} />
@@ -126,9 +126,9 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
                 value={db?.updated_at ?? null}
                 formatDatetime={formatDt}
               />
-            </RecordDetailGrid>
-          </RecordDetailSection>
-        </RecordDetailCard>
+            </RecordPageGrid>
+          </RecordPageSection>
+        </RecordPageCard>
       }
     />
   );

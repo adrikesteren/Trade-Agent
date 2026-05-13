@@ -13,7 +13,7 @@ export const ListViewIconButton = React.forwardRef<HTMLButtonElement, ListViewIc
     <button
       ref={ref}
       type={type}
-      className={cx("bk-listview-icon-btn", className)}
+      className={cx("adri-listview-icon-btn", className)}
       aria-label={label}
       title={label}
       {...props}

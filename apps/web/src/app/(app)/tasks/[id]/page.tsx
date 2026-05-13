@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { TaskDetailHeaderActions } from "@/app/(app)/tasks/[id]/task-detail-header-actions";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
@@ -9,9 +9,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -118,12 +118,12 @@ export default async function TaskDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
-                <RecordDetailSection title="Details">
-                  <RecordDetailGrid>
+              <RecordPageCard>
+                <RecordPageSection title="Details">
+                  <RecordPageGrid>
                     <Output label="Task ID" type="text" value={t.id} span="full" />
                     <Output label="Title" type="text" value={t.title} span="full" />
                     <Output label="Description" type="text" value={t.description?.trim() ? t.description : "—"} span="full" />
@@ -161,16 +161,16 @@ export default async function TaskDetailPage({ params }: PageProps) {
                     <Output label="Created" type="datetime" value={t.created_at} formatDatetime={formatDt} />
                     <Output label="Updated" type="datetime" value={t.updated_at} formatDatetime={formatDt} />
                     <Output label="Metadata" type="codeblock" value={metadataJson(t.metadata)} span="full" />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
+                  </RecordPageGrid>
+                </RecordPageSection>
+              </RecordPageCard>
             </div>
           }
         />
       }
       sidebar={
         <div className="bk-stack bk-stack_gap-md">
-          <RecordDetailCard>
+          <RecordPageCard>
             <RecordRelatedList
               title="Subtasks"
               description="Child tasks with parent_task_id pointing at this record."
@@ -191,7 +191,7 @@ export default async function TaskDetailPage({ params }: PageProps) {
                 </div>
               )}
             />
-          </RecordDetailCard>
+          </RecordPageCard>
         </div>
       }
     />

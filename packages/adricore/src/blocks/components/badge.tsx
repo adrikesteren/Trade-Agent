@@ -8,13 +8,13 @@ export type BadgeProps = React.HTMLAttributes<HTMLSpanElement> & {
 };
 
 const toneClass: Record<BadgeTone, string> = {
-  neutral: "bk-badge_neutral",
-  brand: "bk-badge_brand",
-  success: "bk-badge_success",
-  warning: "bk-badge_warning",
-  error: "bk-badge_error",
+  neutral: "adri-badge_neutral",
+  brand: "adri-badge_brand",
+  success: "adri-badge_success",
+  warning: "adri-badge_warning",
+  error: "adri-badge_error",
 };
 
 export function Badge({ className, tone = "neutral", ...props }: BadgeProps) {
-  return <span className={cx("bk-badge", toneClass[tone], className)} {...props} />;
+  return <span className={cx("adri-badge", toneClass[tone], className)} {...props} />;
 }

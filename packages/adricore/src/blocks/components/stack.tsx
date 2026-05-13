@@ -6,11 +6,11 @@ export type StackProps = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 const gapClass = {
-  sm: "bk-stack_gap-sm",
-  md: "bk-stack_gap-md",
-  lg: "bk-stack_gap-lg",
+  sm: "adri-stack_gap-sm",
+  md: "adri-stack_gap-md",
+  lg: "adri-stack_gap-lg",
 } as const;
 
 export function Stack({ gap = "md", className, ...props }: StackProps) {
-  return <div className={cx("bk-stack", gapClass[gap], className)} {...props} />;
+  return <div className={cx("adri-stack", gapClass[gap], className)} {...props} />;
 }

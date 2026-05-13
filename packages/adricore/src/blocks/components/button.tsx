@@ -14,16 +14,16 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variantClass: Record<ButtonVariant, string> = {
-  brand: "bk-button_brand",
-  neutral: "bk-button_neutral",
-  destructive: "bk-button_destructive",
-  ghost: "bk-button_ghost",
+  brand: "adri-button_brand",
+  neutral: "adri-button_neutral",
+  destructive: "adri-button_destructive",
+  ghost: "adri-button_ghost",
 };
 
 const sizeClass: Record<ButtonSize, string> = {
-  sm: "bk-button_sm",
+  sm: "adri-button_sm",
   md: "",
-  lg: "bk-button_lg",
+  lg: "adri-button_lg",
 };
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -37,7 +37,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   return (
     <Comp
       ref={ref as never}
-      className={cx("bk-button", variantClass[variant], sizeClass[size], className)}
+      className={cx("adri-button", variantClass[variant], sizeClass[size], className)}
       disabled={asChild ? undefined : isDisabled}
       aria-disabled={asChild && isDisabled ? true : undefined}
       {...props}
@@ -45,7 +45,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       {showSpinner ? (
         <>
           <Spinner aria-hidden />
-          <span className="bk-sr-only">Loading</span>
+          <span className="adri-sr-only">Loading</span>
           {children}
         </>
       ) : (

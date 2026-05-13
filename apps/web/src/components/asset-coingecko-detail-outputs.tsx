@@ -116,7 +116,7 @@ function emptySnapshotOutputs(coinIdDisplay: string) {
   );
 }
 
-/** CoinGecko columns as plain `Output` rows inside `RecordDetailGrid` (crypto only). */
+/** CoinGecko columns as plain `Output` rows inside `RecordPageGrid` (crypto only). */
 export function AssetCoingeckoDetailOutputs({
   asset,
   metadataCoingeckoId,

@@ -17,7 +17,7 @@ export const DropdownMenuContent = React.forwardRef<
       <DropdownMenuPrimitive.Content
         ref={ref}
         sideOffset={sideOffset}
-        className={cx("bk-menu-content", className)}
+        className={cx("adri-menu-content", className)}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
@@ -28,7 +28,7 @@ export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>
 >(function DropdownMenuItem({ className, ...props }, ref) {
-  return <DropdownMenuPrimitive.Item ref={ref} className={cx("bk-menu-item", className)} {...props} />;
+  return <DropdownMenuPrimitive.Item ref={ref} className={cx("adri-menu-item", className)} {...props} />;
 });
 
 export const DropdownMenuSeparator = React.forwardRef<
@@ -36,6 +36,6 @@ export const DropdownMenuSeparator = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
 >(function DropdownMenuSeparator({ className, ...props }, ref) {
   return (
-    <DropdownMenuPrimitive.Separator ref={ref} className={cx("bk-menu-separator", className)} {...props} />
+    <DropdownMenuPrimitive.Separator ref={ref} className={cx("adri-menu-separator", className)} {...props} />
   );
 });

@@ -7,5 +7,5 @@ export type SpinnerProps = {
 };
 
 export function Spinner({ className, "aria-label": ariaLabel = "Loading" }: SpinnerProps) {
-  return <span className={cx("bk-spinner", className)} role="status" aria-label={ariaLabel} />;
+  return <span className={cx("adri-spinner", className)} role="status" aria-label={ariaLabel} />;
 }

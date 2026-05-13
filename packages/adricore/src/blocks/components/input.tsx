@@ -7,5 +7,5 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   { className, ...props },
   ref,
 ) {
-  return <input ref={ref} className={cx("bk-input", className)} {...props} />;
+  return <input ref={ref} className={cx("adri-input", className)} {...props} />;
 });

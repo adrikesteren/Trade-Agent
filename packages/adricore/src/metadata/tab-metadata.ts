@@ -39,20 +39,19 @@ export class ObjectTabMetadata extends TabMetadata {
   }
 
   public getApiName(): string {
-    return this.object.apiName;
+    return this.object.route.getApiName ? this.object.route.getApiName() : this.object.apiName;
   }
 
   public getLabel(): string {
-    return this.object.label.plural;
+    return this.object.route.getLabel();
   }
 
   public getHref(): string {
-    // Note: the original getHref returns `/${slug}` usually. We use `/${apiName}`.
-    return `/${this.object.getApiName()}`;
+    return this.object.route.getHref();
   }
 
   public getTarget(): string | undefined {
-    return undefined;
+    return this.object.route.getTarget();
   }
 }
 

@@ -12,7 +12,7 @@ export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(function DialogOverlay({ className, ...props }, ref) {
-  return <DialogPrimitive.Overlay ref={ref} className={cx("bk-dialog-overlay", className)} {...props} />;
+  return <DialogPrimitive.Overlay ref={ref} className={cx("adri-dialog-overlay", className)} {...props} />;
 });
 
 export const DialogContent = React.forwardRef<
@@ -22,7 +22,7 @@ export const DialogContent = React.forwardRef<
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay />
-      <DialogPrimitive.Content ref={ref} className={cx("bk-dialog-content", className)} {...props}>
+      <DialogPrimitive.Content ref={ref} className={cx("adri-dialog-content", className)} {...props}>
         {children}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
@@ -33,16 +33,16 @@ export const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
 >(function DialogTitle({ className, ...props }, ref) {
-  return <DialogPrimitive.Title ref={ref} className={cx("bk-dialog-title", className)} {...props} />;
+  return <DialogPrimitive.Title ref={ref} className={cx("adri-dialog-title", className)} {...props} />;
 });
 
 export const DialogDescription = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
 >(function DialogDescription({ className, ...props }, ref) {
-  return <DialogPrimitive.Description ref={ref} className={cx("bk-dialog-description", className)} {...props} />;
+  return <DialogPrimitive.Description ref={ref} className={cx("adri-dialog-description", className)} {...props} />;
 });
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cx("bk-dialog-footer", className)} {...props} />;
+  return <div className={cx("adri-dialog-footer", className)} {...props} />;
 }

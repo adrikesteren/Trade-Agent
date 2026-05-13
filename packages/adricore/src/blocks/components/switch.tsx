@@ -14,16 +14,16 @@ export const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.R
     const inputId = id ?? autoId;
 
     const control = (
-      <SwitchPrimitive.Root ref={ref} id={inputId} className={cx("bk-switch-root", className)} {...props}>
-        <SwitchPrimitive.Thumb className="bk-switch-thumb" />
+      <SwitchPrimitive.Root ref={ref} id={inputId} className={cx("adri-switch-root", className)} {...props}>
+        <SwitchPrimitive.Thumb className="adri-switch-thumb" />
       </SwitchPrimitive.Root>
     );
 
     if (label) {
       return (
-        <div className="bk-switch-row">
+        <div className="adri-switch-row">
           {control}
-          <label htmlFor={inputId} className="bk-form-label" style={{ margin: 0, fontWeight: 500 }}>
+          <label htmlFor={inputId} className="adri-form-label" style={{ margin: 0, fontWeight: 500 }}>
             {label}
           </label>
         </div>

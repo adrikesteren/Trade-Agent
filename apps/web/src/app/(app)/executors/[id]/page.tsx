@@ -4,7 +4,7 @@ import { ExecutorHistoricalRunHeaderAction } from "@/app/(app)/executors/[id]/ex
 import { ExecutorEditDialog } from "@/app/(app)/executors/[id]/executor-edit-dialog";
 import type { AssetOption, ExchangeOption } from "@/app/(app)/executors/executor-form";
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import {
   DASHBOARD_LIST_VIEW_LIMIT,
@@ -31,9 +31,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
   listViewOutlineActionClass,
 } from "@repo/adricore/blocks";
@@ -619,12 +619,12 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
         </div>
       }
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordDetailCard>
-                <RecordDetailSection title="Configuration">
-                  <RecordDetailGrid>
+              <RecordPageCard>
+                <RecordPageSection title="Configuration">
+                  <RecordPageGrid>
                     <Output label="Name" type="text" value={String(ex.name ?? "")} />
                     <Output label="Enabled" type="boolean" value={ex.enabled} />
                     <Output label="Slack trade-fill notifications" type="boolean" value={slackTradeNotificationsEnabled} />
@@ -684,10 +684,10 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                         />
                       </>
                     ) : null}
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-                <RecordDetailSection title="Mediator / risk rails">
-                  <RecordDetailGrid>
+                  </RecordPageGrid>
+                </RecordPageSection>
+                <RecordPageSection title="Mediator / risk rails">
+                  <RecordPageGrid>
                     <Output label="Default order size (EUR)" type="text" value={fmtEur(ex.default_notional_eur)} />
                     <Output label="Max risk per trade (0–1)" type="text" value={String(ex.max_risk_per_trade ?? "—")} />
                     <Output label="Max open positions" type="number" value={ex.max_open_positions ?? 0} />
@@ -705,9 +705,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     />
                     <Output label="Moving floor timeframe" type="text" value={String(ex.moving_floor_timeframe ?? "—")} />
                     <Output label="Advanced rails (JSON)" type="codeblock" value={mediator_rails_extra_json} span="full" />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
+                  </RecordPageGrid>
+                </RecordPageSection>
+              </RecordPageCard>
             </div>
           }
           related={

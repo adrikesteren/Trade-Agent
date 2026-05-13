@@ -49,11 +49,11 @@ export function RecordRelatedList<T>({
   const showViewAll = Boolean(viewAllHref && (hasMore || alwaysShowViewAll));
 
   return (
-    <section className={cx("bk-record-detail-section bk-record-related-list", className)}>
-      <header className="bk-record-related-list_header">
-        <div className="bk-record-related-list_titles">
-          <h2 className="bk-record-detail-section_title">{title}</h2>
-          {description ? <div className="bk-record-detail-section_desc">{description}</div> : null}
+    <section className={cx("adri-record-page-section adri-record-related-list", className)}>
+      <header className="adri-record-related-list_header">
+        <div className="adri-record-related-list_titles">
+          <h2 className="adri-record-page-section_title">{title}</h2>
+          {description ? <div className="adri-record-page-section_desc">{description}</div> : null}
         </div>
         {showViewAll ? (
           <a href={viewAllHref} className={listViewOutlineActionClass}>
@@ -61,15 +61,15 @@ export function RecordRelatedList<T>({
           </a>
         ) : null}
       </header>
-      <div className="bk-record-detail-section_body">
-        <ul className="bk-list-divided">
+      <div className="adri-record-page-section_body">
+        <ul className="adri-list-divided">
           {visible.length === 0 ? (
-            <li className="bk-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
+            <li className="adri-text-muted py-4" style={{ fontSize: "0.8125rem" }}>
               {emptyMessage}
             </li>
           ) : (
             visible.map((item) => (
-              <li key={getKey(item)} className="bk-record-related-list_row">
+              <li key={getKey(item)} className="adri-record-related-list_row">
                 {renderRow(item)}
               </li>
             ))

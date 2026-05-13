@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { formatDatetime } from "@/lib/locale/format";
@@ -9,9 +9,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
@@ -82,11 +82,11 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="automation" relatedTable="sync_runs" relatedId={run.id} />}
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Run ID" type="text" value={run.id} span="full" />
                   <Output label="Job" type="text" value={run.job_key} span="full" />
                   <Output label="Status" type="text" value={run.status} />
@@ -95,13 +95,13 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
                   <Output label="Ended" type="datetime" value={run.ended_at} formatDatetime={formatDt} />
                   <Output label="Updated" type="datetime" value={run.updated_at} formatDatetime={formatDt} />
                   {showReason ? <Output label="Reason" type="text" value={run.reason} span="full" /> : null}
-                </RecordDetailGrid>
-              </RecordDetailSection>
+                </RecordPageGrid>
+              </RecordPageSection>
 
-              <RecordDetailSection title="Metadata">
+              <RecordPageSection title="Metadata">
                 <pre className="bk-pre">{metadataJson}</pre>
-              </RecordDetailSection>
-            </RecordDetailCard>
+              </RecordPageSection>
+            </RecordPageCard>
           }
         />
       }

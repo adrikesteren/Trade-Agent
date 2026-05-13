@@ -47,9 +47,11 @@ export {
   type OutputType,
 } from "./components/output";
 export { PageHeader, type PageHeaderProps, type PageHeaderVariant } from "./components/page-header";
-export { RecordDetailCard, RecordDetailLayout, type RecordDetailCardProps, type RecordDetailLayoutProps } from "./components/record-detail-layout";
-export { RecordDetailGrid, type RecordDetailGridProps } from "./components/record-detail-grid";
-export { RecordDetailSection, type RecordDetailSectionProps } from "./components/record-detail-section";
+export { RecordPageCard, RecordPageLayout, type RecordPageCardProps, type RecordPageLayoutProps } from "./components/record-page-layout";
+export { FieldRenderer } from "./components/field-renderer";
+export { Lookup, type LookupProps } from "./components/lookup";
+export { RecordPageGrid, type RecordPageGridProps } from "./components/record-page-grid";
+export { RecordPageSection, type RecordPageSectionProps } from "./components/record-page-section";
 export { RecordRelatedList, type RecordRelatedListProps } from "./components/record-related-list";
 export { Select, type SelectProps } from "./components/select";
 export { Spinner, type SpinnerProps } from "./components/spinner";
@@ -60,4 +62,4 @@ export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
 export { Textarea, type TextareaProps } from "./components/textarea";
 
 /** Class for plain text dropdown triggers (nav menus). */
-export const menuTriggerPlainClass = "bk-menu-trigger_plain";
+export const menuTriggerPlainClass = "adri-menu-trigger_plain";

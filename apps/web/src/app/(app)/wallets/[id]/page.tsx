@@ -6,9 +6,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
 
@@ -60,9 +60,9 @@ export default async function WalletDetailPage({ params }: PageProps) {
         />
       }
       content={
-        <RecordDetailCard>
-          <RecordDetailSection title="Details">
-            <RecordDetailGrid>
+        <RecordPageCard>
+          <RecordPageSection title="Details">
+            <RecordPageGrid>
               <Output label="Wallet id" type="text" value={walletId} span="full" />
               {executorId ? (
                 <Output
@@ -78,9 +78,9 @@ export default async function WalletDetailPage({ params }: PageProps) {
                 <Output label="Executor" type="text" value="—" />
               )}
               <Output label="Created" type="datetime" value={(row as { created_at?: string }).created_at} formatDatetime={formatDt} />
-            </RecordDetailGrid>
-          </RecordDetailSection>
-        </RecordDetailCard>
+            </RecordPageGrid>
+          </RecordPageSection>
+        </RecordPageCard>
       }
     />
   );

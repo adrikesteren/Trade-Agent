@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
@@ -10,9 +10,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -236,11 +236,11 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
               {ordErr.message}
             </p>
           ) : null}
-          <RecordDetailTabs
+          <RecordPageTabs
             details={
-              <RecordDetailCard>
-                <RecordDetailSection title="Details">
-                  <RecordDetailGrid>
+              <RecordPageCard>
+                <RecordPageSection title="Details">
+                  <RecordPageGrid>
                     <Output label="Decision ID" type="text" value={dec.id} span="full" />
                     {dec.market_id ? (
                       <Output
@@ -280,23 +280,23 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                     )}
                     <Output label="Reason codes" type="text" value={reasons} span="full" />
                     <Output label="Created" type="datetime" value={dec.created_at} formatDatetime={formatDt} />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-                <RecordDetailSection title="Decision payload">
-                  <RecordDetailGrid>
+                  </RecordPageGrid>
+                </RecordPageSection>
+                <RecordPageSection title="Decision payload">
+                  <RecordPageGrid>
                     <Output label="JSON" type="codeblock" value={payloadJson} span="full" />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-                <RecordDetailSection title="Risk snapshot">
-                  <RecordDetailGrid>
+                  </RecordPageGrid>
+                </RecordPageSection>
+                <RecordPageSection title="Risk snapshot">
+                  <RecordPageGrid>
                     <Output label="JSON" type="codeblock" value={riskJson} span="full" />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
+                  </RecordPageGrid>
+                </RecordPageSection>
+              </RecordPageCard>
             }
             related={
               <div className="bk-stack bk-stack_gap-md">
-                <RecordDetailCard>
+                <RecordPageCard>
                 <RecordRelatedList
                   title="Orders"
                   description="Orders linked to this decision (newest first)."
@@ -318,7 +318,7 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 />
-              </RecordDetailCard>
+              </RecordPageCard>
               </div>
             }
           />

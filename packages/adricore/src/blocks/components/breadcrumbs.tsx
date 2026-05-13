@@ -11,12 +11,12 @@ export type BreadcrumbsProps = {
 export function Breadcrumbs({ items, className }: BreadcrumbsProps) {
   return (
     <nav aria-label="Breadcrumb">
-      <ol className={cx("bk-breadcrumb", className)}>
+      <ol className={cx("adri-breadcrumb", className)}>
         {items.map((item, i) => (
           <li key={`${item.label}-${i}`}>
-            {i > 0 ? <span className="bk-breadcrumb-sep" aria-hidden>/</span> : null}
+            {i > 0 ? <span className="adri-breadcrumb-sep" aria-hidden>/</span> : null}
             {item.href ? (
-              <a href={item.href} className="bk-link">
+              <a href={item.href} className="adri-link">
                 {item.label}
               </a>
             ) : (

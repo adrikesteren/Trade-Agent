@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
@@ -9,9 +9,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
 } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -164,12 +164,12 @@ export default async function SignalDetailPage({ params }: PageProps) {
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signals" relatedId={sig.id} />}
       content={
-        <RecordDetailTabs
+        <RecordPageTabs
           defaultTab="details"
           details={
-            <RecordDetailCard>
-              <RecordDetailSection title="Details">
-                <RecordDetailGrid>
+            <RecordPageCard>
+              <RecordPageSection title="Details">
+                <RecordPageGrid>
                   <Output label="Signal ID" type="text" value={sig.id} span="full" />
                   {sig.market_id ? (
                     <Output
@@ -194,19 +194,19 @@ export default async function SignalDetailPage({ params }: PageProps) {
                   <Output label="Bar close" type="datetime" value={sig.close_time} formatDatetime={formatDt} />
                   <Output label="Timeframe" type="text" value={sig.timeframe} />
                   <Output label="Created" type="datetime" value={sig.created_at} formatDatetime={formatDt} />
-                </RecordDetailGrid>
-              </RecordDetailSection>
-              <RecordDetailSection title="Reasons">
-                <RecordDetailGrid>
+                </RecordPageGrid>
+              </RecordPageSection>
+              <RecordPageSection title="Reasons">
+                <RecordPageGrid>
                   <Output label="JSON" type="codeblock" value={reasonsJson(sig.reasons)} span="full" />
-                </RecordDetailGrid>
-              </RecordDetailSection>
-              <RecordDetailSection title="Metadata">
-                <RecordDetailGrid>
+                </RecordPageGrid>
+              </RecordPageSection>
+              <RecordPageSection title="Metadata">
+                <RecordPageGrid>
                   <Output label="JSON" type="codeblock" value={metaJson} span="full" />
-                </RecordDetailGrid>
-              </RecordDetailSection>
-            </RecordDetailCard>
+                </RecordPageGrid>
+              </RecordPageSection>
+            </RecordPageCard>
           }
           related={
             <div className="bk-stack bk-stack_gap-md">

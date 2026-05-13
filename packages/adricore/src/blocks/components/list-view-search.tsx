@@ -12,9 +12,9 @@ export const ListViewSearch = React.forwardRef<HTMLInputElement, ListViewSearchP
   ref,
 ) {
   return (
-    <div className={cx("bk-listview-search", className)}>
-      <Search className="bk-listview-search_glyph" size={16} strokeWidth={2} aria-hidden />
-      <input ref={ref} type={type} className="bk-listview-search_input" {...props} />
+    <div className={cx("adri-listview-search", className)}>
+      <Search className="adri-listview-search_glyph" size={16} strokeWidth={2} aria-hidden />
+      <input ref={ref} type={type} className="adri-listview-search_input" {...props} />
     </div>
   );
 });

@@ -1,4 +1,4 @@
-import { RecordDetailTabs } from "@/components/record-detail-tabs";
+import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
@@ -10,9 +10,9 @@ import {
   ListViewObjectIcon,
   Output,
   PageHeader,
-  RecordDetailCard,
-  RecordDetailGrid,
-  RecordDetailSection,
+  RecordPageCard,
+  RecordPageGrid,
+  RecordPageSection,
   RecordRelatedList,
 } from "@repo/adricore/blocks";
 import { notFound } from "next/navigation";
@@ -191,11 +191,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
               {fillErr.message}
             </p>
           ) : null}
-          <RecordDetailTabs
+          <RecordPageTabs
             details={
-              <RecordDetailCard>
-                <RecordDetailSection title="Details">
-                  <RecordDetailGrid>
+              <RecordPageCard>
+                <RecordPageSection title="Details">
+                  <RecordPageGrid>
                     <Output label="Order ID" type="text" value={order.id} span="full" />
                     {order.market_id ? (
                       <Output
@@ -226,13 +226,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     <Output label="Decision ID" type="text" value={order.decision_id ?? "—"} span="full" />
                     <Output label="Created" type="datetime" value={order.created_at} formatDatetime={formatDt} />
                     <Output label="Updated" type="datetime" value={order.updated_at} formatDatetime={formatDt} />
-                  </RecordDetailGrid>
-                </RecordDetailSection>
-              </RecordDetailCard>
+                  </RecordPageGrid>
+                </RecordPageSection>
+              </RecordPageCard>
             }
             related={
               <div className="bk-stack bk-stack_gap-md">
-                <RecordDetailCard>
+                <RecordPageCard>
                 <RecordRelatedList
                   title="Fills"
                   description="Sorted by created date (newest first)."
@@ -252,7 +252,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 />
-              </RecordDetailCard>
+              </RecordPageCard>
               </div>
             }
           />

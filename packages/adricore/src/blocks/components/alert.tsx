@@ -8,12 +8,12 @@ export type AlertProps = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 const toneClass: Record<AlertTone, string> = {
-  info: "bk-alert_info",
-  success: "bk-alert_success",
-  warning: "bk-alert_warning",
-  error: "bk-alert_error",
+  info: "adri-alert_info",
+  success: "adri-alert_success",
+  warning: "adri-alert_warning",
+  error: "adri-alert_error",
 };
 
 export function Alert({ className, tone = "info", role = "status", ...props }: AlertProps) {
-  return <div role={role} className={cx("bk-alert", toneClass[tone], className)} {...props} />;
+  return <div role={role} className={cx("adri-alert", toneClass[tone], className)} {...props} />;
 }
