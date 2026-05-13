@@ -1,5 +1,6 @@
 import { iconRegistry } from "./icons";
-import { ObjectMetadata, ObjectLabelMetadata, ObjectFieldDataTypes, ObjectRelationshipReferenceTypes } from "@repo/adricore/metadata";
+import { ObjectMetadata, ObjectLabelMetadata, ObjectFieldDataTypes, ObjectRelationshipReferenceTypes, ObjectRelationshipMetadata, ObjectFieldMetadata } from "@repo/adricore/metadata";
+import { objectRegistry } from "./registry";
 
 export class MarketsModel extends ObjectMetadata {
   constructor() {
@@ -13,37 +14,36 @@ export class MarketsModel extends ObjectMetadata {
   }
 
   public connectRelationships(): void {
-    const assetObj = require("./registry").objectRegistry.registrations.get("assets");
+    const assetObj = objectRegistry.registrations.get("assets");
+    
     if (assetObj) {
       this.fieldRegistry.add(
-        new (require("@repo/adricore/metadata").ObjectFieldMetadata)(
+        new ObjectFieldMetadata(
           "base_asset_id",
           "Base Asset",
           ObjectFieldDataTypes.Reference,
           {
-            relationship: new (require("@repo/adricore/metadata").ObjectRelationshipMetadata)(
-              this,
-              "base_asset_id",
-              assetObj,
+            sourceObject: this,
+            relationship: new ObjectRelationshipMetadata(
               "markets_by_base_asset",
-              ObjectRelationshipReferenceTypes.Lookup
+              ObjectRelationshipReferenceTypes.Lookup,
+              assetObj
             )
           }
         )
       );
 
       this.fieldRegistry.add(
-        new (require("@repo/adricore/metadata").ObjectFieldMetadata)(
+        new ObjectFieldMetadata(
           "quote_asset_id",
           "Quote Asset",
           ObjectFieldDataTypes.Reference,
           {
-            relationship: new (require("@repo/adricore/metadata").ObjectRelationshipMetadata)(
-              this,
-              "quote_asset_id",
-              assetObj,
+            sourceObject: this,
+            relationship: new ObjectRelationshipMetadata(
               "markets_by_quote_asset",
-              ObjectRelationshipReferenceTypes.Lookup
+              ObjectRelationshipReferenceTypes.Lookup,
+              assetObj
             )
           }
         )
