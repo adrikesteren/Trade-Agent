@@ -1,0 +1,47 @@
+---
+description: Service folder layout, object folder layout, and naming conventions inside apps/web/src/lib (fflib-style).
+alwaysApply: true
+---
+
+# Service folders, object folders & naming
+
+Domain/business logic in this monorepo follows an fflib-style layout under [`apps/web/src/lib/`](apps/web/src/lib/). Always honor the folder + suffix conventions below when creating, moving, or renaming files. Tests live next to their source.
+
+## What is a "service"
+
+A service is **business / domain logic** scoped to one of our agents or to a cross-agent orchestrator. It coordinates Supabase queries, agent rules, relay publishes, etc. — anything that encodes domain behavior.
+
+Things that are **not** services (do not place under `agents/`/`orchestrators/`, do not rename with `.service.ts`):
+
+- Pure utilities, types, small helpers (e.g. `lib/automation-actor.ts`, `lib/format-usd-metric.ts`, `lib/trading/close-time-match.ts`).
+- Integration clients / SDK wrappers (e.g. raw Bitvavo HTTP under `lib/bitvavo/`).
+- UI / chart helpers (e.g. `lib/markets/chart-types.ts`, `aggregate-ohlcv.ts`, `fetch-market-chart-candles.ts`).
+- Infra / cross-cutting: `lib/supabase/`, `lib/env/`, `lib/workers/`, `lib/relay/`, `lib/logs/`, `lib/locale/`, `lib/auth/`, `lib/dashboard/`, `lib/docs/`, `lib/ops/`, `lib/system-settings/`, `lib/tasks/`, `lib/catalog/`.
+
+## Service location rules (always)
+
+- **Single-namespace service** → `apps/web/src/lib/agents/<namespace>/services/<name>.service.ts`. Allowed namespaces (one per agent):
+  - `ingest` — Bitvavo / CoinGecko sync, candle backfill windows, ingest schedulers.
+  - `signal` — signal evaluators (MA cross / RSI / breakout-ATR), signal upsert / replay pipelines.
+  - `trade-mediator` — catalog-close mediator pipelines.
+  - `executor` — catalog-close executor pipelines, paper fills, executor rules / wallet / pnl, historical executor simulation.
+- **Cross-namespace orchestrator** (combines ≥ 2 agents) → `apps/web/src/lib/orchestrators/<name>.service.ts`. No namespace folder.
+- **Per-object service** (rare, scoped to one ObjectMetadata) → `apps/web/src/lib/objects/<object>/services/<name>.service.ts`. Create the `services/` subfolder only when the first service is added.
+
+Never place agent-specific logic at the bare root of `lib/`, and never put orchestrators inside an agent namespace.
+
+## Object location rules (always)
+
+- One folder per object: `apps/web/src/lib/objects/<object>/<object>.object.ts` containing the `ObjectMetadata` subclass.
+- Cross-cutting object files at the root: `lib/objects/registry.ts` (central `objectRegistry`) and `lib/objects/icons.ts` (icon registry).
+- Import metadata types from `@repo/adricore/metadata`. Wire each new object class into `lib/objects/registry.ts`.
+
+## Naming rules (always)
+
+- Service files end in **`.service.ts`** (kebab-case, descriptive verb-ish name). Tests: `<name>.service.test.ts`.
+- Object files end in **`.object.ts`** (kebab-case, matches its folder name). One class per file.
+- Use **functional exports**: `export async function runFoo(...) { ... }`. No `class FooService` or `export const FooService = { ... }` wrappers (that may come later; not now).
+
+## When in doubt
+
+If a new file is borderline (e.g. could be a util or a service, or it touches two namespaces but feels like a helper), **ask the maintainer first** before creating it. Prefer a brief clarifying question over guessing the wrong folder.

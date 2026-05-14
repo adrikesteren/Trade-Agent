@@ -1,4 +1,5 @@
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -6,15 +7,12 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
   Card,
   CardBody,
-  ListViewObjectIcon,
-  ListViewPlaceholderToolbar,
-  ListViewTitlePickerPlaceholder,
-  PageHeader,
   Table,
   TableWrap,
   Td,
@@ -49,23 +47,20 @@ export default async function ExchangesIndexPage({ searchParams }: PageProps) {
     .range(from, to);
 
   const list = rows ?? [];
-  const summaryBits = [
-    `${list.length} on this page`,
+  const sortLineParts = [
     `${totalCount} total`,
     `Page ${page} of ${pages}`,
     "Sorted by Code",
     `${pageSize} per page`,
   ];
-  if (countError) summaryBits.push(`Count: ${countError.message}`);
+  if (countError) sortLineParts.push(`Count: ${countError.message}`);
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader
-        variant="list"
-        icon={<ListViewObjectIcon letter="E" />}
-        eyebrow="Exchanges"
-        title="Directory"
-        titleAddon={<ListViewTitlePickerPlaceholder />}
+      <ObjectListViewHeader
+        model={objectRegistry.registrations.get("exchanges")!}
+        rowCount={list.length}
+        sortLine={sortLineParts.join(" · ")}
         subtitle={
           <>
             Venues that host{" "}
@@ -75,8 +70,6 @@ export default async function ExchangesIndexPage({ searchParams }: PageProps) {
             (catalog reference data).
           </>
         }
-        summary={summaryBits.join(" · ")}
-        toolbar={<ListViewPlaceholderToolbar />}
       />
 
       {error ? <Alert tone="error">{error.message}</Alert> : null}

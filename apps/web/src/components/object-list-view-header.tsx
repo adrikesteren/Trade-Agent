@@ -1,59 +1,79 @@
 import {
-  ListViewObjectIcon,
   ListViewPlaceholderToolbar,
   ListViewTitlePickerPlaceholder,
-  PageHeader,
 } from "@repo/adricore/blocks";
+import type { ObjectMetadata } from "@repo/adricore/metadata";
 import type { ReactNode } from "react";
 
+/**
+ * Metadata-driven Lightning list-view header.
+ *
+ * Pass `model={SomeObjectMetadata}` and the title + object icon are derived
+ * from the model automatically (via `model.CreateListPageHeader(...)`).
+ * `title` and `subtitle` are optional overrides for list-view names that
+ * differ from the bare `label.plural`.
+ */
 export type ObjectListViewHeaderProps = {
-  eyebrow: string;
-  title: string;
+  /** ObjectMetadata that drives title / icon / object label. */
+  model: ObjectMetadata;
+  /** Total rows currently loaded. */
   rowCount: number;
+  /** Sort / status line displayed in the summary strip. */
   sortLine: string;
-  /** When true, summary omits the “Max N rows” segment (unbounded list). */
+  /** Override the auto-derived summary entirely. */
+  summary?: ReactNode;
+  /** When true, summary omits the "Max N rows" segment (unbounded list). */
   uncapped?: boolean;
   maxRows?: number;
-  /** Overrides default tile (first letter of `title`). */
-  icon?: ReactNode;
-  /** Single letter when you do not pass a custom `icon`. */
-  iconLetter?: string;
+  /** Page-header right-side actions. */
   actions?: ReactNode;
+  /** Optional toolbar slot (defaults to a `ListViewPlaceholderToolbar`). */
+  toolbar?: ReactNode;
+  /** Optional title-row addon (defaults to a `ListViewTitlePickerPlaceholder`). */
+  titleAddon?: ReactNode;
+  /** Override the title (default: `model.label.plural`). Use for named list views. */
+  title?: ReactNode;
+  /** Optional subtitle / description rendered under the title row. */
+  subtitle?: ReactNode;
+  /** Override the entire icon node. */
+  icon?: ReactNode;
+  /** Override the icon letter (default: first letter of `model.label.singular`). */
+  iconLetter?: string;
 };
 
+const DEFAULT_MAX_ROWS = 200;
+
 export function ObjectListViewHeader({
-  eyebrow,
-  title,
+  model,
   rowCount,
   sortLine,
+  summary,
   uncapped = false,
-  maxRows = 200,
+  maxRows = DEFAULT_MAX_ROWS,
+  actions,
+  toolbar,
+  titleAddon,
+  title,
+  subtitle,
   icon,
   iconLetter,
-  actions,
 }: ObjectListViewHeaderProps) {
-  const n = rowCount;
-  const summaryParts = [`${n} row${n === 1 ? "" : "s"}`, sortLine];
+  const summaryParts = [`${rowCount} row${rowCount === 1 ? "" : "s"}`, sortLine];
   if (!uncapped) summaryParts.push(`Max ${maxRows} rows`);
-  const summary = summaryParts.join(" · ");
-  const resolvedIcon =
-    icon ??
-    (iconLetter ? (
-      <ListViewObjectIcon letter={iconLetter} />
-    ) : (
-      <ListViewObjectIcon letter={title.trim().slice(0, 1).toUpperCase()} />
-    ));
+  const derivedSummary = summary ?? summaryParts.join(" · ");
 
-  return (
-    <PageHeader
-      variant="list"
-      icon={resolvedIcon}
-      eyebrow={eyebrow}
-      title={title}
-      titleAddon={<ListViewTitlePickerPlaceholder />}
-      summary={summary}
-      toolbar={<ListViewPlaceholderToolbar />}
-      actions={actions}
-    />
-  );
+  return model.CreateListPageHeader({
+    rowCount,
+    sortLine,
+    summary: derivedSummary,
+    uncapped,
+    maxRows,
+    actions,
+    icon,
+    iconLetter,
+    title,
+    subtitle,
+    titleAddon: titleAddon ?? <ListViewTitlePickerPlaceholder />,
+    toolbar: toolbar ?? <ListViewPlaceholderToolbar />,
+  });
 }

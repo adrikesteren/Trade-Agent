@@ -39,7 +39,7 @@ export class ObjectTabMetadata extends TabMetadata {
   }
 
   public getApiName(): string {
-    return this.object.route.getApiName ? this.object.route.getApiName() : this.object.apiName;
+    return this.object.apiName;
   }
 
   public getLabel(): string {

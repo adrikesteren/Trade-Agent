@@ -1,5 +1,5 @@
 import { LogsListView } from "@/app/(app)/object-tab-views/logs-list-view";
-import { getObjectMetadataBySlug } from "@/models/registry";
+import { getObjectMetadataBySlug } from "@/lib/objects/registry";
 import { notFound } from "next/navigation";
 
 type PageProps = {

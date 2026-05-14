@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/markets/run-symbol-close-pipeline";
+import { runSymbolClosePipeline, type SymbolClosePipelineOptions } from "@/lib/orchestrators/symbol-close-pipeline.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 

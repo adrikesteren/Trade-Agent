@@ -3,12 +3,12 @@ import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -51,21 +51,15 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="E" />}
-          eyebrow="Exchange"
-          title={ex.name}
-          highlights={
-            <>
-              <Output label="Code" type="text" value={ex.code} />
-              <Output label="Markets" type="text" value={countLabel} />
-            </>
-          }
-          meta={`id: ${ex.id}`}
-        />
-      }
+      header={objectRegistry.registrations.get("exchanges")!.CreateDetailPageHeader({
+        record: ex as Record<string, unknown>,
+        highlights: (
+          <>
+            <Output label="Code" type="text" value={ex.code} />
+            <Output label="Markets" type="text" value={countLabel} />
+          </>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="exchanges" relatedId={id} />}
       content={
         <RecordPageTabs
@@ -83,26 +77,26 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordPageCard>
-                <RecordRelatedList
-                  title="Markets"
-                  description={
-                    marketTotal > list.length
-                      ? `Preview: first ${list.length} of ${marketTotal} listings.`
-                      : marketTotal > 0
-                        ? `${marketTotal} listing${marketTotal === 1 ? "" : "s"}.`
-                        : undefined
-                  }
-                  items={list}
-                  getKey={(m) => m.id}
-                  totalCount={typeof count === "number" ? count : undefined}
-                  viewAllHref="/markets"
-                  emptyMessage="No markets synced for this exchange yet."
-                  renderRow={(m) => {
-                    const rawQ = m.quote_asset as unknown;
-                    const qa = (Array.isArray(rawQ) ? rawQ[0] : rawQ) as { code?: string } | null;
-                    const quoteLabel = String(qa?.code ?? "—");
-                    return (
+              <RecordRelatedList
+                title="Markets"
+                icon={<ListViewObjectIcon letter="M" />}
+                description={
+                  marketTotal > list.length
+                    ? `Preview: first ${list.length} of ${marketTotal} listings.`
+                    : marketTotal > 0
+                      ? `${marketTotal} listing${marketTotal === 1 ? "" : "s"}.`
+                      : undefined
+                }
+                items={list}
+                getKey={(m) => m.id}
+                totalCount={typeof count === "number" ? count : undefined}
+                viewAllHref="/markets"
+                emptyMessage="No markets synced for this exchange yet."
+                renderRow={(m) => {
+                  const rawQ = m.quote_asset as unknown;
+                  const qa = (Array.isArray(rawQ) ? rawQ[0] : rawQ) as { code?: string } | null;
+                  const quoteLabel = String(qa?.code ?? "—");
+                  return (
                     <>
                       <Link href={`/markets/${m.id}`} className="bk-link font-mono" style={{ fontWeight: 600 }}>
                         {m.market_symbol}
@@ -111,10 +105,9 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
                         {quoteLabel} · {m.status}
                       </span>
                     </>
-                    );
-                  }}
-                />
-              </RecordPageCard>
+                  );
+                }}
+              />
             </div>
           }
         />

@@ -1,0 +1,50 @@
+/* ——— Checkbox (Radix) ——— */
+.bk-checkbox-root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: var(--bk-radius-sm);
+  border: 1px solid var(--bk-color-border-strong);
+  background: var(--bk-color-surface);
+  box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.04);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.bk-checkbox-root:hover:not([data-disabled]) {
+  border-color: var(--bk-color-brand);
+}
+
+.bk-checkbox-root[data-state="checked"] {
+  background: var(--bk-color-brand);
+  border-color: var(--bk-color-brand);
+  color: var(--bk-color-brand-contrast);
+}
+
+.bk-checkbox-root:focus-visible {
+  outline: none;
+  box-shadow: var(--bk-focus-ring);
+}
+
+.bk-checkbox-root[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bk-checkbox-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.bk-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}

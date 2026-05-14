@@ -6,7 +6,7 @@ import {
 } from "@/lib/locale/choices";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
-import { Button, Card, CardBody, PageHeader, Stack } from "@repo/adricore/blocks";
+import { Button, Card, CardBody, Stack } from "@repo/adricore/blocks";
 import { updateUserLocalePreferences } from "./actions";
 
 export default async function MePreferencesPage() {
@@ -23,11 +23,10 @@ export default async function MePreferencesPage() {
 
   return (
     <div className="bk-container bk-container_md bk-stack bk-stack_gap-md">
-      <PageHeader
-        eyebrow="Account"
-        title="My preferences"
-        subtitle="How dates, times, numbers, and primary fiat appear in the app."
-      />
+      <div>
+        <h1 className="bk-page-header_title">My preferences</h1>
+        <p className="bk-page-header_subtitle">How dates, times, numbers, and primary fiat appear in the app.</p>
+      </div>
 
       <Card>
         <CardBody>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { executeExecutorCatalogCloseWithSyncRun } from "@/lib/executor/run-executor-catalog-close-with-sync-run";
-import type { ExecutorCatalogCloseBody } from "@/lib/executor/run-executor-catalog-close";
+import { executeExecutorCatalogCloseWithSyncRun } from "@/lib/agents/executor/services/catalog-close-executor-with-sync-run.service";
+import type { ExecutorCatalogCloseBody } from "@/lib/agents/executor/services/catalog-close-executor-run.service";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): ExecutorCatalogCloseBody | null {

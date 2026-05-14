@@ -13,6 +13,7 @@ import {
 import { formatDatetime } from "@/lib/locale/format";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -227,9 +228,8 @@ export async function TradeDecisionsListView({
     <ListViewLayout>
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
-          eyebrow={parentExecutor ? "Executor · related" : "Trading"}
-          title={parentExecutor ? `Trading decisions · ${parentExecutor.name}` : "Trading Decisions"}
-          iconLetter="D"
+          model={objectRegistry.registrations.get("trade_decisions")!}
+          title={parentExecutor ? `Trading decisions · ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={executorIdFilter ? `Filtered by executor · ${sortLineCore}` : sortLineCore}
           actions={

@@ -1,5 +1,6 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -8,7 +9,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { getDashboardSession } from "@/lib/supabase/dashboard-session";
-import { ensureUserExecutorExists } from "@/lib/trading/executors";
+import { ensureUserExecutorExists } from "@/lib/agents/executor/services/executors-lookup.service";
 import {
   Alert,
   Card,
@@ -79,9 +80,7 @@ export default async function ExecutorsListPage({ searchParams }: PageProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Trading"
-        title="Executors"
-        iconLetter="E"
+        model={objectRegistry.registrations.get("executors")!}
         rowCount={list.length}
         sortLine={`Portfolios: paper, live, historical backtest, and asset filters · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
         actions={

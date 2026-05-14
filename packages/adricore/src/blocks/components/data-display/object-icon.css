@@ -1,0 +1,33 @@
+/* ——— Object icon (rounded gradient square, used by list + detail headers) ——— */
+.bk-object-icon {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--bk-radius-md);
+  background: linear-gradient(145deg, #5867e8 0%, #3949ab 55%, #5c6bc0 100%);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.bk-object-icon_letter {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+
+/* Smaller variant for detail page headers. */
+.bk-object-icon_sm {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.bk-object-icon_sm .bk-object-icon_letter {
+  font-size: 0.9375rem;
+}

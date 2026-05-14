@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { executeFindCoingeckoIdWorker } from "@/lib/markets/execute-find-coingecko-id-worker";
+import { executeFindCoingeckoIdWorker } from "@/lib/agents/ingest/services/coingecko-id-find-worker.service";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 /**

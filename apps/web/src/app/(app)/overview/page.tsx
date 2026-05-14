@@ -2,7 +2,7 @@ import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overvi
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { OverviewSyncCoingeckoCoinIdsButton } from "@/app/(app)/overview/overview-sync-coingecko-coin-ids-button";
 import { OverviewSyncCoingeckoMetricsButton } from "@/app/(app)/overview/overview-sync-coingecko-metrics-button";
-import { Card, CardBody, ListViewLayout, PageHeader, Stack } from "@repo/adricore/blocks";
+import { Card, CardBody, ListViewLayout, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 export default async function OverviewPage() {
@@ -10,10 +10,13 @@ export default async function OverviewPage() {
     <ListViewLayout>
       <div className="bk-container bk-container_lg">
         <Stack gap="lg">
-          <PageHeader
-            title="Overview"
-            subtitle="Start from market data: sync listings and candles, then inspect assets and fundamentals. Trading signals, mediator, and execution layers are not wired in this repo yet."
-          />
+          <div>
+            <h1 className="bk-page-header_title">Overview</h1>
+            <p className="bk-page-header_subtitle">
+              Start from market data: sync listings and candles, then inspect assets and fundamentals. Trading signals,
+              mediator, and execution layers are not wired in this repo yet.
+            </p>
+          </div>
 
           <Card>
             <CardBody>

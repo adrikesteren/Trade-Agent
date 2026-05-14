@@ -1,11 +1,10 @@
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -51,13 +50,12 @@ export default async function WalletDetailPage({ params }: PageProps) {
     <DetailPageLayout
       className="bk-container bk-container_lg"
       header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="W" />}
-          eyebrow="Wallet"
-          title={shortId(walletId)}
-          subtitle={executorId ? `Executor: ${executorName}` : "Portfolio wallet"}
-        />
+        objectRegistry.registrations.get("wallets")!.CreateDetailPageHeader({
+          record: row as Record<string, unknown>,
+          title: shortId(walletId),
+          titleClassName: "font-mono",
+          subtitle: executorId ? `Executor: ${executorName}` : "Portfolio wallet",
+        })
       }
       content={
         <RecordPageCard>

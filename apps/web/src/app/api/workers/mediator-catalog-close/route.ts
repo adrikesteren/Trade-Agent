@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { executeMediatorCatalogCloseWithSyncRun } from "@/lib/mediator/run-mediator-catalog-close-with-sync-run";
-import type { MediatorCatalogCloseBody } from "@/lib/mediator/run-mediator-catalog-close";
+import { executeMediatorCatalogCloseWithSyncRun } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-with-sync-run.service";
+import type { MediatorCatalogCloseBody } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-run.service";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): MediatorCatalogCloseBody | null {

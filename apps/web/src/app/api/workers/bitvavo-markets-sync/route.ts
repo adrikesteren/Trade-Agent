@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/markets/run-bitvavo-markets-eur-sync-with-sync-run";
+import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/agents/ingest/services/bitvavo-markets-eur-sync-with-sync-run.service";
 import { sendOpsAlert } from "@/lib/ops/send-ops-alert";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";

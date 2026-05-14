@@ -5,13 +5,13 @@ import {
   CANDLE_RETENTION_HOURS,
   CANDLE_TIMESTAMP_TTL_HOURS,
   CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
-} from "@/lib/markets/candle-retention";
+} from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import {
   fetchCandleSyncWindowMeta,
   prepareEurCandleSyncRunWindow,
-} from "@/lib/markets/candle-sync-window";
-import { prepareEurCandleTimestampWindow } from "@/lib/markets/prepare-eur-candle-timestamp-window";
+} from "@/lib/agents/ingest/services/candle-sync-window.service";
+import { prepareEurCandleTimestampWindow } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
 import {
   beginBitvavoSyncRun,
   BITVAVO_SYNC_JOB_CANDLES_EUR,
@@ -20,11 +20,11 @@ import {
   recordBitvavoSyncFailed,
   resolveLatestRunningBitvavoRunId,
   SKIPPED_PREVIOUS_SYNC_STILL_RUNNING,
-} from "@/lib/markets/record-bitvavo-sync-status";
+} from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 import {
   syncBitvavoCandlesChunk,
   type CandleSyncMode,
-} from "@/lib/markets/sync-bitvavo-candles-chunk";
+} from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
 import { NextResponse } from "next/server";
 
 type Body = {

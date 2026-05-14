@@ -39,4 +39,10 @@ export class RouteMetadata implements AdriRoutable {
   public getTarget(): string | undefined {
     return this.target;
   }
+
+  /** Absolute href for a record on this route: `${href}/${id}` (slashes normalised). */
+  public getRecordHref(id: string): string {
+    const base = this.href.replace(/\/+$/, "");
+    return `${base}/${id}`;
+  }
 }

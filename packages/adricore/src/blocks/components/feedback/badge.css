@@ -1,0 +1,38 @@
+/* ——— Badge ——— */
+.bk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--bk-radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+
+.bk-badge_neutral {
+  background: var(--bk-color-surface-alt);
+  color: var(--bk-color-text-muted);
+  border-color: var(--bk-color-border);
+}
+
+.bk-badge_brand {
+  background: var(--bk-color-brand-soft);
+  color: var(--bk-color-brand);
+}
+
+.bk-badge_success {
+  background: var(--bk-color-success-bg);
+  color: var(--bk-color-success);
+}
+
+.bk-badge_warning {
+  background: var(--bk-color-warning-bg);
+  color: var(--bk-color-warning-text);
+}
+
+.bk-badge_error {
+  background: var(--bk-color-error-bg);
+  color: var(--bk-color-error);
+}

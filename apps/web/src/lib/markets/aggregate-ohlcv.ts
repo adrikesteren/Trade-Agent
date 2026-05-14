@@ -1,6 +1,6 @@
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
-import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
+import { candleTimeToUnixSeconds } from "@/lib/agents/ingest/services/candle-time.service";
 
 const MINUTES: Record<ChartTimeframe, number> = {
   "15m": 15,

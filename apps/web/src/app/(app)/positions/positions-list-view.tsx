@@ -6,6 +6,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@repo/adricore/blocks";
@@ -82,9 +83,8 @@ export async function PositionsListView({
     <ListViewLayout>
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
-          eyebrow={parentExecutor ? "Executor · related" : "Trading"}
-          title={parentExecutor ? `Positions · ${parentExecutor.name}` : "Positions"}
-          iconLetter="P"
+          model={objectRegistry.registrations.get("positions")!}
+          title={parentExecutor ? `Positions · ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={
             executorIdFilter

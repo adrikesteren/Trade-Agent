@@ -1,12 +1,11 @@
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -57,23 +56,18 @@ export async function LogsDetailView({ recordId }: LogsDetailViewProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="L" />}
-          eyebrow="Log"
-          title={log.level}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              <Output label="Created" type="datetime" value={log.created_at} formatDatetime={formatDt} />
-              <Output label="Context" type="text" value={log.context ?? "—"} />
-            </>
-          }
-          subtitle={log.message}
-          meta={log.id}
-        />
-      }
+      header={objectRegistry.registrations.get("logs")!.CreateDetailPageHeader({
+        record: log as Record<string, unknown>,
+        title: log.level,
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            <Output label="Created" type="datetime" value={log.created_at} formatDatetime={formatDt} />
+            <Output label="Context" type="text" value={log.context ?? "—"} />
+          </>
+        ),
+        subtitle: log.message,
+      })}
       content={
         <RecordPageTabs
           details={

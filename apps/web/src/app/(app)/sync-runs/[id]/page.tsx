@@ -3,12 +3,11 @@ import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -64,22 +63,17 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="S" />}
-          eyebrow="Sync run"
-          title={run.job_key}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              <Output label="Status" type="text" value={run.status} />
-              <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
-            </>
-          }
-          meta={run.id}
-        />
-      }
+      header={objectRegistry.registrations.get("sync_runs")!.CreateDetailPageHeader({
+        record: run as Record<string, unknown>,
+        title: run.job_key,
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            <Output label="Status" type="text" value={run.status} />
+            <Output label="Trigger" type="text" value={run.trigger_source ?? "—"} />
+          </>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="automation" relatedTable="sync_runs" relatedId={run.id} />}
       content={
         <RecordPageTabs

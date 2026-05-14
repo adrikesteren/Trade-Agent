@@ -3,7 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
   runCoingeckoMetricsSyncWithSyncRun,
   type CoingeckoMetricsSyncBody,
-} from "@/lib/markets/run-coingecko-sync-with-sync-run";
+} from "@/lib/agents/ingest/services/coingecko-sync-with-sync-run.service";
 import { NextResponse } from "next/server";
 
 /**

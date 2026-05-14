@@ -7,6 +7,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody, ListViewObjectIcon } from "@repo/adricore/blocks";
 
@@ -41,8 +42,7 @@ export default async function SignalRunsPage({ searchParams }: PageProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Automation"
-        title="Signal Runs"
+        model={objectRegistry.registrations.get("signal_runs")!}
         icon={
           <ListViewObjectIcon>
             <svg width={20} height={20} viewBox="0 0 24 24" fill="none" className="text-white" aria-hidden>

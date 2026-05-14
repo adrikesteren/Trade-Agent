@@ -2,12 +2,11 @@ import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -40,19 +39,16 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
     <DetailPageLayout
       className="bk-container px-1"
       header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="A" />}
-          eyebrow="Signal agent"
-          title={row.agent_id}
-          highlights={
+        objectRegistry.registrations.get("signal_agents")!.CreateDetailPageHeader({
+          record: row as Record<string, unknown>,
+          title: row.agent_id,
+          highlights: (
             <>
               <Output label="Enabled" type="boolean" value={row.enabled} />
               <Output label="Version" type="text" value={row.version?.trim() ? row.version : "—"} />
             </>
-          }
-          meta={`id: ${row.id}`}
-        />
+          ),
+        })
       }
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signal_agents" relatedId={id} />}
       content={

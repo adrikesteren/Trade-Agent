@@ -1,13 +1,20 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
+import { runMarketBackfillCandles, todayUtcYmd } from "@/lib/orchestrators/market-backfill-candles.service";
 import {
+  buildMarketBackfillCandlesWorkerUrl,
   buildSymbolClosePipelineUrl,
   downstreamWorkerHeaders,
+  isRelayWorkerEnqueueConfigured,
   normalizeRelayBaseUrl,
   postRelaySingleMessage,
+  RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S,
   relayMaxRetries,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export type EnqueueMarketSymbolCloseRelayResult =
@@ -92,6 +99,92 @@ export async function enqueueMarketSymbolCloseRelay(marketId: string): Promise<E
       relayMaxRetries(),
     );
     return { ok: true, relayMessageId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export type EnqueueMarketBackfillCandlesResult =
+  | {
+      ok: true;
+      /** True when handed off to Relay; false when the worker ran inline (no Relay env). */
+      queued: boolean;
+      relayMessageId?: string;
+      /** Inline result fields (only when `queued === false`). */
+      candleRowsUpserted?: number;
+      barsReplayed?: number;
+      signalsUpsertedTotal?: number;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Backfill candles for one market over a UTC window:
+ * - Ingest Agent: pulls Bitvavo OHLCV in 1440-bar batches into `catalog.candles`.
+ * - Signal Agent: upserts `trading.signals` for every closed bar in the window.
+ *
+ * When Relay is configured ({@link isRelayWorkerEnqueueConfigured}) the work is enqueued on Relay
+ * with a 30-minute message timeout ({@link RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S}); otherwise it
+ * runs inline using the service-role client and revalidates the market page.
+ */
+export async function enqueueMarketBackfillCandlesViaRelay(args: {
+  marketId: string;
+  startDate: string;
+  endDate?: string | null;
+}): Promise<EnqueueMarketBackfillCandlesResult> {
+  const marketId = args.marketId.trim();
+  const startDate = args.startDate.trim();
+  const rawEnd = (args.endDate ?? "").trim();
+  const endDate = rawEnd || todayUtcYmd();
+
+  if (!marketId) {
+    return { ok: false, error: "Market id is required." };
+  }
+  if (!ISO_DATE_RE.test(startDate)) {
+    return { ok: false, error: "Start date must be a YYYY-MM-DD UTC date." };
+  }
+  if (!ISO_DATE_RE.test(endDate)) {
+    return { ok: false, error: "End date must be a YYYY-MM-DD UTC date." };
+  }
+  if (startDate > endDate) {
+    return { ok: false, error: "Start date must be on or before end date." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in." };
+  }
+
+  try {
+    if (await isRelayWorkerEnqueueConfigured()) {
+      const relayBase = normalizeRelayBaseUrl();
+      const appBase = getAppBaseUrl();
+      const url = buildMarketBackfillCandlesWorkerUrl(appBase, { marketId, startDate, endDate });
+      const relayMessageId = await postRelaySingleMessage(
+        relayBase,
+        url,
+        await downstreamWorkerHeaders(),
+        relayMaxRetries(),
+        { timeoutSec: RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S },
+      );
+      return { ok: true, queued: true, relayMessageId };
+    }
+
+    const admin = createServiceRoleClient();
+    const result = await runMarketBackfillCandles(admin, { marketId, startDate, endDate });
+    revalidatePath(`/markets/${marketId}`);
+    revalidatePath("/signals");
+    return {
+      ok: true,
+      queued: false,
+      candleRowsUpserted: result.candleRowsUpserted,
+      barsReplayed: result.barsReplayed,
+      signalsUpsertedTotal: result.signalsUpsertedTotal,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

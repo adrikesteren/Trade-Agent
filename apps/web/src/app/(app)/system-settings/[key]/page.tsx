@@ -7,12 +7,11 @@ import {
   getNumericSystemSettingDef,
   type SystemSettingNumericKey,
 } from "@/lib/system-settings/registry";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -47,17 +46,10 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
     return (
       <DetailPageLayout
         className="bk-container px-1"
-        header={
-          <PageHeader
-            variant="detail"
-            icon={<ListViewObjectIcon letter="S" />}
-            eyebrow="System setting"
-            title={def.label}
-            back={{ href: "/system-settings", label: "Back to system settings" }}
-            subtitle="Administrator role is required to view or edit this row."
-            meta={settingKey}
-          />
-        }
+        header={objectRegistry.registrations.get("system_settings")!.CreateDetailPageHeader({
+          record: { id: settingKey, name: def.label } as Record<string, unknown>,
+          subtitle: "Administrator role is required to view or edit this row.",
+        })}
         content={
           <RecordPageCard>
             <RecordPageSection title="Access">
@@ -84,31 +76,24 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="S" />}
-          eyebrow="System setting"
-          title={def.label}
-          back={{ href: "/system-settings", label: "Back to system settings" }}
-          highlights={
-            <>
-              <Output label="Effective value" type="number" value={effective} />
-              <Output label="Env fallback" type="text" value={def.envFallbackVar} />
-            </>
-          }
-          subtitle={def.description}
-          meta={settingKey}
-          actions={
-            <SystemSettingDetailActions
-              settingKey={settingKey}
-              label={def.label}
-              def={{ min: def.min, max: def.max, integer: def.integer, envFallbackVar: def.envFallbackVar }}
-              currentNumeric={effective}
-            />
-          }
-        />
-      }
+      header={objectRegistry.registrations.get("system_settings")!.CreateDetailPageHeader({
+        record: { id: settingKey, name: def.label, ...(db ?? {}) } as Record<string, unknown>,
+        highlights: (
+          <>
+            <Output label="Effective value" type="number" value={effective} />
+            <Output label="Env fallback" type="text" value={def.envFallbackVar} />
+          </>
+        ),
+        subtitle: def.description,
+        actions: (
+          <SystemSettingDetailActions
+            settingKey={settingKey}
+            label={def.label}
+            def={{ min: def.min, max: def.max, integer: def.integer, envFallbackVar: def.envFallbackVar }}
+            currentNumeric={effective}
+          />
+        ),
+      })}
       content={
         <RecordPageCard>
           <RecordPageSection title="Details">

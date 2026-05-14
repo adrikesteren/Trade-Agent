@@ -4,12 +4,12 @@ import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -166,23 +166,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="O" />}
-          eyebrow="Order"
-          title={titleLabel}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              <Output label="Status" type="text" value={<span className={statusClass(order.status)}>{order.status}</span>} />
-              <Output label="Side" type="text" value={order.side} />
-              <Output label="Notional (EUR)" type="text" value={fmtEur(order.notional_eur)} />
-            </>
-          }
-          meta={order.id}
-        />
-      }
+      header={objectRegistry.registrations.get("orders")!.CreateDetailPageHeader({
+        record: order as Record<string, unknown>,
+        title: titleLabel,
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            <Output label="Status" type="text" value={<span className={statusClass(order.status)}>{order.status}</span>} />
+            <Output label="Side" type="text" value={order.side} />
+            <Output label="Notional (EUR)" type="text" value={fmtEur(order.notional_eur)} />
+          </>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="orders" relatedId={orderId} />}
       content={
         <>
@@ -232,9 +227,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
             }
             related={
               <div className="bk-stack bk-stack_gap-md">
-                <RecordPageCard>
                 <RecordRelatedList
                   title="Fills"
+                  icon={<ListViewObjectIcon letter="F" />}
                   description="Sorted by created date (newest first)."
                   items={fills}
                   getKey={(f) => f.id}
@@ -252,7 +247,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 />
-              </RecordPageCard>
               </div>
             }
           />

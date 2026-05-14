@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { runExchangeClosePipeline } from "@/lib/markets/run-exchange-close-pipeline";
+import { runExchangeClosePipeline } from "@/lib/orchestrators/exchange-close-pipeline.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 

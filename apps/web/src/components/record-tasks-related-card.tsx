@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { RecordPageCard, RecordRelatedList } from "@repo/adricore/blocks";
+import { ListViewObjectIcon, RecordRelatedList } from "@repo/adricore/blocks";
 import Link from "next/link";
 
 export type RecordTasksRelatedCardProps = {
@@ -43,9 +43,10 @@ export async function RecordTasksRelatedCard({
   const errMsg = error?.message;
 
   return (
-    <RecordPageCard>
+    <div className="bk-stack bk-stack_gap-sm">
       <RecordRelatedList
         title={title}
+        icon={<ListViewObjectIcon letter="T" />}
         items={rows}
         getKey={(t) => t.id}
         previewLimit={limit}
@@ -63,7 +64,7 @@ export async function RecordTasksRelatedCard({
           </div>
         )}
       />
-      {errMsg ? <p className="bk-text-muted mt-2 text-xs">{errMsg}</p> : null}
-    </RecordPageCard>
+      {errMsg ? <p className="bk-text-muted text-xs">{errMsg}</p> : null}
+    </div>
   );
 }

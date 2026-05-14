@@ -1,5 +1,6 @@
 import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-assets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -9,15 +10,12 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
   Card,
   CardBody,
-  ListViewObjectIcon,
-  ListViewPlaceholderToolbar,
-  ListViewTitlePickerPlaceholder,
-  PageHeader,
   Table,
   TableWrap,
   Td,
@@ -64,25 +62,23 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
 
   const sortedRows = (rows ?? []) as AssetRow[];
 
-  const summaryBits = [
-    `${sortedRows.length} on this page`,
+  const sortLineParts = [
     `${totalCount} total`,
     `Page ${page} of ${pages}`,
     "Sorted by Market Cap",
     `${pageSize} per page`,
   ];
   if (countError) {
-    summaryBits.push(`Count error: ${countError.message}`);
+    sortLineParts.push(`Count error: ${countError.message}`);
   }
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader
-        variant="list"
-        icon={<ListViewObjectIcon letter="A" />}
-        eyebrow="Assets"
+      <ObjectListViewHeader
+        model={objectRegistry.registrations.get("assets")!}
+        rowCount={sortedRows.length}
+        sortLine={sortLineParts.join(" · ")}
         title="All listings"
-        titleAddon={<ListViewTitlePickerPlaceholder />}
         subtitle={
           <>
             Base instruments (crypto, later stocks). Pairs live under{" "}
@@ -92,8 +88,6 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
             .
           </>
         }
-        summary={summaryBits.join(" · ")}
-        toolbar={<ListViewPlaceholderToolbar />}
         actions={<OverviewRetrieveBitvavoAssetsButton label="Get From Bitvavo" />}
       />
 

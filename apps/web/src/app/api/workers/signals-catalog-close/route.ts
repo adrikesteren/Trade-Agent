@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { executeSignalsCatalogCloseWithSyncRun } from "@/lib/signals/run-signals-catalog-close-with-sync-run";
-import type { SignalsCatalogCloseBody } from "@/lib/signals/run-signals-catalog-close";
+import { executeSignalsCatalogCloseWithSyncRun } from "@/lib/agents/signal/services/signals-catalog-close-with-sync-run.service";
+import type { SignalsCatalogCloseBody } from "@/lib/agents/signal/services/signals-catalog-close-run.service";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 function parseBody(raw: string): SignalsCatalogCloseBody | null {

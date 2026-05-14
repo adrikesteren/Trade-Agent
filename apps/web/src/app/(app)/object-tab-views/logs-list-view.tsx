@@ -9,6 +9,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/adricore/blocks";
 import Link from "next/link";
@@ -62,9 +63,7 @@ export async function LogsListView({ searchParams }: LogsListViewProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="System"
-        title="Logs"
-        iconLetter="L"
+        model={objectRegistry.registrations.get("logs")!}
         rowCount={list.length}
         sortLine={`Append-only events (errors, warnings, info) · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
       />

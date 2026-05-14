@@ -1,6 +1,7 @@
 import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -10,15 +11,12 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
   Card,
   CardBody,
-  ListViewObjectIcon,
-  ListViewPlaceholderToolbar,
-  ListViewTitlePickerPlaceholder,
-  PageHeader,
   Table,
   TableWrap,
   Td,
@@ -101,22 +99,20 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
   const { from, to } = rangeForPage(page, pageSize);
   const displayListings = sortedListings.slice(from, to + 1);
 
-  const summaryBits = [
-    `${displayListings.length} on this page`,
+  const sortLine = [
     `${totalCount} loaded & ranked`,
     `Page ${page} of ${pages}`,
     `${exchange?.name ?? "Bitvavo"}`,
     `${pageSize} per page`,
-  ];
+  ].join(" · ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader
-        variant="list"
-        icon={<ListViewObjectIcon letter="M" />}
-        eyebrow="Markets"
+      <ObjectListViewHeader
+        model={objectRegistry.registrations.get("markets")!}
+        rowCount={displayListings.length}
+        sortLine={sortLine}
         title="Bitvavo EUR"
-        titleAddon={<ListViewTitlePickerPlaceholder />}
         subtitle={
           <>
             Tradable pairs (e.g. BTC-EUR). Base assets live under{" "}
@@ -126,8 +122,6 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
             .
           </>
         }
-        summary={summaryBits.join(" · ")}
-        toolbar={<ListViewPlaceholderToolbar />}
         actions={<OverviewRetrieveBitvavoMarketsButton label="Get From Bitvavo" />}
       />
 

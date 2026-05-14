@@ -1,0 +1,49 @@
+/* ——— Switch (Radix) ——— */
+.bk-switch-root {
+  width: 2.5rem;
+  height: 1.375rem;
+  flex-shrink: 0;
+  border-radius: var(--bk-radius-pill);
+  border: 1px solid var(--bk-color-border-strong);
+  background: var(--bk-color-neutral-200);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  padding: 0;
+}
+
+.bk-switch-root[data-state="checked"] {
+  background: var(--bk-color-brand);
+  border-color: var(--bk-color-brand);
+}
+
+.bk-switch-root:focus-visible {
+  outline: none;
+  box-shadow: var(--bk-focus-ring);
+}
+
+.bk-switch-root[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bk-switch-thumb {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: var(--bk-shadow-sm);
+  transform: translateX(0.1875rem);
+  transition: transform 0.15s ease;
+  will-change: transform;
+}
+
+.bk-switch-root[data-state="checked"] .bk-switch-thumb {
+  transform: translateX(1.125rem);
+}
+
+.bk-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}

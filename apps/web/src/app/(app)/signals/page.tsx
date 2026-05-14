@@ -1,5 +1,6 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { DASHBOARD_LIST_VIEW_LIMIT, SIGNALS_LIST_RAW_FETCH_CAP } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -251,9 +252,7 @@ export default async function SignalsPage({
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Trading"
-        title="Signals"
-        iconLetter="S"
+        model={objectRegistry.registrations.get("signals")!}
         rowCount={list.length}
         sortLine={sortLineParts.join(" · ")}
         actions={

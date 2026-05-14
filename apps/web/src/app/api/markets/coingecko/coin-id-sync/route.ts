@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/markets/run-coingecko-coin-id-sync-with-sync-run";
+import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/agents/ingest/services/coingecko-coin-id-sync-with-sync-run.service";
 import { NextResponse } from "next/server";
 
 /**

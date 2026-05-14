@@ -10,6 +10,9 @@ export const RELAY_CHUNK_WAIT_MAX_MS = 3_600_000;
 /** Per-message `timeout` (seconds) for Relay `historical-executor-replay` jobs — 30 minutes. */
 export const RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S = 30 * 60;
 
+/** Per-message `timeout` (seconds) for Relay `market-backfill-candles` jobs — 30 minutes. */
+export const RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S = 30 * 60;
+
 export function normalizeRelayBaseUrl(): string {
   loadMonorepoDotenvOnce();
   const raw = process.env.RELAY_APP_URL?.trim();
@@ -98,6 +101,22 @@ export function buildCoingeckoCoinIdSyncWorkerUrl(appBase: string): string {
 export function buildHistoricalExecutorReplayWorkerUrl(appBase: string, executorId: string): string {
   const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/historical-executor-replay`);
   u.searchParams.set("executorId", executorId.trim());
+  return u.toString();
+}
+
+/**
+ * Worker URL for one "Backfill candles" market run (Ingest Agent + Signal Agent over a UTC window).
+ * `endDate` is optional — leave empty to backfill up to today.
+ */
+export function buildMarketBackfillCandlesWorkerUrl(
+  appBase: string,
+  args: { marketId: string; startDate: string; endDate?: string | null },
+): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/market-backfill-candles`);
+  u.searchParams.set("marketId", args.marketId.trim());
+  u.searchParams.set("startDate", args.startDate.trim());
+  const end = (args.endDate ?? "").trim();
+  if (end) u.searchParams.set("endDate", end);
   return u.toString();
 }
 

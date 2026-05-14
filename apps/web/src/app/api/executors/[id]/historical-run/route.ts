@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
-import { runHistoricalExecutorReplay } from "@/lib/historical/run-historical-executor-replay";
+import { runHistoricalExecutorReplay } from "@/lib/orchestrators/historical-executor-replay.service";
 import { insertUserAppLog } from "@/lib/logs/insert-user-app-log";
 import {
   buildHistoricalExecutorReplayWorkerUrl,
@@ -15,7 +15,7 @@ import {
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { fetchExecutorById } from "@/lib/trading/executors";
+import { fetchExecutorById } from "@/lib/agents/executor/services/executors-lookup.service";
 
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id: executorId } = await ctx.params;

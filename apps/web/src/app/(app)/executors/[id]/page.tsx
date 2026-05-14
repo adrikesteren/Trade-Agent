@@ -17,10 +17,11 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { valueInPrimaryUnits } from "@/lib/catalog/asset-dollar-value";
-import { loadExecutorPnlSnapshot } from "@/lib/trading/executor-pnl";
-import { fetchWalletBalanceForAsset } from "@/lib/trading/executor-wallet";
-import { fetchHistoricalExecutorPaperMarket } from "@/lib/historical/historical-executor-paper-market";
-import { resolveQuoteAssetId } from "@/lib/markets/resolve-quote-asset";
+import { loadExecutorPnlSnapshot } from "@/lib/agents/executor/services/executor-pnl.service";
+import { fetchWalletBalanceForAsset } from "@/lib/agents/executor/services/executor-wallet.service";
+import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/services/historical-paper-market.service";
+import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -30,7 +31,6 @@ import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -545,34 +545,32 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       className="bk-container bk-container_lg"
       header={
         <div className="bk-stack bk-stack_gap-md">
-          <PageHeader
-            variant="detail"
-            icon={<ListViewObjectIcon letter="E" />}
-            eyebrow="Executor"
-            title={String(ex.name)}
-            subtitle="Balance, orders, and related activity for this portfolio."
-            highlights={
+          {objectRegistry.registrations.get("executors")!.CreateDetailPageHeader({
+            record: ex as Record<string, unknown>,
+            subtitle: "Balance, orders, and related activity for this portfolio.",
+            highlights: (
               <>
                 <Output label="Enabled" type="boolean" value={ex.enabled} />
                 <Output label="Execution mode" type="text" value={executionModeLabel(String(ex.execution_mode ?? ""))} />
                 <Output label="Slack trade fills" type="boolean" value={slackTradeNotificationsEnabled} />
                 <Output label="Exchange API credentials" type="boolean" value={exchangeApiCredentialsConfigured} />
                 <Output label="Orders (preview)" type="number" value={orderTotal} />
+                <Output
+                  label="Exchange"
+                  type="text"
+                  value={
+                    executorExchangeId ? (
+                      <Link href={`/exchanges/${executorExchangeId}`} className="bk-link">
+                        {executorExchangeLinkName}
+                      </Link>
+                    ) : (
+                      "—"
+                    )
+                  }
+                />
               </>
-            }
-            meta={
-              executorExchangeId ? (
-                <span className="bk-text-muted text-sm">
-                  Exchange:{" "}
-                  <Link href={`/exchanges/${executorExchangeId}`} className="bk-link">
-                    {executorExchangeLinkName}
-                  </Link>
-                </span>
-              ) : (
-                <span className="bk-text-muted text-sm">Exchange: —</span>
-              )
-            }
-            actions={
+            ),
+            actions: (
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Link href={`/executors/new?from=${encodeURIComponent(id)}`} className={listViewOutlineActionClass}>
                   Clone
@@ -597,8 +595,8 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 ) : null}
                 <ExecutorEditDialog executorId={id} assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={initial} />
               </div>
-            }
-          />
+            ),
+          })}
           {ledgerFull ? (
             <Alert tone="info">
               Showing expanded wallet transactions (newest first, cap {EXECUTOR_LEDGER_FULL_FETCH_CAP} rows).
@@ -711,11 +709,11 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             </div>
           }
           related={
-            <Card>
-              <CardBody className="bk-stack bk-stack_gap-md !pt-4">
-                <RecordRelatedList
-                  title="Orders"
-                  description="Id, market, side, bar close (via signal candle), filled. Newest first."
+            <div className="bk-stack bk-stack_gap-md">
+              <RecordRelatedList
+                title="Orders"
+                icon={<ListViewObjectIcon letter="O" />}
+                description="Id, market, side, bar close (via signal candle), filled. Newest first."
                   items={orders}
                   getKey={(o) => o.id}
                   totalCount={orderTotal}
@@ -758,6 +756,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
 
                 <RecordRelatedList
                   title="Positions"
+                  icon={<ListViewObjectIcon letter="P" />}
                   description="Market, qty, mark (latest catalog close), PnL (EUR), avg vs mark. Newest first."
                   items={positions}
                   getKey={(p) => p.id}
@@ -814,6 +813,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
 
                 <RecordRelatedList
                   title="Trade decisions"
+                  icon={<ListViewObjectIcon letter="T" />}
                   description="Id, signal, market, approved, bar close. Sorted by bar close (newest first)."
                   items={tradeDecisionsRaw}
                   getKey={(r) => r.id}
@@ -855,6 +855,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
 
                 <RecordRelatedList
                   title="Runtime risk"
+                  icon={<ListViewObjectIcon letter="R" />}
                   description="Counters stored on the executor (mediator / catalog close). Wallet line shows EUR catalog balance and an approximation in your primary fiat when rates exist."
                   items={[runtimeRiskSnapshot]}
                   getKey={(r) => r.id}
@@ -876,8 +877,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     </div>
                   )}
                 />
-              </CardBody>
-            </Card>
+            </div>
           }
         />
       }
@@ -924,10 +924,10 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
             </CardBody>
           </Card>
 
-          <Card className="mt-4">
-            <CardBody className="!pt-4">
-              <RecordRelatedList
+          <div className="mt-4">
+            <RecordRelatedList
                 title="Wallet transactions"
+                icon={<ListViewObjectIcon letter="W" />}
                 description={
                   ledgerFull && ledgerTotal > ledger.length
                     ? `Sorted by created date (newest first) · loaded ${ledger.length} of ${ledgerTotal} (in-page cap ${EXECUTOR_LEDGER_FULL_FETCH_CAP}).`
@@ -973,8 +973,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                   );
                 }}
               />
-            </CardBody>
-          </Card>
+          </div>
         </div>
       }
     />

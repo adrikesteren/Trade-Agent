@@ -10,6 +10,7 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { isFiatQuoteCurrencyCode } from "@/lib/markets/fiat-quote-currency-codes";
 import { isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
@@ -17,7 +18,6 @@ import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -110,46 +110,41 @@ export default async function AssetDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="A" />}
-          eyebrow="Asset"
-          title={
-            <>
-              {asset.name ?? asset.code}{" "}
-              <span className="font-mono bk-text-muted" style={{ fontSize: "1.125rem", fontWeight: 500 }}>
-                ({asset.code})
-              </span>
-            </>
-          }
-          highlights={
-            <>
-              <Output label="Code" type="text" value={asset.code} />
-              <Output label="Kind" type="text" value={asset.kind} />
-              <Output label="Pairs" type="number" value={pairCount} />
-            </>
-          }
-          subtitle="Catalog base instrument. Linked markets use this asset as the tradable base."
-          meta={`id: ${asset.id}`}
-          actions={
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {isCrypto ? (
-                <AssetCoingeckoHeaderActions
-                  assetId={assetId}
-                  coingeckoCoinId={assetLive.coingecko_coin_id}
-                  relayEnqueueConfigured={relayEnqueueConfigured && !hasOpenSkipAutoCoingeckoCoinIdTask}
-                />
-              ) : null}
-              <AssetDetailDeleteHeaderActions
+      header={objectRegistry.registrations.get("assets")!.CreateDetailPageHeader({
+        record: asset as Record<string, unknown>,
+        title: (
+          <>
+            {asset.name ?? asset.code}{" "}
+            <span className="font-mono bk-text-muted" style={{ fontSize: "1.125rem", fontWeight: 500 }}>
+              ({asset.code})
+            </span>
+          </>
+        ),
+        highlights: (
+          <>
+            <Output label="Code" type="text" value={asset.code} />
+            <Output label="Kind" type="text" value={asset.kind} />
+            <Output label="Pairs" type="number" value={pairCount} />
+          </>
+        ),
+        subtitle: "Catalog base instrument. Linked markets use this asset as the tradable base.",
+        actions: (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isCrypto ? (
+              <AssetCoingeckoHeaderActions
                 assetId={assetId}
-                assetCode={String(asset.code ?? "")}
-                assetName={String(asset.name ?? "")}
+                coingeckoCoinId={assetLive.coingecko_coin_id}
+                relayEnqueueConfigured={relayEnqueueConfigured && !hasOpenSkipAutoCoingeckoCoinIdTask}
               />
-            </div>
-          }
-        />
-      }
+            ) : null}
+            <AssetDetailDeleteHeaderActions
+              assetId={assetId}
+              assetCode={String(asset.code ?? "")}
+              assetName={String(asset.name ?? "")}
+            />
+          </div>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="assets" relatedId={assetId} />}
       content={
         <RecordPageTabs
@@ -184,22 +179,22 @@ export default async function AssetDetailPage({ params }: PageProps) {
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordPageCard>
-                <RecordRelatedList
-                  title="Markets (pairs)"
-                  description={
-                    pairCount > marketRows.length
-                      ? `Preview: first ${marketRows.length} of ${pairCount} listings using this asset as base.`
-                      : pairCount > 0
-                        ? `Listings that use this asset as base.`
-                        : undefined
-                  }
-                  items={marketRows}
-                  getKey={(m) => m.id}
-                  totalCount={typeof marketCount === "number" ? marketCount : undefined}
-                  viewAllHref="/markets"
-                  emptyMessage="No market listings linked yet."
-                  renderRow={(m) => {
+              <RecordRelatedList
+                title="Markets (pairs)"
+                icon={<ListViewObjectIcon letter="M" />}
+                description={
+                  pairCount > marketRows.length
+                    ? `Preview: first ${marketRows.length} of ${pairCount} listings using this asset as base.`
+                    : pairCount > 0
+                      ? `Listings that use this asset as base.`
+                      : undefined
+                }
+                items={marketRows}
+                getKey={(m) => m.id}
+                totalCount={typeof marketCount === "number" ? marketCount : undefined}
+                viewAllHref="/markets"
+                emptyMessage="No market listings linked yet."
+                renderRow={(m) => {
                     const rawEx = m.exchanges as unknown;
                     const ex = (Array.isArray(rawEx) ? rawEx[0] : rawEx) as {
                       id?: string;
@@ -234,7 +229,6 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     );
                   }}
                 />
-              </RecordPageCard>
             </div>
           }
         />

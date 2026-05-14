@@ -3,12 +3,11 @@ import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
-  ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -136,32 +135,27 @@ export default async function SignalDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="S" />}
-          eyebrow="Signal"
-          title={marketSym || (sig.market_id ? `Market ${sig.market_id.slice(0, 8)}…` : `Signal ${sig.id.slice(0, 8)}…`)}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              <Output
-                label="Intent"
-                type="text"
-                value={<span className={intentClass(sig.intent)}>{sig.intent}</span>}
-              />
-              <Output label="Confidence" type="text" value={fmtConfidence(sig.confidence)} />
-              <Output label="Timeframe" type="text" value={sig.timeframe} />
-            </>
-          }
-          meta={sig.id}
-          actions={
-            <Link href="/signals" className="bk-link text-sm">
-              All signals
-            </Link>
-          }
-        />
-      }
+      header={objectRegistry.registrations.get("signals")!.CreateDetailPageHeader({
+        record: sig as Record<string, unknown>,
+        title: marketSym || (sig.market_id ? `Market ${sig.market_id.slice(0, 8)}…` : `Signal ${sig.id.slice(0, 8)}…`),
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            <Output
+              label="Intent"
+              type="text"
+              value={<span className={intentClass(sig.intent)}>{sig.intent}</span>}
+            />
+            <Output label="Confidence" type="text" value={fmtConfidence(sig.confidence)} />
+            <Output label="Timeframe" type="text" value={sig.timeframe} />
+          </>
+        ),
+        actions: (
+          <Link href="/signals" className="bk-link text-sm">
+            All signals
+          </Link>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="signals" relatedId={sig.id} />}
       content={
         <RecordPageTabs

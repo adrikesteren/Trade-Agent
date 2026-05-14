@@ -8,7 +8,7 @@ import {
   bitvavoCredentialsFromExchangeApiFields,
   type BitvavoExchangeCredentials,
 } from "@/lib/bitvavo/private/signed-request";
-import { mergeBuyPositionAvg } from "@/lib/executor/paper-fill";
+import { mergeBuyPositionAvg } from "@/lib/agents/executor/services/paper-fill.service";
 import {
   fetchAssetDisplayNameByMarketId,
   resolveTradeFillAssetDisplayName,
@@ -16,8 +16,8 @@ import {
 } from "@/lib/ops/send-trade-fill-slack";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { fetchMarketAssetIds } from "@/lib/trading/executors";
-import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/trading/executor-wallet";
+import { fetchMarketAssetIds } from "@/lib/agents/executor/services/executors-lookup.service";
+import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/agents/executor/services/executor-wallet.service";
 
 function batchSize(): number {
   const n = Number(process.env.BITVAVO_RECONCILE_BATCH ?? 40);

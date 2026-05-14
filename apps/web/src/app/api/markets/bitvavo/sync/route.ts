@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/markets/run-bitvavo-markets-eur-sync-with-sync-run";
-import { SKIPPED_PREVIOUS_SYNC_STILL_RUNNING } from "@/lib/markets/record-bitvavo-sync-status";
+import { runBitvavoMarketsEurSyncWithSyncRun } from "@/lib/agents/ingest/services/bitvavo-markets-eur-sync-with-sync-run.service";
+import { SKIPPED_PREVIOUS_SYNC_STILL_RUNNING } from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 import { NextResponse } from "next/server";
 
 /**

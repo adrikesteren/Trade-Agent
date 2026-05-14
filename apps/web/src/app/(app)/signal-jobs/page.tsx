@@ -7,6 +7,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@repo/adricore/blocks";
 
@@ -41,9 +42,7 @@ export default async function SignalJobsPage({ searchParams }: PageProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Automation"
-        title="Signal Jobs"
-        iconLetter="J"
+        model={objectRegistry.registrations.get("signal_jobs")!}
         rowCount={list.length}
         sortLine={`Sorted by Created date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
       />

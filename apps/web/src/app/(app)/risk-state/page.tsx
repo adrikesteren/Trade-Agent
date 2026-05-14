@@ -8,6 +8,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@repo/adricore/blocks";
 import { redirect } from "next/navigation";
@@ -64,9 +65,8 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Trading"
+        model={objectRegistry.registrations.get("risk_state")!}
         title="Executor runtime risk"
-        iconLetter="R"
         rowCount={list.length}
         sortLine={
           executorIdFilter

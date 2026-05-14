@@ -7,7 +7,7 @@ import {
   SYNC_JOB_EXECUTOR_CATALOG_CLOSE,
   SYNC_JOB_MEDIATOR_CATALOG_CLOSE,
   SYNC_JOB_SIGNALS_CATALOG_CLOSE,
-} from "@/lib/markets/record-bitvavo-sync-status";
+} from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 
 /** `sync_runs.job_key` values shown on the dashboard sync runs list and detail pages. */
 export const SYNC_RUN_DASHBOARD_JOB_KEYS = [

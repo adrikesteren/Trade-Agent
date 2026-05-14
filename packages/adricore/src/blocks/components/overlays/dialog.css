@@ -1,0 +1,66 @@
+/* ——— Dialog (Radix) ——— */
+.bk-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  z-index: var(--bk-z-modal);
+  animation: bk-fade-in 0.15s ease;
+}
+
+.bk-dialog-content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: calc(var(--bk-z-modal) + 1);
+  transform: translate(-50%, -50%);
+  width: min(92vw, 30rem);
+  max-height: min(85vh, 36rem);
+  overflow: auto;
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--bk-radius-lg);
+  border: 1px solid var(--bk-color-border);
+  background: var(--bk-color-surface);
+  box-shadow: var(--bk-shadow-lg);
+  animation: bk-dialog-in 0.18s ease;
+}
+
+@keyframes bk-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bk-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.bk-dialog-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--bk-color-text-strong);
+}
+
+.bk-dialog-description {
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
+  color: var(--bk-color-text-muted);
+  line-height: 1.5;
+}
+
+.bk-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}

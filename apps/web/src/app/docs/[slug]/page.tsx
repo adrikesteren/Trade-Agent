@@ -1,4 +1,4 @@
-import { PageHeader, Stack } from "@repo/adricore/blocks";
+import { Stack } from "@repo/adricore/blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -51,7 +51,8 @@ export default async function DocArticlePage({ params }: PageProps) {
               ← Documentation
             </Link>
           </p>
-          <PageHeader title={meta.title} subtitle={meta.description} />
+          <h1 className="bk-page-header_title">{meta.title}</h1>
+          <p className="bk-page-header_subtitle">{meta.description}</p>
         </div>
         <DocArticleBody slug={slug} />
       </Stack>

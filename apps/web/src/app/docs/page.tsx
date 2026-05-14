@@ -1,4 +1,4 @@
-import { Card, CardBody, PageHeader, Stack } from "@repo/adricore/blocks";
+import { Card, CardBody, Stack } from "@repo/adricore/blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -13,10 +13,10 @@ export default function DocsHomePage() {
   return (
     <div className="bk-container bk-container_lg bk-scroll-region flex-1 overflow-auto py-6">
       <Stack gap="lg">
-        <PageHeader
-          title="Documentation"
-          subtitle="Concepten en datastromen in deze applicatie. Kies een onderwerp hieronder."
-        />
+        <div>
+          <h1 className="bk-page-header_title">Documentation</h1>
+          <p className="bk-page-header_subtitle">Concepten en datastromen in deze applicatie. Kies een onderwerp hieronder.</p>
+        </div>
 
         <Card>
           <CardBody>

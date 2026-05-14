@@ -9,6 +9,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildTaskListStatusSelectOptions,
@@ -92,11 +93,9 @@ export default async function TasksListPage({ searchParams }: PageProps) {
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Automation"
-        title="Tasks"
+        model={objectRegistry.registrations.get("tasks")!}
         rowCount={totalCount}
         sortLine={taskListStatusSortLine(filter)}
-        iconLetter="T"
         uncapped
         actions={
           <div className="flex flex-wrap items-center justify-end gap-3">

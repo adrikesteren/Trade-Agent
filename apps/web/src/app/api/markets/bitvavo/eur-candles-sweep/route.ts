@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/markets/run-eur-candle-sweep";
+import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/agents/ingest/services/eur-candle-sweep-run.service";
 import { NextResponse } from "next/server";
 
 /**

@@ -43,29 +43,49 @@ Develop and test on **localhost** (`pnpm dev`, repo-root `.env`, local Supabase)
 
 Further UI conventions: [docs/dashboard-ui-conventions.md](docs/dashboard-ui-conventions.md) (naming is historical; paths refer to `(app)`).
 
-## Object model per table
+## Object folder layout
 
-For each “business object” (usually aligned with a primary table), maintain a small **exported definition** under [`apps/web/src/models/`](apps/web/src/models/):
+For each "business object" (usually aligned with a primary table), maintain a small **exported definition** under [`apps/web/src/lib/objects/<object>/`](apps/web/src/lib/objects/):
 
-- Start from [`types.ts`](apps/web/src/models/types.ts) (re-exports from [`@repo/adricore/metadata`](packages/adricore/src/metadata/index.ts)). Metadata modules provide OOP base classes for `ObjectMetadata`, `ObjectFieldMetadata`, `ObjectRelationshipMetadata`, and Registries.
-- **New objects:** Add a **class extending [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.ts)**. The base class documents the DB contract: `id`, `name`, `created_by`, `created_at`, `updated_by`, `updated_at`. Wire the registry and UI as needed.
-- Examples: [`assets.ts`](apps/web/src/models/assets.ts), [`executors.ts`](apps/web/src/models/executors.ts), [`logs.ts`](apps/web/src/models/logs.ts).
+- One folder per object; the metadata class file uses the suffix **`.object.ts`** (kebab-case) — for example [`assets/assets.object.ts`](apps/web/src/lib/objects/assets/assets.object.ts), [`executors/executors.object.ts`](apps/web/src/lib/objects/executors/executors.object.ts), [`logs/logs.object.ts`](apps/web/src/lib/objects/logs/logs.object.ts).
+- Cross-cutting object files live at the root of `lib/objects/`: [`registry.ts`](apps/web/src/lib/objects/registry.ts) (central `objectRegistry`) and [`icons.ts`](apps/web/src/lib/objects/icons.ts) (icon registry).
+- Per-object services (when they exist) belong in `lib/objects/<object>/services/<name>.service.ts` — **not** in `lib/agents/`. Create the `services/` subfolder only when the first service is added.
+- **New objects:** Add a **class extending [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.ts)**. The base class documents the DB contract: `id`, `name`, `created_by`, `created_at`, `updated_by`, `updated_at`. Import metadata types directly from [`@repo/adricore/metadata`](packages/adricore/src/metadata/index.ts) (provides OOP base classes for `ObjectMetadata`, `ObjectFieldMetadata`, `ObjectRelationshipMetadata`, and Registries). Wire the new class into `lib/objects/registry.ts` and the UI as needed.
 
 Use these as the checklist source when adding migrations + routes. AdriCore authoring: [`packages/adricore/docs/new-table.md`](packages/adricore/docs/new-table.md), list/detail UI: [`packages/adricore/docs/ui-list-detail.md`](packages/adricore/docs/ui-list-detail.md), package overview: [`packages/adricore/README.md`](packages/adricore/README.md).
 
 **`nameField` on `ObjectMetadata`:** use `{ mode: "manual" }` when the row `name` is user-editable; use `{ mode: "autoNumber", displayFormat: "…{0000}", startNumber?: n }` when `name` is system-generated (DB sequence / counter + UI read-only still to be wired per object).
 
+## Service folders & naming
+
+Domain/business logic ("services") is organized fflib-style under [`apps/web/src/lib/`](apps/web/src/lib/):
+
+- **Single-namespace services** → `lib/agents/<namespace>/services/<name>.service.ts`. Allowed namespaces: `ingest`, `signal`, `trade-mediator`, `executor` (one per agent).
+- **Cross-namespace orchestrators** (services that combine ≥ 2 agents) → `lib/orchestrators/<name>.service.ts`. No namespace folder.
+- **Per-object services** → `lib/objects/<object>/services/<name>.service.ts` (only create the subfolder when the first service is added).
+- All service files use the suffix **`.service.ts`** (kebab-case) and export plain async functions (`export async function runFoo(...)`). No class/namespace wrappers; tests live next to their source as `<name>.service.test.ts`.
+
+What is **not** a service (do not place under `agents/` or `orchestrators/`, do not rename with `.service.ts`):
+
+- Pure utilities, types, and small helpers (e.g. `lib/automation-actor.ts`, `lib/format-usd-metric.ts`, `lib/trading/close-time-match.ts`).
+- Integration clients / SDK wrappers (e.g. raw Bitvavo HTTP under `lib/bitvavo/`).
+- UI / chart helpers (e.g. `lib/markets/chart-types.ts`, `aggregate-ohlcv.ts`).
+- Infra and cross-cutting concerns: `lib/supabase/`, `lib/env/`, `lib/workers/`, `lib/relay/`, `lib/logs/`, `lib/locale/`, `lib/auth/`, `lib/dashboard/`, `lib/docs/`, `lib/ops/`, `lib/system-settings/`, `lib/tasks/`, `lib/catalog/`.
+
+The same convention is enforced by the always-applied rule [`.cursor/rules/service-folders.mdc`](.cursor/rules/service-folders.mdc). When in doubt about classification, ask first.
+
 ## Checklist: new database table → app surface
 
 1. **Migration** (+ RLS/policies) in `supabase/migrations/`.
-2. **Model** in `apps/web/src/models/<slug>.ts`: a **subclass of [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.ts)**. The migration for the table must include the **standard columns** (`id`, `name`, `created_by`, `created_at`, `updated_by`, `updated_at`).
+2. **Model** in `apps/web/src/lib/objects/<slug>/<slug>.object.ts`: a **subclass of [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.ts)**. Register it in [`apps/web/src/lib/objects/registry.ts`](apps/web/src/lib/objects/registry.ts). The migration for the table must include the **standard columns** (`id`, `name`, `created_by`, `created_at`, `updated_by`, `updated_at`).
 3. **Routes** under `(app)/`:
    - `(app)/<slug>/page.tsx` — list.
    - `(app)/<slug>/[id]/page.tsx` — detail with `DetailPageLayout` + edit/delete actions as appropriate.
    - For each FK child list you expose: `(app)/<parentSlug>/[id]/<relatedSlug>/page.tsx` — list with FK filter.
 4. **Nav**: when you add a top-level list, add a tab to the appropriate entry in **`appRegistry`** in [`apps/web/src/config/app-shell.ts`](apps/web/src/config/app-shell.ts) (usually `appRegistry[DEFAULT_APP_ID]`; uses `AppMetadata` / `TabMetadata` from AdriCore).
-5. **Cache**: update `revalidatePath` / `revalidateTag` in server actions for every path segment you render (including nested related URLs).
-6. **Tests** (when behavior is non-trivial).
+5. **Services** (if needed): single-agent business logic → `apps/web/src/lib/agents/<namespace>/services/<name>.service.ts`; cross-agent orchestrators → `apps/web/src/lib/orchestrators/<name>.service.ts`; per-object services → `apps/web/src/lib/objects/<slug>/services/<name>.service.ts`. See "Service folders & naming" above.
+6. **Cache**: update `revalidatePath` / `revalidateTag` in server actions for every path segment you render (including nested related URLs).
+7. **Tests** (when behavior is non-trivial).
 
 ## Imports after refactors
 

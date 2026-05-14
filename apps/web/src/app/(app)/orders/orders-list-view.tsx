@@ -9,6 +9,7 @@ import {
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -199,9 +200,8 @@ export async function OrdersListView({
     <ListViewLayout>
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
-          eyebrow={parentExecutor ? "Executor · related" : "Trading"}
-          title={parentExecutor ? `Orders · ${parentExecutor.name}` : "Orders"}
-          iconLetter="O"
+          model={objectRegistry.registrations.get("orders")!}
+          title={parentExecutor ? `Orders · ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={
             executorIdFilter

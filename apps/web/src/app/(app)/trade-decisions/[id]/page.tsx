@@ -4,12 +4,12 @@ import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -198,36 +198,31 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="D" />}
-          eyebrow="Trade decision"
-          title={titleLabel}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              <Output
-                label="Resolved"
-                type="text"
-                value={<span className={intentClass(resolved)}>{resolved}</span>}
-              />
-              <Output
-                label="Approved"
-                type="text"
-                value={<span className={approvedClass(dec.approved)}>{dec.approved ? "yes" : "no"}</span>}
-              />
-              <Output label="Timeframe" type="text" value={dec.timeframe} />
-            </>
-          }
-          meta={dec.id}
-          actions={
-            <Link href="/trade-decisions" className="bk-link text-sm">
-              All trade decisions
-            </Link>
-          }
-        />
-      }
+      header={objectRegistry.registrations.get("trade_decisions")!.CreateDetailPageHeader({
+        record: dec as Record<string, unknown>,
+        title: titleLabel,
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            <Output
+              label="Resolved"
+              type="text"
+              value={<span className={intentClass(resolved)}>{resolved}</span>}
+            />
+            <Output
+              label="Approved"
+              type="text"
+              value={<span className={approvedClass(dec.approved)}>{dec.approved ? "yes" : "no"}</span>}
+            />
+            <Output label="Timeframe" type="text" value={dec.timeframe} />
+          </>
+        ),
+        actions: (
+          <Link href="/trade-decisions" className="bk-link text-sm">
+            All trade decisions
+          </Link>
+        ),
+      })}
       sidebar={<RecordTasksRelatedCard relatedSchema="trading" relatedTable="decisions" relatedId={dec.id} />}
       content={
         <>
@@ -296,9 +291,9 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
             }
             related={
               <div className="bk-stack bk-stack_gap-md">
-                <RecordPageCard>
                 <RecordRelatedList
                   title="Orders"
+                  icon={<ListViewObjectIcon letter="O" />}
                   description="Orders linked to this decision (newest first)."
                   items={orders}
                   getKey={(o) => o.id}
@@ -318,7 +313,6 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 />
-              </RecordPageCard>
               </div>
             }
           />

@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { Alert, Button, FormElement, Input, PageHeader, Stack } from "@repo/adricore/blocks";
+import { Alert, Button, FormElement, Input, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useId, useState } from "react";
@@ -34,7 +34,10 @@ function LoginForm() {
 
   return (
     <div className="bk-container flex min-h-[60vh] w-full flex-col justify-center px-6">
-      <PageHeader title="Sign in" subtitle="Email and password (Supabase Auth)." />
+      <div>
+        <h1 className="bk-page-header_title">Sign in</h1>
+        <p className="bk-page-header_subtitle">Email and password (Supabase Auth).</p>
+      </div>
       <form onSubmit={onSubmit} className="mt-8">
         <Stack gap="md">
           <FormElement id={emailId} label="Email" required>

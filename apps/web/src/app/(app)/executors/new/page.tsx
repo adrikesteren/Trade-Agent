@@ -2,7 +2,7 @@ import { ExecutorForm, type AssetOption, type ExchangeOption, type ExecutorFormI
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Alert, PageHeader, Stack } from "@repo/adricore/blocks";
+import { Alert, Stack } from "@repo/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -94,7 +94,10 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader title={title} subtitle={subtitle} />
+      <div>
+        <h1 className="bk-page-header_title">{title}</h1>
+        <p className="bk-page-header_subtitle">{subtitle}</p>
+      </div>
       <Stack gap="md">
         <p className="bk-text-muted text-sm">
           <Link href="/executors" className="bk-link">

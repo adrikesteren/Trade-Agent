@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { ensureRiskStateForExecutor } from "@/lib/trading/executors";
+import { ensureRiskStateForExecutor } from "@/lib/agents/executor/services/executors-lookup.service";
 
 function revalidateExecutorSurface(executorId: string) {
   revalidatePath("/executors");

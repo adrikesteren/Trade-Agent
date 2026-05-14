@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { runHistoricalExecutorReplay } from "@/lib/historical/run-historical-executor-replay";
+import { runHistoricalExecutorReplay } from "@/lib/orchestrators/historical-executor-replay.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { fetchExecutorById } from "@/lib/trading/executors";
+import { fetchExecutorById } from "@/lib/agents/executor/services/executors-lookup.service";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 
 async function handle(request: Request, rawBody: string): Promise<Response> {

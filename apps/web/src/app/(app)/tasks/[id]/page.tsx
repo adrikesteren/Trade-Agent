@@ -3,12 +3,12 @@ import { TaskDetailHeaderActions } from "@/app/(app)/tasks/[id]/task-detail-head
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { resolveRelatedHref } from "@/lib/tasks/resolve-related-href";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -91,19 +91,16 @@ export default async function TaskDetailPage({ params }: PageProps) {
     <DetailPageLayout
       className="bk-container px-1"
       header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="T" />}
-          eyebrow="Task"
-          title={t.title}
-          highlights={
+        objectRegistry.registrations.get("tasks")!.CreateDetailPageHeader({
+          record: t as Record<string, unknown>,
+          title: t.title,
+          highlights: (
             <>
               <Output label="Status" type="text" value={<span className="font-mono">{t.status}</span>} />
               <Output label="Type" type="text" value={<span className="font-mono">{t.task_type}</span>} />
             </>
-          }
-          meta={t.id}
-          actions={
+          ),
+          actions: (
             <TaskDetailHeaderActions
               taskId={t.id}
               initialTitle={t.title}
@@ -114,8 +111,8 @@ export default async function TaskDetailPage({ params }: PageProps) {
               subtaskCount={subtasks.length}
               subtasksHref={`/tasks/${id}/tasks`}
             />
-          }
-        />
+          ),
+        })
       }
       content={
         <RecordPageTabs
@@ -170,28 +167,27 @@ export default async function TaskDetailPage({ params }: PageProps) {
       }
       sidebar={
         <div className="bk-stack bk-stack_gap-md">
-          <RecordPageCard>
-            <RecordRelatedList
-              title="Subtasks"
-              description="Child tasks with parent_task_id pointing at this record."
-              items={subtasks}
-              getKey={(s) => s.id}
-              previewLimit={15}
-              totalCount={subtasks.length}
-              viewAllHref={subtasks.length > 0 ? `/tasks/${id}/tasks` : undefined}
-              emptyMessage="No subtasks for this task."
-              renderRow={(s) => (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                  <Link href={`/tasks/${s.id}`} className="bk-link max-w-[min(100%,20rem)] truncate" title={s.title}>
-                    {s.title}
-                  </Link>
-                  <span className="bk-text-muted shrink-0 font-mono text-xs">
-                    {s.status} · {s.task_type}
-                  </span>
-                </div>
-              )}
-            />
-          </RecordPageCard>
+          <RecordRelatedList
+            title="Subtasks"
+            icon={<ListViewObjectIcon letter="T" />}
+            description="Child tasks with parent_task_id pointing at this record."
+            items={subtasks}
+            getKey={(s) => s.id}
+            previewLimit={15}
+            totalCount={subtasks.length}
+            viewAllHref={subtasks.length > 0 ? `/tasks/${id}/tasks` : undefined}
+            emptyMessage="No subtasks for this task."
+            renderRow={(s) => (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                <Link href={`/tasks/${s.id}`} className="bk-link max-w-[min(100%,20rem)] truncate" title={s.title}>
+                  {s.title}
+                </Link>
+                <span className="bk-text-muted shrink-0 font-mono text-xs">
+                  {s.status} · {s.task_type}
+                </span>
+              </div>
+            )}
+          />
         </div>
       }
     />

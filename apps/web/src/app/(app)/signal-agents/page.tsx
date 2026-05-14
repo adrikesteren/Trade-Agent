@@ -7,6 +7,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -51,9 +52,7 @@ export default async function SignalAgentsPage({ searchParams }: PageProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Automation"
-        title="Signal Agents"
-        iconLetter="A"
+        model={objectRegistry.registrations.get("signal_agents")!}
         rowCount={list.length}
         sortLine={`Sorted by Created date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
         actions={

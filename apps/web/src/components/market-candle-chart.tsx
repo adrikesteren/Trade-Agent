@@ -4,7 +4,7 @@ import { dateOrderLocale, formatDatetime, formatDecimal } from "@/lib/locale/for
 import type { UserDateFormat, UserDecimalFormat, UserLocalePreferences, UserTimeFormat, UserTimezone } from "@/lib/locale/types";
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME, CHART_TIMEFRAMES } from "@/lib/markets/chart-types";
-import { candleTimeToUnixSeconds } from "@/lib/markets/candle-time";
+import { candleTimeToUnixSeconds } from "@/lib/agents/ingest/services/candle-time.service";
 import { createClient } from "@/lib/supabase/client";
 import {
   CandlestickSeries,

@@ -1,0 +1,168 @@
+/**
+ * Base layer: body defaults, layout containers, stack utilities, generic typography.
+ * No component-specific rules — those live alongside each component .tsx.
+ */
+
+/* Reset/inherit for form controls and buttons used inside .bk-* components. */
+.bk-button,
+.bk-input,
+.bk-textarea,
+.bk-select {
+  font-family: inherit;
+}
+
+/* ——— Full-width content shell. No max-width; the dashboard stretches edge-to-edge. ——— */
+.bk-container {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* Opt-in narrow column (e.g. login). Combine with Tailwind `mx-auto` to center. */
+.bk-container_sm {
+  max-width: 28rem;
+}
+
+/* No-op kept for historical class names — `bk-container_lg` used to cap width. */
+.bk-container_lg {
+  max-width: none;
+}
+
+/* ——— Stack: vertical flex with gap variants. ——— */
+.bk-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.bk-stack_gap-sm {
+  gap: 0.5rem;
+}
+
+.bk-stack_gap-md {
+  gap: 1rem;
+}
+
+.bk-stack_gap-lg {
+  gap: 1.5rem;
+}
+
+/* ——— Typography utilities. ——— */
+.bk-text-muted {
+  font-size: 0.8125rem;
+  color: var(--bk-color-text-muted);
+}
+
+.bk-lead {
+  margin: 0.75rem 0 0;
+  max-width: 40rem;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--bk-color-text-muted);
+}
+
+.bk-code {
+  font-family: var(--bk-font-mono);
+  font-size: 0.75rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--bk-radius-sm);
+  background: var(--bk-color-surface-alt);
+  border: 1px solid var(--bk-color-border);
+  color: var(--bk-color-text);
+}
+
+.bk-pre {
+  margin: 0;
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: var(--bk-radius-md);
+  font-family: var(--bk-font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  background: var(--bk-color-surface-alt);
+  color: var(--bk-color-text);
+  border: 1px solid var(--bk-color-border);
+}
+
+.bk-dl-grid {
+  display: grid;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+@media (min-width: 640px) {
+  .bk-dl-grid {
+    grid-template-columns: minmax(8rem, 10rem) 1fr;
+  }
+}
+
+.bk-dl-term {
+  color: var(--bk-color-text-muted);
+}
+
+.bk-dl-desc {
+  margin: 0;
+  color: var(--bk-color-text);
+  word-break: break-word;
+}
+
+/* ——— Scroll region helper. Used by the docs scroll area. ——— */
+.bk-scroll-region {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* ——— Screen reader only. ——— */
+.bk-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ——— Inline stat / KPI cell (used by reports column in detail pages). ——— */
+.bk-stat-cell {
+  border-radius: var(--bk-radius-md);
+  border: 1px solid var(--bk-color-border);
+  background: var(--bk-color-surface-alt);
+  padding: 0.5rem 0.625rem;
+}
+
+.bk-stat-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bk-color-text-muted);
+}
+
+.bk-stat-value {
+  margin-top: 0.125rem;
+  font-family: var(--bk-font-mono);
+  font-size: 0.875rem;
+  color: var(--bk-color-text);
+}
+
+/* ——— Chart tooltip (used by market-candle-chart). ——— */
+.bk-chart-tooltip {
+  pointer-events: none;
+  position: absolute;
+  z-index: var(--bk-z-popover);
+  width: 17rem;
+  border-radius: var(--bk-radius-md);
+  border: 1px solid var(--bk-color-border);
+  background: color-mix(in srgb, var(--bk-color-surface) 95%, transparent);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  box-shadow: var(--bk-shadow-md);
+  backdrop-filter: blur(6px);
+  color: var(--bk-color-text);
+}

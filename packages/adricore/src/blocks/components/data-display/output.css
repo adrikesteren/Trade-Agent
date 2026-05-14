@@ -1,0 +1,65 @@
+/* ——— Output (read-only field display) ——— */
+.bk-output {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.bk-output_label {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--bk-color-text-muted);
+}
+
+.bk-output_value {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--bk-color-text);
+  word-break: break-word;
+}
+
+.bk-output_lookup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.bk-output_lookup-icon {
+  flex-shrink: 0;
+  color: var(--bk-color-text-muted);
+}
+
+.bk-output_value_codeblock {
+  width: 100%;
+  min-width: 0;
+}
+
+.bk-output_pre {
+  box-sizing: border-box;
+  margin: 0;
+  max-height: min(55vh, 24rem);
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: var(--bk-radius-md);
+  font-family: var(--bk-font-mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  background: var(--bk-color-surface-alt);
+  color: var(--bk-color-text);
+  border: 1px solid var(--bk-color-border);
+}
+
+.bk-output_pre code {
+  display: block;
+  font-family: inherit;
+  font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bk-output_span-full {
+  grid-column: 1 / -1;
+}

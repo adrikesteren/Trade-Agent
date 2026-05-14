@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { executeFindCoingeckoIdWorker } from "@/lib/markets/execute-find-coingecko-id-worker";
-import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/markets/run-coingecko-coin-id-sync-with-sync-run";
-import { runCoingeckoMetricsSyncWithSyncRun } from "@/lib/markets/run-coingecko-sync-with-sync-run";
+import { executeFindCoingeckoIdWorker } from "@/lib/agents/ingest/services/coingecko-id-find-worker.service";
+import { runCoingeckoCoinIdSyncWithSyncRun } from "@/lib/agents/ingest/services/coingecko-coin-id-sync-with-sync-run.service";
+import { runCoingeckoMetricsSyncWithSyncRun } from "@/lib/agents/ingest/services/coingecko-sync-with-sync-run.service";
 import { buildFindCoingeckoIdAllWorkerUrl, isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
-import { upsertCatalogCryptoAssetsFromBitvavo } from "@/lib/markets/sync-bitvavo-asset-data";
-import { upsertBitvavoMarketsForExistingAssets } from "@/lib/markets/sync-bitvavo-markets";
+import { upsertCatalogCryptoAssetsFromBitvavo } from "@/lib/agents/ingest/services/bitvavo-asset-data-sync.service";
+import { upsertBitvavoMarketsForExistingAssets } from "@/lib/agents/ingest/services/bitvavo-markets-sync.service";
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";

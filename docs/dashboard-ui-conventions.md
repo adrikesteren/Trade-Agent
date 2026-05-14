@@ -13,7 +13,6 @@ Treat each index route as a **Lightning list view**: chrome around the header, o
 | Page header | `PageHeader` with `variant="list"` | Not the default title bar. |
 | Object tile | `ListViewObjectIcon` (`letter` or `children`) | Purple gradient square, like SF object icon. |
 | List name row | `title`, optional `titleAddon` | e.g. `ListViewTitlePickerPlaceholder` (chevron + pin) until a real view picker exists. |
-| Context line | `eyebrow` (small) + large `title` | e.g. eyebrow `Markets`, title `Bitvavo EUR`. |
 | Summary | `summary` | Plain text line: counts, sort, filters, e.g. `12 listings · Sorted by Market Cap · Max 500 rows`. |
 | Toolbar | `toolbar={<ListViewPlaceholderToolbar />}` or custom `ListViewToolbar` | Search field + icon row (settings, grid, refresh, …). |
 | Row actions | `listViewOutlineActionClass` on `Link` | “New / Import” style outline actions, not only muted links. |

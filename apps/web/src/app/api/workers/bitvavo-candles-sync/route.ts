@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   BITVAVO_SYNC_JOB_CANDLES_EUR,
   recordBitvavoSyncFailed,
-} from "@/lib/markets/record-bitvavo-sync-status";
+} from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 import { sendOpsAlert } from "@/lib/ops/send-ops-alert";
-import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/markets/run-eur-candle-sweep";
+import { runEurCandleSweep, type EurCandleSweepBody } from "@/lib/agents/ingest/services/eur-candle-sweep-run.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { verifyScheduledWorker } from "@/lib/workers/verify-scheduled-worker";
 

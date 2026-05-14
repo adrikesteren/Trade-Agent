@@ -1,6 +1,7 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -44,11 +45,10 @@ export default async function TaskSubtasksPage({ params }: PageProps) {
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Task"
+        model={objectRegistry.registrations.get("tasks")!}
         title="Subtasks"
         rowCount={list.length}
         sortLine="Created (newest first)"
-        iconLetter="T"
         uncapped
         actions={
           <Link href={`/tasks/${id}`} className="bk-link text-sm">

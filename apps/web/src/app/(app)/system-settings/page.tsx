@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import {
   clampPage,
   parseListPage,
@@ -13,15 +14,12 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
 import { listNumericSystemSettingDefs } from "@/lib/system-settings/registry";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
   Alert,
   Card,
   CardBody,
-  ListViewObjectIcon,
-  ListViewPlaceholderToolbar,
-  ListViewTitlePickerPlaceholder,
-  PageHeader,
   Table,
   TableWrap,
   Td,
@@ -45,15 +43,12 @@ export default async function SystemSettingsListPage({
   if (!isAdmin) {
     return (
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-        <PageHeader
-          variant="list"
-          icon={<ListViewObjectIcon letter="S" />}
-          eyebrow="System"
-          title="System settings"
-          titleAddon={<ListViewTitlePickerPlaceholder />}
+        <ObjectListViewHeader
+          model={objectRegistry.registrations.get("system_settings")!}
+          rowCount={0}
+          sortLine="Promote your user in SQL (see docs/ops-developer.md) or ask an administrator."
           subtitle="Administrator role is required to view rows in public.system_settings."
-          summary="Promote your user in SQL (see docs/ops-developer.md) or ask an administrator."
-          toolbar={<ListViewPlaceholderToolbar />}
+          uncapped
         />
       </div>
     );
@@ -93,30 +88,25 @@ export default async function SystemSettingsListPage({
   const { from, to } = rangeForPage(page, pageSize);
   const pagedRows = rows.slice(from, to + 1);
 
-  const summaryBits = [
-    `${pagedRows.length} on this page`,
+  const sortLine = [
     `${n} setting${n === 1 ? "" : "s"}`,
     `Page ${page} of ${pages}`,
     "public.system_settings",
     "Open a row for Edit (dialog) or Delete (confirm)",
-  ];
+  ].join(" · ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
-      <PageHeader
-        variant="list"
-        icon={<ListViewObjectIcon letter="S" />}
-        eyebrow="System"
-        title="System settings"
-        titleAddon={<ListViewTitlePickerPlaceholder />}
+      <ObjectListViewHeader
+        model={objectRegistry.registrations.get("system_settings")!}
+        rowCount={pagedRows.length}
+        sortLine={sortLine}
         subtitle={
           <>
             Key/value rows in <code className="bk-code">public.system_settings</code> override matching{" "}
             <code className="bk-code">process.env</code> at read time. Missing rows use env, then built-in defaults.
           </>
         }
-        summary={summaryBits.join(" · ")}
-        toolbar={<ListViewPlaceholderToolbar />}
         actions={
           <Link href="/sync-runs" className={listViewOutlineActionClass}>
             Sync runs

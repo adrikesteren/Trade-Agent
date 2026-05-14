@@ -1,0 +1,48 @@
+/* ——— Tabs (Radix) ——— */
+.bk-tabs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--bk-color-border);
+  margin-bottom: 1rem;
+}
+
+.bk-tabs-trigger {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: -1px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--bk-color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: var(--bk-radius-sm) var(--bk-radius-sm) 0 0;
+  transition:
+    color 0.12s ease,
+    border-bottom-color 0.12s ease;
+}
+
+.bk-tabs-trigger:hover {
+  color: var(--bk-color-text);
+}
+
+.bk-tabs-trigger[data-state="active"] {
+  color: var(--bk-color-brand);
+  border-bottom-color: var(--bk-color-brand);
+}
+
+.bk-tabs-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--bk-focus-ring);
+  border-radius: var(--bk-radius-sm);
+}
+
+.bk-tabs-content {
+  font-size: 0.8125rem;
+  color: var(--bk-color-text);
+}
+
+.bk-tabs-content:focus-visible {
+  outline: none;
+}

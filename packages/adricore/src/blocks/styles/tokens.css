@@ -1,93 +1,122 @@
 /**
- * Blocks design tokens — SLDS-inspired, no Salesforce class names.
+ * Adricore blocks design tokens.
+ *
+ * SLDS-inspired palette under the `--bk-*` prefix (`bk` = blocks).
+ * Consumed by every category in `components/` and `patterns/`.
  */
 :root {
-  --adri-font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
-  --adri-font-mono: var(--font-geist-mono, ui-monospace, monospace);
+  --bk-font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --bk-font-mono: var(--font-geist-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
 
-  --adri-radius-sm: 0.25rem;
-  --adri-radius-md: 0.375rem;
-  --adri-radius-lg: 0.5rem;
+  --bk-radius-xs: 0.125rem;
+  --bk-radius-sm: 0.25rem;
+  --bk-radius-md: 0.375rem;
+  --bk-radius-lg: 0.5rem;
+  --bk-radius-pill: 9999px;
 
-  --adri-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
-  --adri-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --bk-shadow-xs: 0 1px 1px rgb(0 0 0 / 0.04);
+  --bk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 1px rgb(0 0 0 / 0.04);
+  --bk-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --bk-shadow-lg: 0 12px 24px -6px rgb(0 0 0 / 0.18), 0 4px 8px -2px rgb(0 0 0 / 0.08);
 
-  --adri-z-dropdown: 50;
-  --adri-z-modal: 100;
+  --bk-z-dropdown: 50;
+  --bk-z-popover: 60;
+  --bk-z-modal: 100;
 
-  --adri-color-brand: #0176d3;
-  --adri-color-brand-hover: #014486;
-  --adri-color-brand-active: #032d60;
-  --adri-color-brand-contrast: #ffffff;
+  --bk-color-brand: #0176d3;
+  --bk-color-brand-hover: #014486;
+  --bk-color-brand-active: #032d60;
+  --bk-color-brand-contrast: #ffffff;
+  --bk-color-brand-soft: #eaf5fe;
 
-  --adri-color-neutral-0: #ffffff;
-  --adri-color-neutral-50: #fafafa;
-  --adri-color-neutral-100: #f3f3f3;
-  --adri-color-neutral-200: #e5e5e5;
-  --adri-color-neutral-300: #c9c9c9;
-  --adri-color-neutral-400: #aeaeae;
-  --adri-color-neutral-500: #747474;
-  --adri-color-neutral-600: #5c5c5c;
-  --adri-color-neutral-700: #444444;
-  --adri-color-neutral-800: #2e2e2e;
-  --adri-color-neutral-900: #181818;
+  --bk-color-neutral-0: #ffffff;
+  --bk-color-neutral-50: #fafaf9;
+  --bk-color-neutral-100: #f3f3f3;
+  --bk-color-neutral-150: #ecebea;
+  --bk-color-neutral-200: #e5e5e5;
+  --bk-color-neutral-300: #c9c9c9;
+  --bk-color-neutral-400: #aeaeae;
+  --bk-color-neutral-500: #747474;
+  --bk-color-neutral-600: #5c5c5c;
+  --bk-color-neutral-700: #444444;
+  --bk-color-neutral-800: #2e2e2e;
+  --bk-color-neutral-900: #181818;
 
-  --adri-color-text: #181818;
-  --adri-color-text-muted: #5c5c5c;
-  --adri-color-text-inverse: #ffffff;
+  --bk-color-text: #181818;
+  --bk-color-text-strong: #080707;
+  --bk-color-text-muted: #5c5c5c;
+  --bk-color-text-inverse: #ffffff;
 
-  --adri-color-border: #e5e5e5;
-  --adri-color-border-strong: #c9c9c9;
+  --bk-color-border: #e5e5e5;
+  --bk-color-border-strong: #c9c9c9;
+  --bk-color-border-focus: var(--bk-color-brand);
 
-  --adri-color-surface: #ffffff;
-  --adri-color-surface-alt: #fafafa;
-  --adri-color-page: #f3f3f3;
+  --bk-color-surface: #ffffff;
+  --bk-color-surface-alt: #fafaf9;
+  --bk-color-surface-sunken: #f3f3f3;
+  --bk-color-page: #f3f3f3;
 
-  --adri-color-success: #2e844a;
-  --adri-color-success-bg: #ecf7ef;
-  --adri-color-warning: #fe9339;
-  --adri-color-warning-bg: #fff7e6;
-  --adri-color-error: #ba0517;
-  --adri-color-error-bg: #feded8;
-  --adri-color-info: #0176d3;
-  --adri-color-info-bg: #eaf5fe;
+  --bk-color-success: #2e844a;
+  --bk-color-success-bg: #ecf7ef;
+  --bk-color-warning: #fe9339;
+  --bk-color-warning-text: #8c4b00;
+  --bk-color-warning-bg: #fff7e6;
+  --bk-color-error: #ba0517;
+  --bk-color-error-bg: #feded8;
+  --bk-color-info: #0176d3;
+  --bk-color-info-bg: #eaf5fe;
 
-  --adri-focus-ring: 0 0 0 2px var(--adri-color-surface), 0 0 0 4px var(--adri-color-brand);
+  --bk-focus-ring: 0 0 0 2px var(--bk-color-surface), 0 0 0 4px var(--bk-color-brand);
+
+  --bk-space-1: 0.25rem;
+  --bk-space-2: 0.5rem;
+  --bk-space-3: 0.75rem;
+  --bk-space-4: 1rem;
+  --bk-space-5: 1.25rem;
+  --bk-space-6: 1.5rem;
+  --bk-space-8: 2rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --adri-color-neutral-0: #0c0c0c;
-    --adri-color-neutral-50: #141414;
-    --adri-color-neutral-100: #1c1c1c;
-    --adri-color-neutral-200: #2a2a2a;
-    --adri-color-neutral-300: #3d3d3d;
-    --adri-color-neutral-400: #5c5c5c;
-    --adri-color-neutral-500: #8e8e8e;
-    --adri-color-neutral-600: #aeaeae;
-    --adri-color-neutral-700: #c9c9c9;
-    --adri-color-neutral-800: #e5e5e5;
-    --adri-color-neutral-900: #f3f3f3;
+    --bk-color-neutral-0: #0c0c0c;
+    --bk-color-neutral-50: #141414;
+    --bk-color-neutral-100: #1c1c1c;
+    --bk-color-neutral-150: #1f1f1f;
+    --bk-color-neutral-200: #2a2a2a;
+    --bk-color-neutral-300: #3d3d3d;
+    --bk-color-neutral-400: #5c5c5c;
+    --bk-color-neutral-500: #8e8e8e;
+    --bk-color-neutral-600: #aeaeae;
+    --bk-color-neutral-700: #c9c9c9;
+    --bk-color-neutral-800: #e5e5e5;
+    --bk-color-neutral-900: #f3f3f3;
 
-    --adri-color-text: #f3f3f3;
-    --adri-color-text-muted: #aeaeae;
-    --adri-color-text-inverse: #181818;
+    --bk-color-text: #f3f3f3;
+    --bk-color-text-strong: #ffffff;
+    --bk-color-text-muted: #aeaeae;
+    --bk-color-text-inverse: #181818;
 
-    --adri-color-border: #2a2a2a;
-    --adri-color-border-strong: #3d3d3d;
+    --bk-color-border: #2a2a2a;
+    --bk-color-border-strong: #3d3d3d;
 
-    --adri-color-surface: #141414;
-    --adri-color-surface-alt: #1c1c1c;
-    --adri-color-page: #0c0c0c;
+    --bk-color-surface: #141414;
+    --bk-color-surface-alt: #1c1c1c;
+    --bk-color-surface-sunken: #0c0c0c;
+    --bk-color-page: #0c0c0c;
 
-    --adri-color-success-bg: #0f2918;
-    --adri-color-warning-bg: #3d2800;
-    --adri-color-error-bg: #3d0a0f;
-    --adri-color-info-bg: #0a1e33;
+    --bk-color-brand-soft: #0a1e33;
+    --bk-color-success-bg: #0f2918;
+    --bk-color-warning-bg: #3d2800;
+    --bk-color-warning-text: #ffc573;
+    --bk-color-error-bg: #3d0a0f;
+    --bk-color-info-bg: #0a1e33;
 
-    --adri-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
-    --adri-shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
+    --bk-shadow-xs: 0 1px 1px rgb(0 0 0 / 0.4);
+    --bk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+    --bk-shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
+    --bk-shadow-lg: 0 16px 32px rgb(0 0 0 / 0.55);
 
-    --adri-focus-ring: 0 0 0 2px var(--adri-color-surface), 0 0 0 4px #4b9cd7;
+    --bk-focus-ring: 0 0 0 2px var(--bk-color-surface), 0 0 0 4px #4b9cd7;
   }
 }

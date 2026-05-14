@@ -1,3 +1,4 @@
+import { MarketBackfillCandlesDialog } from "@/app/(app)/markets/[id]/market-backfill-candles-dialog";
 import { MarketHeaderSyncButton } from "@/app/(app)/markets/[id]/market-header-sync-button";
 import { MarketCandleChart } from "@/components/market-candle-chart";
 import { RecordPageTabs } from "@/components/record-page-tabs";
@@ -9,12 +10,12 @@ import { aggregateOhlcvToTarget } from "@/lib/markets/aggregate-ohlcv";
 import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchAllMarketStorageCandles, mapCatalogCandleRowToJson } from "@/lib/markets/fetch-market-chart-candles";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
   ListViewObjectIcon,
   Output,
-  PageHeader,
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
@@ -247,46 +248,46 @@ export default async function MarketDetailPage({ params }: PageProps) {
   return (
     <DetailPageLayout
       className="bk-container bk-container_lg px-1"
-      header={
-        <PageHeader
-          variant="detail"
-          icon={<ListViewObjectIcon letter="M" />}
-          eyebrow="Market"
-          title={market.market_symbol}
-          titleClassName="font-mono"
-          highlights={
-            <>
-              {ex?.id ? (
-                <Output
-                  label="Exchange"
-                  record={{ pathPrefix: "/exchanges", id: ex.id, name: exchangeName }}
-                />
-              ) : (
-                <Output label="Exchange" type="text" value="—" />
-              )}
-              {asset?.id ? (
-                <Output
-                  label="Base asset"
-                  record={{
-                    pathPrefix: "/assets",
-                    id: encodeURIComponent(String(asset.code ?? "")),
-                    name: assetName,
-                  }}
-                />
-              ) : (
-                <Output label="Base asset" type="text" value="—" />
-              )}
-            </>
-          }
-          subtitle={
-            <>
-              Quote <span className="font-mono">{quoteCode}</span> · Status {market.status ?? "—"}
-            </>
-          }
-          meta={`id: ${market.id}`}
-          actions={<MarketHeaderSyncButton marketId={id} />}
-        />
-      }
+      header={objectRegistry.registrations.get("markets")!.CreateDetailPageHeader({
+        record: market as Record<string, unknown>,
+        title: market.market_symbol,
+        titleClassName: "font-mono",
+        highlights: (
+          <>
+            {ex?.id ? (
+              <Output
+                label="Exchange"
+                record={{ pathPrefix: "/exchanges", id: ex.id, name: exchangeName }}
+              />
+            ) : (
+              <Output label="Exchange" type="text" value="—" />
+            )}
+            {asset?.id ? (
+              <Output
+                label="Base asset"
+                record={{
+                  pathPrefix: "/assets",
+                  id: encodeURIComponent(String(asset.code ?? "")),
+                  name: assetName,
+                }}
+              />
+            ) : (
+              <Output label="Base asset" type="text" value="—" />
+            )}
+          </>
+        ),
+        subtitle: (
+          <>
+            Quote <span className="font-mono">{quoteCode}</span> · Status {market.status ?? "—"}
+          </>
+        ),
+        actions: (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <MarketBackfillCandlesDialog marketId={id} marketSymbol={market.market_symbol} />
+            <MarketHeaderSyncButton marketId={id} />
+          </div>
+        ),
+      })}
       content={
         <RecordPageTabs
           defaultTab="related"
@@ -339,41 +340,40 @@ export default async function MarketDetailPage({ params }: PageProps) {
           }
           related={
             <div className="bk-stack bk-stack_gap-md">
-              <RecordPageCard>
-                <RecordRelatedList
-                  title="Signals"
-                  description={
-                    <>
-                      Latest bar per signal agent for this market (RLS: your user). Sorted by bar{" "}
-                      <span className="font-mono">close_time</span> descending, then{" "}
-                      <span className="font-mono">ENTER</span> → <span className="font-mono">EXIT</span> → other
-                      intents.
-                    </>
-                  }
-                  items={relatedSignals}
-                  getKey={(s) => s.id}
-                  previewLimit={24}
-                  totalCount={relatedSignals.length}
-                  viewAllHref={relatedSignals.length > 0 ? "/signals" : undefined}
-                  emptyMessage="No signals for this market yet (or none visible for your account)."
-                  renderRow={(s) => (
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <Link href={`/signals/${s.id}`} className="bk-link font-mono truncate" title={s.id}>
-                          {agentSlugFromSignal(s)}
-                        </Link>
-                        <span className="bk-text-muted font-mono text-xs">
-                          {s.timeframe} · {formatDt(s.close_time)}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-0.5 text-xs">
-                        <span className={intentRowClass(s.intent)}>{s.intent}</span>
-                        <span className="bk-text-muted font-mono">{fmtConfidence(s.confidence)}</span>
-                      </div>
+              <RecordRelatedList
+                title="Signals"
+                icon={<ListViewObjectIcon letter="S" />}
+                description={
+                  <>
+                    Latest bar per signal agent for this market (RLS: your user). Sorted by bar{" "}
+                    <span className="font-mono">close_time</span> descending, then{" "}
+                    <span className="font-mono">ENTER</span> → <span className="font-mono">EXIT</span> → other
+                    intents.
+                  </>
+                }
+                items={relatedSignals}
+                getKey={(s) => s.id}
+                previewLimit={24}
+                totalCount={relatedSignals.length}
+                viewAllHref={relatedSignals.length > 0 ? "/signals" : undefined}
+                emptyMessage="No signals for this market yet (or none visible for your account)."
+                renderRow={(s) => (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <Link href={`/signals/${s.id}`} className="bk-link font-mono truncate" title={s.id}>
+                        {agentSlugFromSignal(s)}
+                      </Link>
+                      <span className="bk-text-muted font-mono text-xs">
+                        {s.timeframe} · {formatDt(s.close_time)}
+                      </span>
                     </div>
-                  )}
-                />
-              </RecordPageCard>
+                    <div className="flex shrink-0 flex-col items-end gap-0.5 text-xs">
+                      <span className={intentRowClass(s.intent)}>{s.intent}</span>
+                      <span className="bk-text-muted font-mono">{fmtConfidence(s.confidence)}</span>
+                    </div>
+                  </div>
+                )}
+              />
             </div>
           }
         />

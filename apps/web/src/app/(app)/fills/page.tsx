@@ -8,6 +8,7 @@ import {
   rangeForPage,
   totalPages,
 } from "@/lib/dashboard/list-pagination";
+import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@repo/adricore/blocks";
 
@@ -50,9 +51,7 @@ export default async function FillsPage({ searchParams }: FillsPageProps) {
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
-        eyebrow="Trading"
-        title="Fills"
-        iconLetter="F"
+        model={objectRegistry.registrations.get("fills")!}
         rowCount={list.length}
         sortLine={
           orderIdFilter
