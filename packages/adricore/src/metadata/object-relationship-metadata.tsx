@@ -1,6 +1,6 @@
 import * as React from "react";
 import { AdriObjectMetadata } from "./adri-object-metadata";
-import type { ObjectMetadata } from "./object-metadata";
+import type { ObjectMetadataBase } from "./object-metadata-base";
 import type { ObjectFieldMetadata, ColumnDef } from "./object-field-metadata";
 import { ObjectRelationshipReferenceTypes } from "./enums";
 import {
@@ -45,8 +45,8 @@ export type RelatedListOpts<T> = {
 
 export class ObjectRelationshipMetadata implements AdriObjectMetadata {
   public readonly apiName: string;
-  public sourceObject?: ObjectMetadata;
-  public readonly referenceObject: ObjectMetadata;
+  public sourceObject?: ObjectMetadataBase;
+  public readonly referenceObject: ObjectMetadataBase;
   public readonly referenceType: ObjectRelationshipReferenceTypes;
   public sourceField?: ObjectFieldMetadata;
   public allowTargetObjectDeletion: boolean = true;
@@ -54,7 +54,7 @@ export class ObjectRelationshipMetadata implements AdriObjectMetadata {
   constructor(
     apiName: string,
     referenceType: ObjectRelationshipReferenceTypes,
-    referenceObject: ObjectMetadata,
+    referenceObject: ObjectMetadataBase,
   ) {
     if (!referenceObject) {
       throw new TargetObjectIsRequiredException();
@@ -68,7 +68,7 @@ export class ObjectRelationshipMetadata implements AdriObjectMetadata {
     this.referenceObject.childRelationships.add(this);
   }
 
-  public setSourceData(sourceObject: ObjectMetadata, sourceField: ObjectFieldMetadata): void {
+  public setSourceData(sourceObject: ObjectMetadataBase, sourceField: ObjectFieldMetadata): void {
     if (!sourceObject) {
       throw new SourceObjectIsRequiredException();
     } else if (!sourceField) {
@@ -93,7 +93,7 @@ export class ObjectRelationshipMetadata implements AdriObjectMetadata {
    */
   public getRelatedListHref(parentId: string): string {
     const base = this.referenceObject.route.getRecordHref(parentId);
-    return `${base}/${this.apiName}`;
+    return `${base}/${this.apiName.replace(/_/g, "-")}`;
   }
 
   // ───────────────────── Lookup output ─────────────────────

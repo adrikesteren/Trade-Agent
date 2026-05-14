@@ -1,7 +1,7 @@
 import * as React from "react";
 import { AdriObjectMetadata } from "./adri-object-metadata";
 import { ObjectFieldDataTypes } from "./enums";
-import type { ObjectMetadata } from "./object-metadata";
+import type { ObjectMetadataBase } from "./object-metadata-base";
 import type { ObjectRelationshipMetadata } from "./object-relationship-metadata";
 import type { PicklistMetadata } from "./picklist-metadata";
 import {
@@ -26,7 +26,7 @@ export interface ObjectFieldMetadataOptions {
   required?: boolean;
   relationship?: ObjectRelationshipMetadata;
   picklist?: PicklistMetadata;
-  sourceObject?: ObjectMetadata;
+  sourceObject?: ObjectMetadataBase;
 }
 
 /**
@@ -99,7 +99,7 @@ export type ColumnDef = {
 };
 
 export class ObjectFieldMetadata implements AdriObjectMetadata {
-  public sourceObject?: ObjectMetadata;
+  public sourceObject?: ObjectMetadataBase;
   public readonly apiName: string;
   public readonly label: string;
   public readonly readOnly: boolean;
@@ -151,7 +151,7 @@ export class ObjectFieldMetadata implements AdriObjectMetadata {
     return this.apiName;
   }
 
-  public clone(sourceObject: ObjectMetadata): ObjectFieldMetadata {
+  public clone(sourceObject: ObjectMetadataBase): ObjectFieldMetadata {
     if (!sourceObject) {
       throw new SourceObjectIsRequiredException();
     }

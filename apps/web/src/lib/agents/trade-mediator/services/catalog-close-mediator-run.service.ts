@@ -11,9 +11,13 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { enqueueExecutorCatalogCloseAfterMediator } from "@/lib/agents/executor/services/executor-catalog-close-enqueue.service";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 import { fetchWalletBalanceForAsset } from "@/lib/agents/executor/services/executor-wallet.service";
-import { defaultNotionalFromExecutor, executorToMediatorRails } from "@/lib/agents/executor/services/executor-mediator-rails.service";
+import { fetchExecutorQuoteBudgetInQuoteUnits } from "@/lib/agents/executor/services/executor-quote-budget.service";
+import { executorToMediatorRails } from "@/lib/agents/executor/services/executor-mediator-rails.service";
+import { applyRegimeGating } from "./regime-gating.service";
+import { evaluateAndEmitSar } from "./sar-mediator-run.service";
 import {
   ensureDefaultExecutorsForUsers,
+  executorAllowedSides,
   executorAllowsMarketAsset,
   fetchExecutorById,
   fetchExecutorsForUsers,
@@ -110,6 +114,7 @@ type SignalRow = {
   id: string;
   intent: string;
   created_at?: string;
+  metadata?: Record<string, unknown> | null;
   signal_agents: { agent_id: string } | { agent_id: string }[] | null;
 };
 
@@ -162,6 +167,62 @@ async function findBarCandle(
   const hit = rows.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
   if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
   return { price: hit.close, candleId: hit.id };
+}
+
+/**
+ * Pure builder for the "no quote-asset budget configured" skip-decision row.
+ * Extracted so it can be unit-tested independently of Supabase mocks.
+ *
+ * Persists `approved=false` with `reason_codes=["quote_asset_not_allowed"]` so the UI
+ * can show why nothing was placed for this bar. The shape mirrors a normal decision
+ * row except `proposedOrder` is null and `resolvedIntent` is forced to "HOLD".
+ */
+export function buildQuoteAssetNotAllowedSkipDecision(args: {
+  ownerId: string;
+  executor: { id: string; name: string; exchange_id: string };
+  timeframe: string;
+  primarySignalId: string;
+  matched: { id: string; intent: string; agent_slug: string }[];
+  marketSymbol: string;
+  quoteAssetIdForMarket: string;
+  closeTimeIso: string;
+  riskSnap: RiskStateSnapshot;
+  candleSyncRunId?: string | null;
+  signalsSyncRunId?: string | null;
+  mediatorPipelineSyncRunId?: string | null;
+}) {
+  return {
+    user_id: args.ownerId,
+    executor_id: args.executor.id,
+    timeframe: args.timeframe,
+    signal_id: args.primarySignalId,
+    approved: false,
+    reason_codes: ["quote_asset_not_allowed"],
+    risk_snapshot: args.riskSnap,
+    position_side: "long" as const,
+    decision_payload: {
+      resolvedIntent: "HOLD" as const,
+      policyVersion: "v1-priority",
+      signalIds: args.matched.map((r) => r.id),
+      signalsIn: args.matched.map((r) => ({
+        id: r.id,
+        intent: r.intent,
+        agent_id: r.agent_slug,
+      })),
+      proposedOrder: null,
+      market_symbol: args.marketSymbol,
+      executorId: args.executor.id,
+      executorName: args.executor.name,
+      exchangeId: args.executor.exchange_id,
+      movingFloor: null,
+      barCloseTimeIso: args.closeTimeIso,
+      quoteAssetId: args.quoteAssetIdForMarket,
+      positionSide: "long",
+      ...(args.candleSyncRunId ? { candleSyncRunId: args.candleSyncRunId } : {}),
+      ...(args.signalsSyncRunId ? { signalsSyncRunId: args.signalsSyncRunId } : {}),
+      ...(args.mediatorPipelineSyncRunId ? { mediatorSyncRunId: args.mediatorPipelineSyncRunId } : {}),
+    },
+  };
 }
 
 function computeMovingFloorDecision(args: {
@@ -392,7 +453,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       const { data: sigData, error: sigErr } = await admin
         .schema("trading")
         .from("signals")
-        .select("id, intent, created_at, signal_agents ( agent_id )")
+        .select("id, intent, created_at, metadata, signal_agents ( agent_id )")
         .eq("user_id", signalUid)
         .eq("candle_id", bar.candleId);
 
@@ -415,6 +476,14 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         if (!executorAllowsMarketAsset(ex, marketAssetId)) continue;
         if (String(ex.exchange_id) !== exchangeId) continue;
 
+        // P2 sides framework: until P3 (regime + SAR) wires real shorts, the mediator
+        // only ever proposes LONG entries. If this executor doesn't allow long, skip
+        // it entirely — there's nothing the mediator can emit for it on this bar.
+        const allowedSides = executorAllowedSides(ex);
+        if (!allowedSides.includes("long")) {
+          continue;
+        }
+
         const ownerId = ex.user_id;
 
         const quoteBalance =
@@ -435,7 +504,39 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           marketSymbol,
         );
         const rails = executorToMediatorRails(ex);
-        const notionalSuggested = defaultNotionalFromExecutor(ex);
+
+        // Quote-asset budget lookup (P1): every (executor, market quote) pair must have a row in
+        // trading.executor_quote_asset_budget. Missing → skip with reason quote_asset_not_allowed.
+        if (!quoteAssetIdForMarket) continue;
+        const notionalSuggested = await fetchExecutorQuoteBudgetInQuoteUnits(admin, {
+          executorId: ex.id,
+          quoteAssetId: quoteAssetIdForMarket,
+        });
+        if (notionalSuggested == null || !Number.isFinite(notionalSuggested) || notionalSuggested <= 0) {
+          if (matched.length && matched[0]?.id) {
+            const skipRow = buildQuoteAssetNotAllowedSkipDecision({
+              ownerId,
+              executor: { id: ex.id, name: ex.name, exchange_id: ex.exchange_id },
+              timeframe,
+              primarySignalId: matched[0].id,
+              matched: matched.map((r) => ({ id: r.id, intent: r.intent, agent_slug: agentSlugFromRow(r) })),
+              marketSymbol,
+              quoteAssetIdForMarket,
+              closeTimeIso,
+              riskSnap,
+              candleSyncRunId: body.candleSyncRunId,
+              signalsSyncRunId: body.signalsSyncRunId,
+              mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
+            });
+            const { error: skipErr } = await admin
+              .schema("trading")
+              .from("decisions")
+              .upsert(skipRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
+            if (skipErr) throw new Error(`${marketSymbol}: decisions skip upsert: ${skipErr.message}`);
+            decisionsUpserted += 1;
+          }
+          continue;
+        }
 
         const { data: posRow, error: posErr } = await admin
           .schema("trading")
@@ -515,7 +616,21 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           if (delFloorErr) throw new Error(delFloorErr.message);
         }
 
-        const intents = matched.map((r) => r.intent as SignalIntent);
+        // P3: regime gating. The mediator applies it before evaluating to
+        // avoid emitting ENTER decisions in bear / unconfirmed-sideways regimes.
+        const regimeGatingEnabled =
+          (ex.mediator_rails_extra as Record<string, unknown> | null | undefined)?.regimeGating !== false;
+        const regimeGate = applyRegimeGating({
+          matched: matched.map((r) => ({
+            id: r.id,
+            intent: r.intent,
+            agent_slug: agentSlugFromRow(r),
+            metadata: r.metadata ?? null,
+          })),
+          regimeGatingEnabled,
+        });
+
+        const intents = regimeGate.effectiveIntents.map((i) => i as SignalIntent);
         const decision = evaluateTradeDecision({
           rails,
           risk: riskSnap,
@@ -538,26 +653,43 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           agent_id: agentSlugFromRow(r),
         }));
 
+        // P2 sides framework: every decision carries position_side. Until SAR (P3),
+        // proposedOrder is always long; the column makes the future short rows
+        // (and SAR's EXIT-long + ENTER-short pair) addressable in the unique key.
+        const proposedOrderWithSide =
+          decision.proposedOrder != null
+            ? { ...decision.proposedOrder, positionSide: "long" as const }
+            : null;
+        const reasonCodesWithRegime = regimeGate.demotionReason
+          ? [...decision.reasonCodes, regimeGate.demotionReason]
+          : decision.reasonCodes;
+
         const decisionRow = {
           user_id: ownerId,
           executor_id: ex.id,
           timeframe,
           signal_id: primarySignalId,
           approved: decision.approved,
-          reason_codes: decision.reasonCodes,
+          reason_codes: reasonCodesWithRegime,
           risk_snapshot: decision.riskSnapshot,
+          position_side: "long" as const,
           decision_payload: {
             resolvedIntent: decision.resolvedIntent,
             policyVersion: "v1-priority",
             signalIds: matched.map((r) => r.id),
             signalsIn,
-            proposedOrder: decision.proposedOrder ?? null,
+            proposedOrder: proposedOrderWithSide,
             market_symbol: marketSymbol,
             executorId: ex.id,
             executorName: ex.name,
             exchangeId: ex.exchange_id,
             movingFloor: movingFloorSnapshot,
             barCloseTimeIso: closeTimeIso,
+            positionSide: "long",
+            ...(regimeGate.regime
+              ? { regime: regimeGate.regime, regimeSignalSide: regimeGate.regimeSignalSide ?? null }
+              : {}),
+            ...(regimeGate.demotionReason ? { regimeDemotion: regimeGate.demotionReason } : {}),
             ...(body.candleSyncRunId ? { candleSyncRunId: body.candleSyncRunId } : {}),
             ...(body.signalsSyncRunId ? { signalsSyncRunId: body.signalsSyncRunId } : {}),
             ...(body.mediatorPipelineSyncRunId ? { mediatorSyncRunId: body.mediatorPipelineSyncRunId } : {}),
@@ -565,10 +697,41 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         };
 
         const { error: upErr } = await admin.schema("trading").from("decisions").upsert(decisionRow, {
-          onConflict: "user_id,executor_id,signal_id",
+          onConflict: "user_id,executor_id,signal_id,position_side",
         });
         if (upErr) throw new Error(`${marketSymbol}: decisions upsert: ${upErr.message}`);
         decisionsUpserted += 1;
+
+        // P3: SAR (Stop-and-Reverse). Independent of the primary decision —
+        // when the regime classifier signal for this bar confirms a flip
+        // against t-1 and t-2, emit paired EXIT(old side) + ENTER(new side).
+        const regimeSignal = matched.find((r) => agentSlugFromRow(r) === "regime-classifier-15m-v1");
+        if (regimeGatingEnabled && regimeSignal) {
+          try {
+            const sarRes = await evaluateAndEmitSar({
+              admin,
+              userId: ownerId,
+              executorId: ex.id,
+              executorName: ex.name,
+              exchangeId: ex.exchange_id,
+              marketId,
+              marketSymbol,
+              timeframe,
+              closeTimeIso,
+              regimeSignalId: regimeSignal.id,
+              regimeSignalMetadata: regimeSignal.metadata ?? null,
+              allowedSides,
+              notionalQuoteForEnter: notionalSuggested ?? null,
+              candleSyncRunId: body.candleSyncRunId,
+              signalsSyncRunId: body.signalsSyncRunId,
+              mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
+              riskSnapshot: decision.riskSnapshot as Record<string, unknown>,
+            });
+            decisionsUpserted += sarRes.decisionsUpserted;
+          } catch (sarErr) {
+            console.error(`[mediator/sar] ${marketSymbol} ${ex.name}: ${(sarErr as Error).message}`);
+          }
+        }
       }
     }
   }

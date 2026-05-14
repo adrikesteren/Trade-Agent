@@ -80,10 +80,15 @@ export function SignalsToPositionArticle() {
             waar van toepassing).
           </li>
           <li>
-            Risk rails komen van de executor-rij: o.a. <code className="bk-code">default_notional_eur</code>,{" "}
+            Risk rails komen van de executor-rij plus per-quote budgets uit{" "}
+            <code className="bk-code">trading.executor_quote_asset_budget</code> (één rij per toegestane quote
+            asset, bedrag in primary fiat — bv. EUR — wordt at decision-time omgerekend naar quote-units via
+            <code className="bk-code">asset.dollar_value</code>). Verder o.a.{" "}
             <code className="bk-code">max_risk_per_trade</code>, <code className="bk-code">max_open_positions</code>
             , daily loss / drawdown, <code className="bk-code">allow_add</code>, optioneel{" "}
-            <code className="bk-code">mediator_rails_extra</code> (JSON overrides).
+            <code className="bk-code">mediator_rails_extra</code> (JSON overrides). Markets met een quote die
+            niet in de junction staat krijgen reason{" "}
+            <code className="bk-code">quote_asset_not_allowed</code> en worden geskipt.
           </li>
           <li>
             Output: één upsert op <code className="bk-code">trading.trade_decisions</code> per (

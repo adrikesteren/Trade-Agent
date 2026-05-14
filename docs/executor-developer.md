@@ -20,7 +20,7 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 ## Executors (portfolios, Paper / Live, asset filter)
 
-- **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live` | `historical`), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array. **Mediator policy** on the same row: `default_notional_eur`, risk rail columns (`max_risk_per_trade`, `max_open_positions`, …, `allow_add`), and optional **`mediator_rails_extra`** jsonb — see [mediator-developer.md](./mediator-developer.md). (Legacy column **`budget_eur`** may still exist in the database but is no longer used by the app; spending is limited by **assigned balance** in `risk_state.equity_eur`.)  
+- **`trading.executors`** (RLS per `user_id`): `name`, `enabled`, `execution_mode` (`paper` | `live` | `historical`), **`asset_filter_mode`** (`all` | `whitelist` | `blacklist`) with **`filter_asset_ids`** (`uuid[]`). DB constraint: whitelist/blacklist modes require a non-empty asset list; `all` uses an empty array. **Mediator policy** on the same row: risk rail columns (`max_risk_per_trade`, `max_open_positions`, …, `allow_add`) plus optional **`mediator_rails_extra`** jsonb — see [mediator-developer.md](./mediator-developer.md). **Per-quote-asset budgets** live in **`trading.executor_quote_asset_budget`** (junction table, see [AGENTS.md → Wallets and quote-asset budgets](../AGENTS.md#wallets-and-quote-asset-budgets)); the legacy column `default_notional_eur` was removed. Spending limits per executor are enforced both by the per-quote budget (notional cap per order) and by the **assigned balance** on the executor's wallet.  
 - **`historical`** mode: `historical_start_date` / `historical_end_date` (`date`, UTC calendar days), **whitelist with exactly one** base asset, **Bitvavo** exchange only, **`slack_trade_notifications_enabled` forced false** in the DB. These executors are **skipped** by `runMediatorCatalogClose` / `runExecutorCatalogClose` during normal **`symbol-close-pipeline`** / catalog-close runs. Use the executor detail **Run** control to ingest candles for the range and replay **signal → mediator → executor** bar-by-bar (paper fills). **Important:** replay upserts **`trading.signals`** for the executor owner’s `user_id` (same uniqueness as live catalog-close), so overlapping backtests can overwrite signal rows for that user and market for past bars.
 - **Trading → Executors** → [`/executors`](../apps/web/src/app/(app)/executors/page.tsx) (detail + PnL snapshot per executor). Legacy **`/settings/execution`** redirects to **`/me/preferences/execution`**, then to Executors.  
 - The **mediator** loads **enabled** executors per `SIGNAL_*` user, skips markets outside the executor’s asset filter (via `catalog.markets.asset_id`), reads **`positions`** for `(user_id, executor_id, market_id)`, and writes **mode-agnostic** decisions (`trade_decisions` has no `paper` column).  
@@ -35,11 +35,17 @@ The executor **does not** re-run risk logic; it only executes what the mediator 
 
 ---
 
-## Executor balance (EUR) — assigned capital
+## Executor balance — assigned capital (per asset, per wallet)
 
-- **`trading.risk_state.equity_eur`** (per `executor_id`) is the **only in-app spendable balance** for that executor: it starts at **0** when `risk_state` is created; users add or remove EUR on the executor detail page (**Add balance** / **Remove balance**), which calls `trading.apply_executor_balance_change` and appends rows to **`trading.executor_balance_ledger`**.
-- **Buys** debit **`notional_eur + fill fee`** from `equity_eur` and append a **`trade_buy`** ledger row (idempotent per `orders.id` via `trading.apply_executor_trade_buy_debit`, **service_role** only). The executor worker **skips** a paper buy (or inserts a **rejected** live stub without calling Bitvavo) when `equity_eur` is below that debit. This balance is **not** your Bitvavo account total — it is only what you assign inside Trade Agent.
-- **New executors** created from the app default to **`enabled = false`** until the user turns them on (DB default on `executors.enabled` is also `false` after the balance migration).
+- Executors no longer carry a single EUR equity number. Instead, each executor points at a **wallet** via `executors.wallet_id` and the spendable balance for an order is the wallet's per-asset balance for the **market quote asset** (e.g. EUR for `GIGA-EUR`, USDT for `BTC-USDT`).
+- For **`paper` and `live`** executors, the wallet is **shared per `(user, exchange)`** (`trading.wallets.kind = 'shared_exchange'`). Multiple executors on Bitvavo for the same user therefore spend from a **single pooled wallet** — deposits, withdrawals, and trade fills all touch one balance per asset.
+- For **`historical`** executors, the create-wallet trigger always creates an **isolated `historical_paper`** wallet so backtests can be funded and reset without affecting the user's live/paper books.
+- Balance changes flow through three RPCs (signatures unchanged after the v2 refactor; they now resolve the wallet via `executors.wallet_id`):  
+  - `trading.apply_wallet_balance_change` — manual deposit/withdrawal from the executor detail balance actions.  
+  - `trading.apply_wallet_trade_buy_debit` — debits the **quote asset** by `notional + fee` when a buy fills (idempotent per `orders.id`).  
+  - `trading.apply_wallet_trade_sell_credit` — credits the **quote asset** when a sell fills.  
+  All three append rows to `trading.wallet_transactions` (the audit ledger). The executor worker **skips** a paper buy (or inserts a **rejected** live stub without calling Bitvavo) when the quote balance is below the required debit.
+- New executors default to **`enabled = false`** until the user turns them on; the wallet is created automatically by the `executors_create_wallet` trigger and reused across executors that share the same `(user, exchange)`.
 
 ---
 
@@ -76,6 +82,14 @@ Entry points:
 - **No** new trading decisions from the executor.  
 - **No** unsigned `user_id` — workers use env-configured users only.  
 - **Reconciliation:** v1 worker `POST /api/workers/bitvavo-reconcile` (scheduled) syncs open/pending live orders against Bitvavo; see [ops-developer.md](./ops-developer.md). When a **filled** buy gets its first `fills` row here, the same **`apply_executor_trade_buy_debit`** runs so balance stays in sync for late-filled live orders.
+
+---
+
+## P3: position sides + EXIT-before-ENTER ordering
+
+- The executor reads `decision_payload.proposedOrder.positionSide` (with `decision_payload.positionSide` as fallback) and rejects orders whose side is **not** in `executor.allowed_sides`. The reject row is written with `status='rejected'` and `position_side` so the UI can surface it.
+- **Short** is framework-only in P2 — every short proposal is rejected with reason code `short_execution_not_implemented` (no Bitvavo / live calls).
+- For Phase 3 SAR pairs, the mediator may write **two** decisions for the same `(executor, market, bar)` keyed on different `position_side` (one EXIT, one ENTER). The executor sorts candidates **EXIT-first, then by id** before processing — see [`exitFirstRank`](../apps/web/src/lib/agents/executor/services/catalog-close-executor-run.service.ts) in `catalog-close-executor-run.service.ts` and the unit tests in [`catalog-close-executor-decision-order.test.ts`](../apps/web/src/lib/agents/executor/services/catalog-close-executor-decision-order.test.ts). This guarantees the EXIT credits the wallet before the ENTER tries to debit, so the SAR pair survives the per-quote balance pre-check.
 
 ---
 

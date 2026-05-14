@@ -9,8 +9,9 @@ export class ExecutorsModel extends ObjectMetadata {
       "executors",
       "executors",
       new ObjectLabelMetadata("Executor", "Executors"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = { mode: "manual" };
   }
 
   public connectRelationships(): void {

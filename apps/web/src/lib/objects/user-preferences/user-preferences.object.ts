@@ -8,7 +8,12 @@ export class UserPreferencesModel extends ObjectMetadata {
       "user_preferences",
       "user_preferences",
       new ObjectLabelMetadata("User Preference", "User Preferences"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "UPR-{0000}",
+      startNumber: 1,
+    };
   }
 }

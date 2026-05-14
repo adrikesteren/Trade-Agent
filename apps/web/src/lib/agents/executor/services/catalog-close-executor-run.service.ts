@@ -19,6 +19,7 @@ import {
 
 import {
   ensureDefaultExecutorsForUsers,
+  executorAllowedSides,
   executorAllowsMarketAsset,
   fetchExecutorById,
   fetchExecutorsForUsers,
@@ -135,6 +136,47 @@ function parseProposedSell(payload: Record<string, unknown> | null): { symbol: s
   const sym = typeof o.symbol === "string" ? o.symbol.trim() : "";
   if (!sym) return null;
   return { symbol: sym };
+}
+
+/**
+ * Read the position side the mediator stamped on a decision.
+ * Falls back to "long" so legacy decisions written before P2 keep working.
+ *
+ * Looks at `decision_payload.proposedOrder.positionSide` first (per-order detail),
+ * then `decision_payload.positionSide` (top-level fallback).
+ */
+export function parseProposedPositionSide(payload: Record<string, unknown> | null): "long" | "short" {
+  if (!payload) return "long";
+  const po = payload.proposedOrder;
+  if (po && typeof po === "object") {
+    const inner = (po as Record<string, unknown>).positionSide;
+    if (inner === "short") return "short";
+    if (inner === "long") return "long";
+  }
+  const top = payload.positionSide;
+  if (top === "short") return "short";
+  return "long";
+}
+
+/**
+ * Sort key so EXIT-style decisions are processed before ENTER-style decisions
+ * for the same (executor, market, bar). Critical for SAR pairs (P3): the EXIT
+ * frees up wallet balance / closes the old position before the ENTER on the
+ * opposite side tries to spend or open. Lower rank = earlier processing.
+ *
+ * Ranking is purely lexical — we read `decision_payload.resolvedIntent` and
+ * `proposedOrder.side`. SELL or EXIT → 0 (process first); BUY / ENTER → 1.
+ */
+export function exitFirstRank(payload: Record<string, unknown> | null): 0 | 1 {
+  if (!payload) return 1;
+  const resolved = typeof payload.resolvedIntent === "string" ? (payload.resolvedIntent as string).toUpperCase() : "";
+  if (resolved === "EXIT") return 0;
+  const po = payload.proposedOrder;
+  if (po && typeof po === "object") {
+    const side = (po as Record<string, unknown>).side;
+    if (side === "sell") return 0;
+  }
+  return 1;
 }
 
 type DecisionRow = {
@@ -506,18 +548,76 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       if (decErr) throw new Error(decErr.message);
 
       const candidates = (decList ?? []) as DecisionRow[];
-      const dec =
-        candidates
-          .filter(
-            (d) =>
-              d.approved && (Boolean(parseProposedBuy(d.decision_payload)) || Boolean(parseProposedSell(d.decision_payload))),
-          )
-          .sort((a, b) => a.id.localeCompare(b.id))[0] ?? null;
-      if (!dec) continue;
+      // P3: process EXIT-style decisions first so SAR pairs sequence wallet /
+      // position changes correctly (close old side → free quote balance →
+      // open new side). Lexical id is the secondary sort for stable ordering.
+      const orderedCandidates = candidates
+        .filter(
+          (d) =>
+            d.approved && (Boolean(parseProposedBuy(d.decision_payload)) || Boolean(parseProposedSell(d.decision_payload))),
+        )
+        .sort((a, b) => {
+          const ra = exitFirstRank(a.decision_payload);
+          const rb = exitFirstRank(b.decision_payload);
+          if (ra !== rb) return ra - rb;
+          return a.id.localeCompare(b.id);
+        });
+      if (!orderedCandidates.length) continue;
 
+      for (const dec of orderedCandidates) {
       const proposedBuy = parseProposedBuy(dec.decision_payload);
       const proposedSell = parseProposedSell(dec.decision_payload);
       if (!proposedBuy && !proposedSell) continue;
+
+      // P2 sides framework — gate on the position side stamped by the mediator.
+      // Two reasons to reject without ever placing an order:
+      //   1. side_not_allowed              — executor.allowed_sides excludes it
+      //   2. short_execution_not_implemented — short path is framework-only in P2
+      // We still write a `status=rejected` order row (matching the credentials /
+      // insufficient-balance pattern above) so the UI can show that the executor
+      // saw the decision and chose not to place anything.
+      const decisionPositionSide = parseProposedPositionSide(dec.decision_payload);
+      const allowedSides = executorAllowedSides(ex);
+      if (!allowedSides.includes(decisionPositionSide)) {
+        const inferredSide = proposedSell ? "sell" : "buy";
+        const inferredNotional = proposedBuy?.notionalEur ?? 0;
+        const { error: rejErr } = await admin.schema("trading").from("orders").insert({
+          user_id: ownerId,
+          executor_id: ex.id,
+          decision_id: dec.id,
+          side: inferredSide,
+          quantity: 0,
+          notional_eur: inferredNotional,
+          status: "rejected",
+          paper: ex.execution_mode !== "live",
+          position_side: decisionPositionSide,
+          external_id: null,
+        });
+        if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
+          throw new Error(`${marketSymbol}: side_not_allowed reject insert: ${rejErr.message}`);
+        }
+        continue;
+      }
+      if (decisionPositionSide === "short") {
+        const { error: rejShortErr } = await admin.schema("trading").from("orders").insert({
+          user_id: ownerId,
+          executor_id: ex.id,
+          decision_id: dec.id,
+          side: proposedSell ? "sell" : "buy",
+          quantity: 0,
+          notional_eur: proposedBuy?.notionalEur ?? 0,
+          status: "rejected",
+          paper: ex.execution_mode !== "live",
+          position_side: "short",
+          external_id: null,
+        });
+        if (rejShortErr && !/duplicate|unique/i.test(rejShortErr.message)) {
+          throw new Error(
+            `${marketSymbol}: short_execution_not_implemented reject insert: ${rejShortErr.message}`,
+          );
+        }
+        continue;
+      }
 
         const { data: existingOrder, error: ordSelErr } = await admin
           .schema("trading")
@@ -906,6 +1006,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           }
           console.error(`executor live order failed ${marketSymbol}:`, msg);
         }
+      } // end for (const dec of orderedCandidates)
     }
   }
 

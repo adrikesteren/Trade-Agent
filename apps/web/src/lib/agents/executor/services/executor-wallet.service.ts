@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveExecutorWalletId } from "@/lib/objects/executors/services/executor-wallet-resolve.service";
+
 /** Paper fee model (matches `run-executor-catalog-close` paper path). */
 export function executorPaperFeeEur(notionalEur: number): number {
   if (!Number.isFinite(notionalEur) || notionalEur <= 0) return 0;
@@ -11,25 +13,7 @@ export async function fetchWalletBalanceForAsset(
   admin: SupabaseClient,
   args: { executorId: string; assetId: string },
 ): Promise<number> {
-  const { data: ex, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select("wallet_id")
-    .eq("id", args.executorId)
-    .maybeSingle();
-  if (exErr) throw new Error(exErr.message);
-  let walletId = String((ex as { wallet_id?: string | null } | null)?.wallet_id ?? "").trim();
-
-  if (!walletId) {
-    const { data: w, error: wErr } = await admin
-      .schema("trading")
-      .from("wallets")
-      .select("id")
-      .eq("executor_id", args.executorId)
-      .maybeSingle();
-    if (wErr) throw new Error(wErr.message);
-    walletId = String((w as { id?: string } | null)?.id ?? "").trim();
-  }
+  const walletId = await resolveExecutorWalletId(admin, { executorId: args.executorId });
   if (!walletId) return 0;
 
   const { data: bal, error } = await admin

@@ -1,3 +1,4 @@
+import { PositionSidePill } from "@/components/position-side-pill";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -26,6 +27,7 @@ type OrderDetail = {
   /** Resolved via `decisions → signals → candles` */
   market_id: string;
   side: string;
+  position_side: string;
   quantity: string | number | null;
   notional_eur: string | number | null;
   status: string;
@@ -40,6 +42,7 @@ type OrderRowDb = {
   decision_id: string | null;
   executor_id: string;
   side: string;
+  position_side: string | null;
   quantity: string | number | null;
   notional_eur: string | number | null;
   status: string;
@@ -71,6 +74,7 @@ function flattenOrderDetail(row: OrderRowDb, candleById: Map<string, CatalogCand
     executor_id: row.executor_id,
     market_id,
     side: row.side,
+    position_side: String(row.position_side ?? "long"),
     quantity: row.quantity,
     notional_eur: row.notional_eur,
     status: row.status,
@@ -118,7 +122,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( signals ( candle_id ) )",
+      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( signals ( candle_id ) )",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -174,6 +178,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <>
             <Output label="Status" type="text" value={<span className={statusClass(order.status)}>{order.status}</span>} />
             <Output label="Side" type="text" value={order.side} />
+            <Output label="Pos. side" type="text" value={<PositionSidePill side={order.position_side} />} />
             <Output label="Notional (EUR)" type="text" value={fmtEur(order.notional_eur)} />
           </>
         ),
@@ -213,6 +218,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       }}
                     />
                     <Output label="Side" type="text" value={order.side} />
+                    <Output label="Pos. side" type="text" value={<PositionSidePill side={order.position_side} />} />
                     <Output label="Quantity" type="text" value={fmtQty(order.quantity)} />
                     <Output label="Notional (EUR)" type="text" value={fmtEur(order.notional_eur)} />
                     <Output label="Status" type="text" value={order.status} />

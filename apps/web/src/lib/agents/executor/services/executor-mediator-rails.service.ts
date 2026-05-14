@@ -76,8 +76,3 @@ export function executorToMediatorRails(ex: ExecutorRow): MediatorRailsConfig {
   };
 }
 
-export function defaultNotionalFromExecutor(ex: ExecutorRow): number {
-  const n = Number(ex.default_notional_eur);
-  if (!Number.isFinite(n) || n <= 0) return 100;
-  return n;
-}

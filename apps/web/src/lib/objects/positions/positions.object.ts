@@ -8,7 +8,12 @@ export class PositionsModel extends ObjectMetadata {
       "positions",
       "positions",
       new ObjectLabelMetadata("Position", "Positions"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "POS-{0000}",
+      startNumber: 1,
+    };
   }
 }

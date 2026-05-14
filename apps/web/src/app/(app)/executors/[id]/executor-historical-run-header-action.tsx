@@ -1,46 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@repo/adricore/blocks";
 
-function disabledHint(props: {
-  enabled: boolean;
-  whitelistBaseWalletBalance: number;
-  historicalStartDate: string | null;
-  historicalEndDate: string | null;
-}): string | null {
-  if (!props.enabled) return "Enable the executor before running a replay.";
-  if (!Number.isFinite(props.whitelistBaseWalletBalance) || props.whitelistBaseWalletBalance <= 0) {
-    return "Add a positive paper balance for the whitelisted base asset (the single filter asset), then refresh.";
-  }
-  if (!props.historicalStartDate?.trim() || !props.historicalEndDate?.trim()) {
-    return "Set historical start and end dates on the executor, then save.";
-  }
-  return null;
-}
-
 /** Header action: POST historical replay (paper). Feedback stays inline under the button. */
-export function ExecutorHistoricalRunHeaderAction(props: {
-  executorId: string;
-  /** Positive `wallet_asset_balance.amount` for the whitelisted base asset (same id as the single filter). */
-  whitelistBaseWalletBalance: number;
-  historicalStartDate: string | null;
-  historicalEndDate: string | null;
-  enabled: boolean;
-}) {
+export function ExecutorHistoricalRunHeaderAction(props: { executorId: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const canRun =
-    props.enabled &&
-    Number.isFinite(props.whitelistBaseWalletBalance) &&
-    props.whitelistBaseWalletBalance > 0 &&
-    Boolean(props.historicalStartDate?.trim()) &&
-    Boolean(props.historicalEndDate?.trim());
-
-  const hint = useMemo(() => disabledHint(props), [props]);
 
   return (
     <div className="flex max-w-[14rem] flex-col items-end gap-1">
@@ -48,12 +16,8 @@ export function ExecutorHistoricalRunHeaderAction(props: {
         type="button"
         variant="brand"
         size="sm"
-        title={
-          canRun
-            ? "Ingest 15m candles for the configured UTC range, then replay signal → mediator → executor per bar (paper)."
-            : (hint ?? undefined)
-        }
-        disabled={!canRun || busy}
+        title="Ingest 15m candles for the configured UTC range, then replay signal → mediator → executor per bar (paper)."
+        disabled={busy}
         onClick={async () => {
           setBusy(true);
           setError(null);

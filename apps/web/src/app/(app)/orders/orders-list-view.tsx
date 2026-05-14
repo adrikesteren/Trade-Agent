@@ -1,5 +1,6 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   clampPage,
@@ -31,6 +32,7 @@ type OrderRow = {
   executor_id: string;
   market_id: string;
   side: string;
+  position_side: string;
   quantity: string | number | null;
   notional_eur: string | number | null;
   status: string;
@@ -69,6 +71,7 @@ function toOrderRow(r: OrderRowRaw, candleById: Map<string, CatalogCandleBar>): 
     executor_id: r.executor_id,
     market_id,
     side: r.side,
+    position_side: String((r as { position_side?: string | null }).position_side ?? "long"),
     quantity: r.quantity,
     notional_eur: r.notional_eur,
     status: r.status,
@@ -169,7 +172,7 @@ export async function OrdersListView({
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
+      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
     )
     .order("created_at", { ascending: false })
     .range(from, to);
@@ -245,6 +248,7 @@ export async function OrdersListView({
                     <Th>Market</Th>
                     <Th>Executor</Th>
                     <Th>Side</Th>
+                    <Th>Pos. side</Th>
                     <Th className="text-right">Quantity</Th>
                     <Th className="text-right">Notional (EUR)</Th>
                     <Th>Status</Th>
@@ -286,6 +290,9 @@ export async function OrdersListView({
                           </Link>
                         </Td>
                         <Td className="font-mono">{row.side}</Td>
+                        <Td>
+                          <PositionSidePill side={row.position_side} />
+                        </Td>
                         <Td className="text-right font-mono">{fmtQty(row.quantity)}</Td>
                         <Td className="text-right font-mono">{fmtEur(row.notional_eur)}</Td>
                         <Td>
@@ -308,7 +315,7 @@ export async function OrdersListView({
                   })}
                   {!list.length ? (
                     <tr>
-                      <Td colSpan={11} muted className="py-8 text-center">
+                      <Td colSpan={12} muted className="py-8 text-center">
                         No orders yet. When the executor runs on approved trade decisions, rows appear here. See{" "}
                         <Link href="/trade-decisions" className="bk-link">
                           Trade decisions

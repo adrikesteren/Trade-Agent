@@ -64,7 +64,7 @@ export async function PositionsListView({
   let q = supabase
     .schema("trading")
     .from("positions")
-    .select("id, user_id, executor_id, market_id, quantity, avg_price, paper, updated_at")
+    .select("id, user_id, executor_id, market_id, position_side, quantity, avg_price, paper, updated_at")
     .order("updated_at", { ascending: false })
     .range(from, to);
   if (executorIdFilter) {

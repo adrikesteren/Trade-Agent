@@ -8,7 +8,12 @@ export class WalletAssetBalanceModel extends ObjectMetadata {
       "wallet_asset_balance",
       "wallet_asset_balance",
       new ObjectLabelMetadata("Wallet Asset Balance", "Wallet Asset Balances"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "WAB-{0000}",
+      startNumber: 1,
+    };
   }
 }

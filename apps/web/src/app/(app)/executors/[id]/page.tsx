@@ -2,8 +2,13 @@ import type { ExecutorAssetFilterMode } from "@/app/(app)/executors/actions";
 import { ExecutorDetailBalanceActions } from "@/app/(app)/executors/[id]/executor-detail-balance-actions";
 import { ExecutorHistoricalRunHeaderAction } from "@/app/(app)/executors/[id]/executor-historical-run-header-action";
 import { ExecutorEditDialog } from "@/app/(app)/executors/[id]/executor-edit-dialog";
-import type { AssetOption, ExchangeOption } from "@/app/(app)/executors/executor-form";
+import { ExecutorQuoteBudgetCreateDialog } from "@/app/(app)/executors/[id]/executor-quote-budget-create-dialog";
+import { ExecutorQuoteBudgetDeleteDialog } from "@/app/(app)/executors/[id]/executor-quote-budget-delete-dialog";
+import { ExecutorQuoteBudgetEditDialog } from "@/app/(app)/executors/[id]/executor-quote-budget-edit-dialog";
+import type { AssetOption, ExchangeOption, ExecutorQuoteBudgetInitial } from "@/app/(app)/executors/executor-form";
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
+import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
+import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import {
@@ -183,6 +188,13 @@ type LedgerRow = {
   created_at: string;
 };
 
+type WalletAssetBalanceRow = {
+  id: string;
+  asset_id: string;
+  amount: string | number | null;
+  updated_at: string;
+};
+
 type TradeDecisionRowDb = {
   id: string;
   signal_id: string | null;
@@ -326,7 +338,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .schema("trading")
     .from("executors")
     .select(
-      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, updated_at, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
+      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, updated_at, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -335,7 +347,27 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   if (exErr) return <Alert tone="error">{exErr.message}</Alert>;
   if (!ex) notFound();
 
-  const initial = executorRowToFormInitial(ex);
+  const { data: budgetRows, error: budgetErr } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .select("id, quote_asset_id, max_notional_primary")
+    .eq("executor_id", id)
+    .order("created_at", { ascending: true });
+  if (budgetErr) {
+    console.error("executor detail: budgets:", budgetErr.message);
+  }
+  type BudgetRowDb = {
+    id: string;
+    quote_asset_id: string;
+    max_notional_primary: string | number;
+  };
+  const budgetRowsRaw = (budgetRows ?? []) as BudgetRowDb[];
+  const quoteBudgetsForForm: ExecutorQuoteBudgetInitial[] = budgetRowsRaw.map((row) => ({
+    quote_asset_id: row.quote_asset_id,
+    max_notional_primary: String(row.max_notional_primary ?? ""),
+  }));
+
+  const initial = executorRowToFormInitial(ex, { quoteBudgets: quoteBudgetsForForm });
   const filterIds = initial.filter_asset_ids;
   const slackTradeNotificationsEnabled = initial.slack_trade_notifications_enabled !== false;
   const exchangeApiCredentialsConfigured = Boolean(initial.exchange_api_credentials_configured);
@@ -348,6 +380,8 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const [
     assetOptions,
     exchangeOptions,
+    quoteAssetOptionsByExchange,
+    exchangeCapabilitiesById,
     pnl,
     walletPack,
     ordPack,
@@ -356,6 +390,8 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   ] = await Promise.all([
     fetchAssetOptions(supabase),
     fetchExchangeOptions(supabase),
+    fetchQuoteAssetOptionsByExchange(supabase),
+    fetchExchangeCapabilitiesById(supabase),
     loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
     supabase.schema("trading").from("wallets").select("id").eq("executor_id", id).maybeSingle(),
     supabase
@@ -400,6 +436,17 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
         .limit(ledgerFetchLimit)
     : { data: [] as LedgerRow[], count: 0, error: null };
 
+  const walletAssetBalanceFetchLimit = RECORD_RELATED_LIST_PREVIEW_ROWS;
+  const walletAssetBalancePack = walletId
+    ? await supabase
+        .schema("trading")
+        .from("wallet_asset_balance")
+        .select("id, asset_id, amount, updated_at", { count: "exact" })
+        .eq("wallet_id", walletId)
+        .order("updated_at", { ascending: false })
+        .limit(walletAssetBalanceFetchLimit)
+    : { data: [] as WalletAssetBalanceRow[], count: 0, error: null };
+
   const eurFallbackQuoteId = await resolveQuoteAssetId(supabase, "EUR");
   const historicalPaperMarket =
     String(ex.execution_mode) === "historical" && filterIds.length === 1
@@ -417,10 +464,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     replayQuoteAssetId != null
       ? await fetchWalletBalanceForAsset(supabase, { executorId: id, assetId: replayQuoteAssetId })
       : 0;
-  const historicalWhitelistBaseWalletBalance =
-    String(ex.execution_mode) === "historical" && filterIds.length === 1
-      ? await fetchWalletBalanceForAsset(supabase, { executorId: id, assetId: filterIds[0]! })
-      : 0;
   const eurAssetId = replayQuoteAssetId ?? eurFallbackQuoteId;
 
   const rsRow = {
@@ -434,6 +477,16 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const lgErr = ledgerPackErr ?? null;
   const ledger = (ledgerRows ?? []) as LedgerRow[];
   const ledgerTotal = typeof ledgerCount === "number" ? ledgerCount : ledger.length;
+
+  const {
+    data: walletAssetBalanceRowsRaw,
+    count: walletAssetBalanceCount,
+    error: walletAssetBalanceErr,
+  } = walletAssetBalancePack;
+  const wabErr = walletAssetBalanceErr ?? null;
+  const walletAssetBalanceRows = (walletAssetBalanceRowsRaw ?? []) as WalletAssetBalanceRow[];
+  const walletAssetBalanceTotal =
+    typeof walletAssetBalanceCount === "number" ? walletAssetBalanceCount : walletAssetBalanceRows.length;
 
   const { data: ordRows, count: orderCount, error: ordErr } = ordPack;
   const ordRowsRaw = (ordRows ?? []) as OrderRowDb[];
@@ -538,6 +591,20 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     executorExchangeId ||
     "—";
 
+  const primaryCode = prefs.primary_asset?.code ?? "EUR";
+  const budgetsForList = budgetRowsRaw.map((row) => ({
+    id: row.id,
+    quote_asset_id: row.quote_asset_id,
+    quote_asset_code:
+      assetCodeById.get(row.quote_asset_id) ?? `${row.quote_asset_id.slice(0, 8)}…`,
+    max_notional_primary: String(row.max_notional_primary ?? ""),
+  }));
+  const existingBudgetQuoteIds = new Set(budgetsForList.map((b) => b.quote_asset_id));
+  const quoteOptsForThisExchange = quoteAssetOptionsByExchange[executorExchangeId] ?? [];
+  const availableQuoteOptionsForNew = quoteOptsForThisExchange.filter(
+    (o) => !existingBudgetQuoteIds.has(o.id),
+  );
+
   const ledgerViewAll = ledgerFull ? undefined : `/executors/${id}?ledger=all`;
 
   return (
@@ -585,15 +652,17 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                   }
                 />
                 {String(ex.execution_mode) === "historical" ? (
-                  <ExecutorHistoricalRunHeaderAction
-                    executorId={id}
-                    whitelistBaseWalletBalance={historicalWhitelistBaseWalletBalance}
-                    historicalStartDate={(ex as { historical_start_date?: string | null }).historical_start_date ?? null}
-                    historicalEndDate={(ex as { historical_end_date?: string | null }).historical_end_date ?? null}
-                    enabled={Boolean(ex.enabled)}
-                  />
+                  <ExecutorHistoricalRunHeaderAction executorId={id} />
                 ) : null}
-                <ExecutorEditDialog executorId={id} assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={initial} />
+                <ExecutorEditDialog
+                  executorId={id}
+                  assetOptions={assetOptions}
+                  exchangeOptions={exchangeOptions}
+                  quoteAssetOptionsByExchange={quoteAssetOptionsByExchange}
+                  exchangeCapabilitiesById={exchangeCapabilitiesById}
+                  primaryAssetCode={prefs.primary_asset?.code ?? "EUR"}
+                  initial={initial}
+                />
               </div>
             ),
           })}
@@ -612,6 +681,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
           {ordErr ? <Alert tone="error">{ordErr.message}</Alert> : null}
           {rsErr ? <Alert tone="error">{rsErr.message}</Alert> : null}
           {lgErr ? <Alert tone="error">{lgErr.message}</Alert> : null}
+          {wabErr ? <Alert tone="error">{wabErr.message}</Alert> : null}
           {tdErr ? <Alert tone="error">{tdErr.message}</Alert> : null}
           {posErr ? <Alert tone="error">{posErr.message}</Alert> : null}
         </div>
@@ -684,9 +754,49 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     ) : null}
                   </RecordPageGrid>
                 </RecordPageSection>
+                <RecordPageSection title="Quote-asset budgets">
+                  {quoteBudgetsForForm.length === 0 ? (
+                    <Alert tone="warning">
+                      No quote-asset budgets configured. The mediator will skip every market for this executor with
+                      reason <code className="bk-code">quote_asset_not_allowed</code> until at least one row is added
+                      via Edit.
+                    </Alert>
+                  ) : (
+                    <div className="bk-stack bk-stack_gap-sm">
+                      <p className="bk-text-muted text-xs">
+                        Notional per allowed quote, stored in your primary fiat (
+                        <code className="bk-code">{prefs.primary_asset?.code ?? "EUR"}</code>) and converted to the
+                        market quote at decision time using each asset&rsquo;s{" "}
+                        <code className="bk-code">dollar_value</code>.
+                      </p>
+                      <table className="w-full max-w-md text-sm">
+                        <thead>
+                          <tr className="bk-text-muted text-left text-xs">
+                            <th className="pb-1 pr-4 font-medium">Quote asset</th>
+                            <th className="pb-1 font-medium">
+                              Max notional ({prefs.primary_asset?.code ?? "EUR"})
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quoteBudgetsForForm.map((b) => (
+                            <tr key={b.quote_asset_id} className="border-border border-t">
+                              <td className="py-1 pr-4 font-mono text-xs">
+                                {assetOptions.find((o) => o.id === b.quote_asset_id)?.code ??
+                                  b.quote_asset_id.slice(0, 8) + "…"}
+                              </td>
+                              <td className="py-1 font-mono tabular-nums">
+                                {fmtEur(b.max_notional_primary)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </RecordPageSection>
                 <RecordPageSection title="Mediator / risk rails">
                   <RecordPageGrid>
-                    <Output label="Default order size (EUR)" type="text" value={fmtEur(ex.default_notional_eur)} />
                     <Output label="Max risk per trade (0–1)" type="text" value={String(ex.max_risk_per_trade ?? "—")} />
                     <Output label="Max open positions" type="number" value={ex.max_open_positions ?? 0} />
                     <Output label="Max exposure per symbol (EUR)" type="text" value={fmtEur(ex.max_exposure_per_symbol_eur)} />
@@ -923,6 +1033,84 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
               <p className="mt-1 font-mono text-lg">{fmtEur(pnl.filledBuyNotionalEur)}</p>
             </CardBody>
           </Card>
+
+          <div className="mt-4">
+            <RecordRelatedList
+              title="Wallet asset balances"
+              icon={<ListViewObjectIcon letter="B" />}
+              description="System-maintained per-asset balance for this executor's wallet. Updated by the wallet_transactions trigger."
+              items={walletAssetBalanceRows}
+              getKey={(r) => r.id}
+              totalCount={walletAssetBalanceTotal}
+              viewAllHref={`/executors/${id}/wallet-asset-balance`}
+              alwaysShowViewAll
+              emptyMessage="No wallet asset balances yet. Use Add balance in the header to credit an asset."
+              renderRow={(row) => {
+                const code =
+                  assetCodeById.get(row.asset_id) ?? `${row.asset_id.slice(0, 8)}…`;
+                return (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                    <code className="bk-code shrink-0">{code}</code>
+                    <span
+                      className="bk-text-muted flex flex-wrap items-center gap-x-3 gap-y-1"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      <span className="font-mono tabular-nums">{fmtQty(row.amount)}</span>
+                      <span className="whitespace-nowrap font-mono">{fmtDt(row.updated_at)}</span>
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+
+          <div className="mt-4">
+            <RecordRelatedList
+              title="Quote-asset budgets"
+              icon={<ListViewObjectIcon letter="Q" />}
+              description={`Notional caps per quote asset, stored in your primary fiat (${primaryCode}).`}
+              items={budgetsForList}
+              getKey={(r) => r.id}
+              totalCount={budgetsForList.length}
+              viewAllHref={`/executors/${id}/executor-quote-asset-budgets`}
+              alwaysShowViewAll
+              actions={
+                <ExecutorQuoteBudgetCreateDialog
+                  executorId={id}
+                  availableOptions={availableQuoteOptionsForNew}
+                  primaryCode={primaryCode}
+                />
+              }
+              emptyMessage="No budgets configured. Add one to enable a quote-asset book."
+              renderRow={(row) => (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8125rem]">
+                  <span className="flex shrink-0 flex-wrap items-center gap-2 font-mono">
+                    <code className="bk-code">{row.quote_asset_code}</code>
+                    <span className="bk-text-muted">·</span>
+                    <span className="tabular-nums">
+                      {fmtEur(row.max_notional_primary)} {primaryCode}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <ExecutorQuoteBudgetEditDialog
+                      executorId={id}
+                      budgetId={row.id}
+                      currentQuoteAssetId={row.quote_asset_id}
+                      currentQuoteAssetCode={row.quote_asset_code}
+                      currentMaxNotionalPrimary={row.max_notional_primary}
+                      availableOptions={availableQuoteOptionsForNew}
+                      primaryCode={primaryCode}
+                    />
+                    <ExecutorQuoteBudgetDeleteDialog
+                      executorId={id}
+                      budgetId={row.id}
+                      quoteAssetCode={row.quote_asset_code}
+                    />
+                  </span>
+                </div>
+              )}
+            />
+          </div>
 
           <div className="mt-4">
             <RecordRelatedList

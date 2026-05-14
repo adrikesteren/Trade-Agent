@@ -18,4 +18,6 @@ export * from "./object-relationship-metadata";
 export * from "./object-field-metadata";
 export * from "./standard-fields";
 export * from "./registries";
+export * from "./object-metadata-base";
 export * from "./object-metadata";
+export * from "./high-volume-object-metadata";

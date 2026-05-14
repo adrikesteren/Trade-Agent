@@ -1,5 +1,14 @@
-import { ExecutorForm, type AssetOption, type ExchangeOption, type ExecutorFormInitial } from "@/app/(app)/executors/executor-form";
+import {
+  ExecutorForm,
+  type AssetOption,
+  type ExchangeOption,
+  type ExecutorFormInitial,
+  type ExecutorQuoteBudgetInitial,
+} from "@/app/(app)/executors/executor-form";
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
+import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
+import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
+import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Stack } from "@repo/adricore/blocks";
@@ -53,21 +62,25 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
   const sp = (await searchParams) ?? {};
   const cloneFromId = parseCloneFromParam(sp.from);
 
-  const [assetOptions, exchangeOptions, cloneRow] = await Promise.all([
-    fetchAssetOptions(supabase),
-    fetchExchangeOptions(supabase),
-    cloneFromId
-      ? supabase
-          .schema("trading")
-          .from("executors")
-          .select(
-            "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, default_notional_eur, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
-          )
-          .eq("id", cloneFromId)
-          .eq("user_id", user.id)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null as { message: string } | null }),
-  ]);
+  const [assetOptions, exchangeOptions, quoteAssetOptionsByExchange, exchangeCapabilitiesById, prefs, cloneRow] =
+    await Promise.all([
+      fetchAssetOptions(supabase),
+      fetchExchangeOptions(supabase),
+      fetchQuoteAssetOptionsByExchange(supabase),
+      fetchExchangeCapabilitiesById(supabase),
+      getUserLocalePreferences(),
+      cloneFromId
+        ? supabase
+            .schema("trading")
+            .from("executors")
+            .select(
+              "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
+            )
+            .eq("id", cloneFromId)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null as { message: string } | null }),
+    ]);
 
   let cloneInitial: ExecutorFormInitial | undefined;
   let cloneSourceName: string | undefined;
@@ -83,7 +96,23 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
       cloneSourceName = String(row.name ?? "").trim() || "Executor";
       const base = cloneSourceName;
       const copyName = base ? `${base} (copy)` : "Executor (copy)";
-      cloneInitial = executorRowToFormInitial(row, { nameOverride: copyName });
+
+      // Clone the source executor's quote-asset budget rows so the new form starts pre-populated.
+      const { data: cloneBudgets } = await supabase
+        .schema("trading")
+        .from("executor_quote_asset_budget")
+        .select("quote_asset_id, max_notional_primary")
+        .eq("executor_id", cloneFromId)
+        .order("created_at", { ascending: true });
+      const quoteBudgets: ExecutorQuoteBudgetInitial[] = ((cloneBudgets ?? []) as {
+        quote_asset_id: string;
+        max_notional_primary: string | number;
+      }[]).map((b) => ({
+        quote_asset_id: b.quote_asset_id,
+        max_notional_primary: String(b.max_notional_primary ?? ""),
+      }));
+
+      cloneInitial = executorRowToFormInitial(row, { nameOverride: copyName, quoteBudgets });
     }
   }
 
@@ -108,7 +137,15 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
         {assetOptions.length === 0 ? (
           <Alert tone="warning">No catalog assets loaded yet; asset filters will be empty until assets exist.</Alert>
         ) : null}
-        <ExecutorForm mode="create" assetOptions={assetOptions} exchangeOptions={exchangeOptions} initial={cloneInitial} />
+        <ExecutorForm
+          mode="create"
+          assetOptions={assetOptions}
+          exchangeOptions={exchangeOptions}
+          quoteAssetOptionsByExchange={quoteAssetOptionsByExchange}
+          exchangeCapabilitiesById={exchangeCapabilitiesById}
+          primaryAssetCode={prefs.primary_asset?.code ?? "EUR"}
+          initial={cloneInitial}
+        />
       </Stack>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Alert, Button, Card, CardBody } from "@repo/adricore/blocks";
 
@@ -10,6 +10,31 @@ import { createExecutor, updateExecutor } from "./actions";
 export type AssetOption = { id: string; code: string };
 export type ExchangeOption = { id: string; code: string; name: string };
 
+/** Side an executor may take. Mirrors trading.position_side enum. */
+export type PositionSide = "long" | "short";
+
+/**
+ * Per-exchange capability flags that gate which sides the user may pick.
+ * Mirrors the boolean columns added in 20260723110000_exchange_capabilities.sql.
+ *
+ * `long` is allowed if the exchange supports either spot buy or margin long.
+ * `short` is allowed if the exchange supports margin short. Pure-spot venues
+ * (e.g. Bitvavo) therefore offer "long" only and the "short" checkbox is hidden.
+ */
+export type ExchangeCapabilities = {
+  supports_spot_buy: boolean;
+  supports_spot_sell: boolean;
+  supports_margin_long: boolean;
+  supports_margin_short: boolean;
+};
+
+export type ExecutorQuoteBudgetInitial = {
+  /** catalog.assets.id of the quote asset (e.g. EUR / USDT) */
+  quote_asset_id: string;
+  /** Number stored in the OWNER's primary fiat (e.g. EUR or USD), matches max_notional_primary. */
+  max_notional_primary: string;
+};
+
 export type ExecutorFormInitial = {
   name: string;
   enabled: boolean;
@@ -17,7 +42,8 @@ export type ExecutorFormInitial = {
   exchange_id?: string;
   asset_filter_mode: ExecutorAssetFilterMode;
   filter_asset_ids: string[];
-  default_notional_eur?: string;
+  /** Existing trading.executor_quote_asset_budget rows for this executor (edit/clone). */
+  quote_budgets?: ExecutorQuoteBudgetInitial[];
   max_risk_per_trade?: string;
   max_open_positions?: string;
   max_exposure_per_symbol_eur?: string;
@@ -38,13 +64,28 @@ export type ExecutorFormInitial = {
   exchange_api_credentials_configured?: boolean;
   /** Last few characters of stored key for display only (edit mode). */
   exchange_api_key_suffix?: string;
+  /** Subset of trading.position_side this executor may take. Defaults to ["long"]. */
+  allowed_sides?: PositionSide[];
 };
+
+type BudgetRow = {
+  /** Local key so React keeps inputs stable across add/remove. */
+  key: number;
+  quote_asset_id: string;
+  max_notional_primary: string;
+};
+
+let budgetKeySeq = 0;
+const nextBudgetKey = () => ++budgetKeySeq;
 
 export function ExecutorForm({
   mode,
   executorId,
   assetOptions,
   exchangeOptions,
+  quoteAssetOptionsByExchange,
+  exchangeCapabilitiesById,
+  primaryAssetCode,
   initial,
   onSaved,
 }: {
@@ -52,6 +93,19 @@ export function ExecutorForm({
   executorId?: string;
   assetOptions: AssetOption[];
   exchangeOptions: ExchangeOption[];
+  /**
+   * Distinct quote-asset choices per exchange, derived from `catalog.markets`.
+   * Used by the "Quote-asset budgets" editor so users only pick quotes that the
+   * selected exchange actually trades.
+   */
+  quoteAssetOptionsByExchange?: Record<string, AssetOption[]>;
+  /**
+   * Capability flags per `catalog.exchanges.id`. Drives the "Allowed sides"
+   * checkbox visibility — e.g. Bitvavo (spot-only) hides the short option.
+   */
+  exchangeCapabilitiesById?: Record<string, ExchangeCapabilities>;
+  /** ISO code of the user's primary fiat (e.g. "EUR" / "USD"). Used as the budgets unit label. */
+  primaryAssetCode?: string;
   initial?: ExecutorFormInitial;
   /** Called after a successful create or update (server action completed without throwing). */
   onSaved?: () => void;
@@ -60,6 +114,53 @@ export function ExecutorForm({
     initial?.execution_mode === "historical" ? "whitelist" : (initial?.asset_filter_mode ?? "all"),
   );
   const [execMode, setExecMode] = useState<ExecutionModeValue>(initial?.execution_mode ?? "paper");
+  const [exchangeId, setExchangeId] = useState<string>(
+    initial?.exchange_id ?? exchangeOptions[0]?.id ?? "",
+  );
+
+  const [budgets, setBudgets] = useState<BudgetRow[]>(() => {
+    const initRows = (initial?.quote_budgets ?? []).map((b) => ({
+      key: nextBudgetKey(),
+      quote_asset_id: b.quote_asset_id,
+      max_notional_primary: b.max_notional_primary,
+    }));
+    if (initRows.length > 0) return initRows;
+    // First-time create: no rows yet.
+    return [{ key: nextBudgetKey(), quote_asset_id: "", max_notional_primary: "100" }];
+  });
+
+  const quoteOptionsForCurrentExchange = useMemo(() => {
+    const map = quoteAssetOptionsByExchange ?? {};
+    const list = map[exchangeId] ?? [];
+    return list;
+  }, [quoteAssetOptionsByExchange, exchangeId]);
+
+  const primaryCode = primaryAssetCode?.trim() || "EUR";
+
+  // Sides framework. The selected sides default to the saved row's value, or
+  // ["long"] for new executors. When the exchange changes we strip any side that
+  // the new exchange doesn't support (pure spot exchanges hide "short"); this
+  // matches the DB CHECK that requires at least one element.
+  const initialSides: PositionSide[] =
+    initial?.allowed_sides && initial.allowed_sides.length > 0 ? initial.allowed_sides : ["long"];
+  const [allowedSides, setAllowedSides] = useState<PositionSide[]>(initialSides);
+
+  const capabilities = useMemo<ExchangeCapabilities | null>(() => {
+    return exchangeCapabilitiesById?.[exchangeId] ?? null;
+  }, [exchangeCapabilitiesById, exchangeId]);
+
+  const longSupported = capabilities ? capabilities.supports_spot_buy || capabilities.supports_margin_long : true;
+  const shortSupported = capabilities ? capabilities.supports_margin_short : false;
+
+  useEffect(() => {
+    setAllowedSides((prev) => {
+      const next = prev.filter((s) => (s === "long" ? longSupported : shortSupported));
+      // Never let the array go empty — fall back to "long" when the exchange supports it.
+      if (next.length === 0 && longSupported) return ["long"];
+      if (next.length === 0 && shortSupported) return ["short"];
+      return next;
+    });
+  }, [longSupported, shortSupported]);
 
   useEffect(() => {
     if (execMode === "historical") {
@@ -198,7 +299,8 @@ export function ExecutorForm({
               id="ex-exchange"
               name="exchange_id"
               className="bk-input mt-1 w-full max-w-md font-mono text-sm"
-              defaultValue={initial?.exchange_id ?? exchangeOptions[0]?.id ?? ""}
+              value={exchangeId}
+              onChange={(e) => setExchangeId(e.target.value)}
               required
             >
               {exchangeOptions.map((opt) => (
@@ -268,24 +370,182 @@ export function ExecutorForm({
           ) : null}
 
           <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
-            Mediator / risk rails
+            Quote-asset budgets
+          </div>
+          <p className="bk-text-muted text-xs">
+            One row per allowed quote on this exchange. Notional is stored in your primary fiat (
+            <code className="font-mono text-[var(--text)]">{primaryCode}</code>) and converted to the market quote
+            at decision time using each asset&rsquo;s <code className="font-mono text-[var(--text)]">dollar_value</code>.
+            Markets whose quote is not listed here are skipped with reason{" "}
+            <code className="font-mono text-[var(--text)]">quote_asset_not_allowed</code>.
+          </p>
+
+          <div className="bk-stack bk-stack_gap-sm">
+            {budgets.map((row, idx) => (
+              <div key={row.key} className="flex flex-wrap items-end gap-2">
+                <div>
+                  <label
+                    htmlFor={`ex-budget-quote-${row.key}`}
+                    className="bk-form-label text-xs"
+                  >
+                    Quote asset
+                  </label>
+                  <select
+                    id={`ex-budget-quote-${row.key}`}
+                    name="quote_budget_quote_asset_id"
+                    className="bk-input mt-1 w-44 font-mono text-sm"
+                    value={row.quote_asset_id}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBudgets((prev) =>
+                        prev.map((b, i) => (i === idx ? { ...b, quote_asset_id: v } : b)),
+                      );
+                    }}
+                    required
+                  >
+                    <option value="">— Select quote —</option>
+                    {quoteOptionsForCurrentExchange.length === 0 ? (
+                      <option value="" disabled>
+                        (no quote markets known for this exchange)
+                      </option>
+                    ) : null}
+                    {quoteOptionsForCurrentExchange.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.code}
+                      </option>
+                    ))}
+                    {/* Stale fallback: keep current value visible even if it is not in the options list. */}
+                    {row.quote_asset_id &&
+                    !quoteOptionsForCurrentExchange.some((o) => o.id === row.quote_asset_id) ? (
+                      <option value={row.quote_asset_id}>
+                        (current: {row.quote_asset_id.slice(0, 8)}…)
+                      </option>
+                    ) : null}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor={`ex-budget-amount-${row.key}`}
+                    className="bk-form-label text-xs"
+                  >
+                    Max notional ({primaryCode})
+                  </label>
+                  <input
+                    id={`ex-budget-amount-${row.key}`}
+                    name="quote_budget_max_notional_primary"
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    inputMode="decimal"
+                    className="bk-input mt-1 w-44 font-mono text-sm"
+                    value={row.max_notional_primary}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBudgets((prev) =>
+                        prev.map((b, i) => (i === idx ? { ...b, max_notional_primary: v } : b)),
+                      );
+                    }}
+                    required
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="neutral"
+                  size="sm"
+                  onClick={() => {
+                    setBudgets((prev) =>
+                      prev.length === 1 ? prev : prev.filter((_, i) => i !== idx),
+                    );
+                  }}
+                  disabled={budgets.length === 1}
+                  title={
+                    budgets.length === 1
+                      ? "Need at least one budget row."
+                      : "Remove this quote-asset budget."
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <div>
+              <Button
+                type="button"
+                variant="neutral"
+                size="sm"
+                onClick={() =>
+                  setBudgets((prev) => [
+                    ...prev,
+                    { key: nextBudgetKey(), quote_asset_id: "", max_notional_primary: "100" },
+                  ])
+                }
+              >
+                Add quote-asset budget
+              </Button>
+            </div>
           </div>
 
-          <div>
-            <label htmlFor="ex-default-notional" className="bk-form-label">
-              Default order size (EUR)
-            </label>
-            <input
-              id="ex-default-notional"
-              name="default_notional_eur"
-              type="number"
-              min={0.01}
-              step="0.01"
-              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
-              defaultValue={initial?.default_notional_eur ?? "100"}
-              required
-            />
-            <p className="bk-text-muted mt-1 text-xs">Suggested EUR per trade before equity cap (mediator).</p>
+          <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
+            Allowed position sides
+          </div>
+          <p className="bk-text-muted text-xs">
+            The mediator only emits decisions for sides this executor allows; the executor rejects orders for any
+            side not listed here with reason{" "}
+            <code className="font-mono text-[var(--text)]">side_not_allowed</code>. The exchange itself further
+            limits which sides can ever be picked (Bitvavo is spot-only, so &quot;short&quot; is unavailable).
+          </p>
+          <div className="bk-stack bk-stack_gap-xs">
+            {longSupported ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="allowed_sides"
+                  value="long"
+                  checked={allowedSides.includes("long")}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAllowedSides((prev) => {
+                      const without = prev.filter((s) => s !== "long");
+                      const next = checked ? [...without, "long" as const] : without;
+                      // Enforce at least one selected side (DB CHECK).
+                      return next.length ? next : prev;
+                    });
+                  }}
+                />
+                Long (spot buy or margin long)
+              </label>
+            ) : (
+              <p className="bk-text-muted text-xs">
+                This exchange does not support long entries (no spot buy and no margin long).
+              </p>
+            )}
+            {shortSupported ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="allowed_sides"
+                  value="short"
+                  checked={allowedSides.includes("short")}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAllowedSides((prev) => {
+                      const without = prev.filter((s) => s !== "short");
+                      const next = checked ? [...without, "short" as const] : without;
+                      return next.length ? next : prev;
+                    });
+                  }}
+                />
+                Short (margin short — execution stub for now)
+              </label>
+            ) : (
+              <p className="bk-text-muted text-xs">
+                This exchange does not support short selling.
+              </p>
+            )}
+          </div>
+
+          <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
+            Mediator / risk rails
           </div>
 
           <div>

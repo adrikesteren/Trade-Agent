@@ -1,5 +1,6 @@
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
+import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   TRADE_DECISIONS_FETCH_POOL,
@@ -38,6 +39,7 @@ type DecisionRow = {
   reason_codes: string[] | null;
   close_time: string;
   timeframe: string;
+  position_side: string;
   decision_payload: Record<string, unknown> | null;
   created_at: string;
 };
@@ -108,6 +110,7 @@ function normalizeTradeDecisionRow(r: DecisionRowDb, candleById: Map<string, Cat
     approved: base.approved,
     reason_codes: base.reason_codes,
     timeframe: base.timeframe,
+    position_side: String((base as { position_side?: string | null }).position_side ?? "long"),
     decision_payload: base.decision_payload,
     created_at: base.created_at,
     close_time: barFromPayload || closeFromCandle || base.created_at,
@@ -192,7 +195,7 @@ export async function TradeDecisionsListView({
     .schema("trading")
     .from("decisions")
     .select(
-      "id, executor_id, signal_id, approved, reason_codes, timeframe, decision_payload, created_at, signals ( candle_id )",
+      "id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, created_at, signals ( candle_id )",
     )
     .order("created_at", { ascending: false })
     .limit(TRADE_DECISIONS_FETCH_POOL);
@@ -275,6 +278,7 @@ export async function TradeDecisionsListView({
                     <Th>TF</Th>
                     <Th>Bar close</Th>
                     <Th>Resolved</Th>
+                    <Th>Pos. side</Th>
                     <Th>Approved</Th>
                     <Th>Reason codes</Th>
                     <Th>Created</Th>
@@ -313,6 +317,9 @@ export async function TradeDecisionsListView({
                           <span className={intentClass(resolved)}>{resolved}</span>
                         </Td>
                         <Td>
+                          <PositionSidePill side={row.position_side} />
+                        </Td>
+                        <Td>
                           <span className={approvedClass(row.approved)}>{row.approved ? "yes" : "no"}</span>
                         </Td>
                         <Td className="max-w-[14rem] truncate font-mono" title={reasons}>
@@ -324,7 +331,7 @@ export async function TradeDecisionsListView({
                   })}
                   {!list.length ? (
                     <tr>
-                      <Td colSpan={9} muted className="py-8 text-center">
+                      <Td colSpan={10} muted className="py-8 text-center">
                         No trade decisions yet. After a candle sync produces signals, the mediator worker writes rows
                         here. See{" "}
                         <Link href="/signals" className="bk-link">

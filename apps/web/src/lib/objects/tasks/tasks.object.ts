@@ -8,7 +8,8 @@ export class TasksModel extends ObjectMetadata {
       "tasks",
       "tasks",
       new ObjectLabelMetadata("Task", "Tasks"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = { mode: "manual" };
   }
 }

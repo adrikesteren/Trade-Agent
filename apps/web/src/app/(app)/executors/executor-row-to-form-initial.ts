@@ -1,5 +1,5 @@
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "./actions";
-import type { ExecutorFormInitial } from "./executor-form";
+import type { ExecutorFormInitial, ExecutorQuoteBudgetInitial, PositionSide } from "./executor-form";
 
 /** Shape returned from `trading.executors` selects used for edit / clone forms. */
 export type ExecutorRowForFormInitial = {
@@ -9,7 +9,6 @@ export type ExecutorRowForFormInitial = {
   exchange_id: unknown;
   asset_filter_mode: unknown;
   filter_asset_ids: unknown;
-  default_notional_eur: unknown;
   max_risk_per_trade: unknown;
   max_open_positions: unknown;
   max_exposure_per_symbol_eur: unknown;
@@ -27,11 +26,17 @@ export type ExecutorRowForFormInitial = {
   exchange_api_secret?: unknown;
   historical_start_date?: unknown;
   historical_end_date?: unknown;
+  /** P2: trading.executors.allowed_sides — array of trading.position_side. */
+  allowed_sides?: unknown;
 };
 
 export function executorRowToFormInitial(
   ex: ExecutorRowForFormInitial,
-  options?: { nameOverride?: string },
+  options?: {
+    nameOverride?: string;
+    /** Existing trading.executor_quote_asset_budget rows for this executor (edit/clone). */
+    quoteBudgets?: ExecutorQuoteBudgetInitial[];
+  },
 ): ExecutorFormInitial {
   const filterIds = (ex.filter_asset_ids as string[] | null) ?? [];
 
@@ -61,7 +66,7 @@ export function executorRowToFormInitial(
     exchange_id: String(ex.exchange_id ?? ""),
     asset_filter_mode: ex.asset_filter_mode as ExecutorAssetFilterMode,
     filter_asset_ids: filterIds,
-    default_notional_eur: String(ex.default_notional_eur ?? "100"),
+    quote_budgets: options?.quoteBudgets ?? [],
     max_risk_per_trade: String(ex.max_risk_per_trade ?? "0.05"),
     max_open_positions: String(ex.max_open_positions ?? "5"),
     max_exposure_per_symbol_eur: String(ex.max_exposure_per_symbol_eur ?? "500"),
@@ -79,5 +84,16 @@ export function executorRowToFormInitial(
     exchange_api_key_suffix: exchangeApiKeySuffix,
     historical_start_date: (ex as { historical_start_date?: string | null }).historical_start_date ?? null,
     historical_end_date: (ex as { historical_end_date?: string | null }).historical_end_date ?? null,
+    allowed_sides: parseAllowedSidesFromRow(ex.allowed_sides),
   };
+}
+
+function parseAllowedSidesFromRow(raw: unknown): PositionSide[] {
+  if (!Array.isArray(raw)) return ["long"];
+  const out: PositionSide[] = [];
+  for (const v of raw) {
+    const s = String(v ?? "").trim().toLowerCase();
+    if (s === "long" || s === "short") out.push(s);
+  }
+  return out.length > 0 ? out : ["long"];
 }

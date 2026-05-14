@@ -8,7 +8,12 @@ export class AutomationActorModel extends ObjectMetadata {
       "automation_actor",
       "automation_actor",
       new ObjectLabelMetadata("Automation Actor", "Automation Actors"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "AAC-{0000}",
+      startNumber: 1,
+    };
   }
 }

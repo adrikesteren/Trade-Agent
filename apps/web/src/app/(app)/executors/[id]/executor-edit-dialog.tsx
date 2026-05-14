@@ -1,6 +1,12 @@
 "use client";
 
-import { ExecutorForm, type AssetOption, type ExchangeOption, type ExecutorFormInitial } from "@/app/(app)/executors/executor-form";
+import {
+  ExecutorForm,
+  type AssetOption,
+  type ExchangeCapabilities,
+  type ExchangeOption,
+  type ExecutorFormInitial,
+} from "@/app/(app)/executors/executor-form";
 import {
   Button,
   Dialog,
@@ -15,11 +21,17 @@ export function ExecutorEditDialog({
   executorId,
   assetOptions,
   exchangeOptions,
+  quoteAssetOptionsByExchange,
+  exchangeCapabilitiesById,
+  primaryAssetCode,
   initial,
 }: {
   executorId: string;
   assetOptions: AssetOption[];
   exchangeOptions: ExchangeOption[];
+  quoteAssetOptionsByExchange?: Record<string, AssetOption[]>;
+  exchangeCapabilitiesById?: Record<string, ExchangeCapabilities>;
+  primaryAssetCode?: string;
   initial: ExecutorFormInitial;
 }) {
   const router = useRouter();
@@ -49,6 +61,9 @@ export function ExecutorEditDialog({
             executorId={executorId}
             assetOptions={assetOptions}
             exchangeOptions={exchangeOptions}
+            quoteAssetOptionsByExchange={quoteAssetOptionsByExchange}
+            exchangeCapabilitiesById={exchangeCapabilitiesById}
+            primaryAssetCode={primaryAssetCode}
             initial={initial}
             onSaved={() => {
               setOpen(false);

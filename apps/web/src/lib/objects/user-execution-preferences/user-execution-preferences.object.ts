@@ -8,7 +8,12 @@ export class UserExecutionPreferencesModel extends ObjectMetadata {
       "user_execution_preferences",
       "user_execution_preferences",
       new ObjectLabelMetadata("User Execution Preference", "User Execution Preferences"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "UEP-{0000}",
+      startNumber: 1,
+    };
   }
 }

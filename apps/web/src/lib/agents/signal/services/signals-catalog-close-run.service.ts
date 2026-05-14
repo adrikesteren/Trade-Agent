@@ -15,6 +15,16 @@ import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval.service";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval.service";
 import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids.service";
 
+/**
+ * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
+ * Accepts numbers; returns null for missing / non-finite values so the
+ * eval services treat the bound as not-configured (no-op gate).
+ */
+function parseGateNumber(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return raw;
+}
+
 export type SignalsCatalogCloseBody = {
   closeTimeIso: string;
   timeframe?: string;
@@ -65,7 +75,14 @@ type CandleRow = {
   candle_timestamps: { close_time: string; open_time: string } | { close_time: string; open_time: string }[] | null;
 };
 
-function mapCandleRows(rows: CandleRow[]): { id: string; high: number; low: number; close: number; closeTimeIso: string }[] {
+function mapCandleRows(rows: CandleRow[]): {
+  id: string;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  closeTimeIso: string;
+}[] {
   const mapped = (rows ?? [])
     .map((r) => {
       const rawTs = r.candle_timestamps as unknown;
@@ -77,6 +94,7 @@ function mapCandleRows(rows: CandleRow[]): { id: string; high: number; low: numb
         high: Number(r.high),
         low: Number(r.low),
         close: Number(r.close),
+        volume: Number(r.volume),
         closeTimeIso: closeTime,
       };
     })
@@ -267,12 +285,19 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       const marketId = m.id as string;
       const raw = await fetchCandlesForMarket(admin, { marketId, timeframe, barLimit });
       const sorted = mapCandleRows(raw);
-      const barsAsc: MaCrossBar[] = sorted.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
+      const barsAsc: MaCrossBar[] = sorted.map((r) => ({
+        close: r.close,
+        closeTimeIso: r.closeTimeIso,
+        high: r.high,
+        low: r.low,
+      }));
       const targetRow = sorted.find((r) => closeTimesMatch(r.closeTimeIso, closeTimeIso));
       const candleId = targetRow?.id ?? null;
 
       for (const agent of activeAgents) {
         const cfg = (agent.config ?? {}) as Record<string, unknown>;
+        const minAtrPct = parseGateNumber(cfg.minAtrPct);
+        const maxAtrPct = parseGateNumber(cfg.maxAtrPct);
         let ev:
           | ReturnType<typeof evaluateMaCrossAtClose>
           | ReturnType<typeof evaluateRsiReversionAtClose>
@@ -285,31 +310,50 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
             targetCloseTimeIso: closeTimeIso,
             fastPeriod,
             slowPeriod,
+            minAtrPct,
+            maxAtrPct,
           });
         } else if (agent.agent_id === "rsi-reversion-15m-v1") {
           const rsiPeriod = Math.floor(Number(cfg.rsiPeriod ?? 14));
           const oversold = Number(cfg.oversold ?? 30);
+          const overbought = parseGateNumber(cfg.overbought);
+          const maxAdx = parseGateNumber(cfg.maxAdx);
           ev = evaluateRsiReversionAtClose({
             barsAsc,
             targetCloseTimeIso: closeTimeIso,
             rsiPeriod,
             oversold,
+            overbought,
+            minAtrPct,
+            maxAtrPct,
+            maxAdx,
           });
         } else if (agent.agent_id === "breakout-atr-15m-v1") {
           const lookbackBars = Math.floor(Number(cfg.lookbackBars ?? 20));
           const atrPeriod = Math.floor(Number(cfg.atrPeriod ?? 14));
           const atrMultiplier = Number(cfg.atrMultiplier ?? 1.2);
+          const volumeConfirmationMultiplier = parseGateNumber(cfg.volumeConfirmationMultiplier);
+          const volumeLookbackBars = parseGateNumber(cfg.volumeLookbackBars);
+          const minAdx = parseGateNumber(cfg.minAdx);
           ev = evaluateBreakoutAtrAtClose({
             barsAsc: sorted.map((r) => ({
               high: r.high,
               low: r.low,
               close: r.close,
               closeTimeIso: r.closeTimeIso,
+              volume: r.volume,
             })),
             targetCloseTimeIso: closeTimeIso,
             lookbackBars,
             atrPeriod,
             atrMultiplier,
+            minAtrPct,
+            maxAtrPct,
+            volumeConfirmationMultiplier,
+            ...(volumeLookbackBars != null
+              ? { volumeLookbackBars: Math.max(2, Math.floor(volumeLookbackBars)) }
+              : {}),
+            minAdx,
           });
         } else {
           continue;
@@ -322,6 +366,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
             signal_agent_id: agent.id,
             candle_id: candleId,
             intent: ev.intent,
+            signal_side: ev.signalSide ?? "long",
             confidence: ev.confidence,
             reasons: ev.reasons,
             metadata: {

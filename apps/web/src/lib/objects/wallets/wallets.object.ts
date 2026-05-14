@@ -8,7 +8,12 @@ export class WalletsModel extends ObjectMetadata {
       "wallets",
       "wallets",
       new ObjectLabelMetadata("Wallet", "Wallets"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "WAL-{0000}",
+      startNumber: 1,
+    };
   }
 }

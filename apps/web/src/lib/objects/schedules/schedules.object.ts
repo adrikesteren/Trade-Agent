@@ -8,7 +8,12 @@ export class SchedulesModel extends ObjectMetadata {
       "schedules",
       "schedules",
       new ObjectLabelMetadata("Schedule", "Schedules"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "SCH-{0000}",
+      startNumber: 1,
+    };
   }
 }

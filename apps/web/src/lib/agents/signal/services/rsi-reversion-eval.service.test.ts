@@ -17,4 +17,22 @@ describe("evaluateRsiReversionAtClose", () => {
     });
     expect(r.intent).toBe("ENTER");
   });
+
+  it("emits EXIT when RSI crosses down through overbought", () => {
+    // Up-down sequence so RSI was above 70 on prev bar and falls below on the
+    // last bar. Use a small period for sensitivity.
+    const barsAsc = [50, 60, 70, 80, 70].map((close, i) => ({
+      close,
+      closeTimeIso: new Date(Date.UTC(2026, 0, 2, 0, i * 15)).toISOString(),
+    }));
+    const target = barsAsc[barsAsc.length - 1].closeTimeIso;
+    const r = evaluateRsiReversionAtClose({
+      barsAsc,
+      targetCloseTimeIso: target,
+      rsiPeriod: 3,
+      oversold: 30,
+      overbought: 70,
+    });
+    expect(r.intent).toBe("EXIT");
+  });
 });

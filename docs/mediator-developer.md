@@ -23,7 +23,8 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 - **Executors & filters:** alleen **enabled** rijen in `trading.executors` per gebruiker; sla markten over die niet voldoen aan whitelist/blacklist (`catalog.markets.asset_id` vs `executors.filter_asset_ids`).  
 - **Positie meenemen:** `trading.positions` voor `(user_id, executor_id, market_id)` — `quantity > 0` betekent “in positie” voor die executor.
 - **Risk state meenemen:** `trading.risk_state` voor **`(user_id, executor_id)`**; `exposure_by_market` wordt voor de risk-check op **symbool** gemapt (o.a. huidige `market_id` → `market_symbol` voor `ProposedOrder.symbol` in `@repo/risk`).
-- **Risk rails & notional:** typed kolommen op `trading.executors` (o.a. `max_risk_per_trade`, `daily_loss_limit_eur`, `default_notional_eur`, `allow_add`) plus optioneel **`mediator_rails_extra`** (jsonb, merge met dezelfde camelCase-keys als `@repo/risk` / `MediatorRailsConfig`). Zie [`executor-mediator-rails.ts`](../apps/web/src/lib/trading/executor-mediator-rails.ts); beheer in de app onder **Executors**.
+- **Risk rails:** typed kolommen op `trading.executors` (o.a. `max_risk_per_trade`, `daily_loss_limit_eur`, `allow_add`) plus optioneel **`mediator_rails_extra`** (jsonb, merge met dezelfde camelCase-keys als `@repo/risk` / `MediatorRailsConfig`). Zie [`executor-mediator-rails.service.ts`](../apps/web/src/lib/agents/executor/services/executor-mediator-rails.service.ts); beheer in de app onder **Executors**.
+- **Notional / quote-asset budget:** per-quote bedragen leven in **`trading.executor_quote_asset_budget`** (één rij per `(executor, quote_asset)`, opgeslagen in primary fiat). De mediator rekent dat per beslissing om naar **quote units** via `asset.dollar_value` ([`fetchExecutorQuoteBudgetInQuoteUnits`](../apps/web/src/lib/agents/executor/services/executor-quote-budget.service.ts)). Markten waarvan de quote **niet** in de junction staat worden geskipt met **`reason_codes=["quote_asset_not_allowed"]`** (rij wordt wel weggeschreven zodat de UI kan tonen waarom er niets is geplaatst). De oude kolom `executors.default_notional_eur` is verwijderd. Zie ook [AGENTS.md → Wallets and quote-asset budgets](../AGENTS.md#wallets-and-quote-asset-budgets).
 - **Eén geaggregeerde intent** per bar volgens prioriteit (sterkste wint): **EXIT** > **REDUCE** > **ADD** > **ENTER** > **HOLD** — zie ook [asset-selection-workflow.md](./asset-selection-workflow.md) (Mediator-beslisvolgorde).
 - **Risk rails toepassen** voor nieuwe **koop**-exposure (`ENTER`, en `ADD` alleen als `allow_add` op die executor aan staat): via `evaluateNewEntry` in `[packages/risk](../packages/risk/src/evaluate.ts)`.
 - **Beslissing vastleggen:** `approved`, `reason_codes`, `risk_snapshot`, `decision_payload` (o.a. `resolvedIntent`, `signalIds`, `signalsIn`, `proposedOrder` bij approve), optioneel `signal_id` naar de eerste bron-signal.
@@ -37,6 +38,51 @@ Doelgroep: menselijke ontwikkelaars en **Cursor / automation agents** die deze c
 - **Geen signalen schrijven** — geen wijzigingen aan `trading.signals` vanuit de mediator-worker.
 - **Geen onbetrouwbare `user_id`** — zelfde regel als signal agents: alleen UUIDs uit **vertrouwde serverbron**: `public.automation_actor` (**Automated Process**) plus optioneel **`SIGNAL_USER_IDS`**. Zie [supabase/RLS-WORKERS.md](../supabase/RLS-WORKERS.md).
 - **EXIT** / **REDUCE** met positie (v1): worden **geweigerd** met redencodes `exit_not_implemented` / `reduce_not_implemented` tot de executor exits ondersteunt. Zonder positie: `no_position`.
+
+---
+
+## Phase 3 (P3) — regime gating, position sides & SAR
+
+P3 voegt drie samenhangende lagen toe aan de mediator. De executor kant van het verhaal staat in [executor-developer.md](./executor-developer.md); voor de signal kant zie [signal-agents-developer.md](./signal-agents-developer.md#phase-3-p3-signal-stack--regime-volatility-multi-timeframe-sar).
+
+### Regime gating
+
+- De `regime-classifier-15m-v1` agent zet `metadata.regime` (`bull` / `bear` / `sideways`) op zijn signal-rij.
+- Per executor schakel je dit in via `mediator_rails_extra.regimeGatingEnabled` (default `false` voor backwards compatibility).
+- Als gating aanstaat, demoteert de mediator `ENTER` intents van andere agents naar `HOLD` met `reason_codes` zoals `regime_demote_bear`. EXIT intents blijven altijd staan.
+- Sideways regime maakt een uitzondering wanneer `multi-tf-confluence-15m-v1` óók `ENTER` heeft op dezelfde bar — dat overrulet de demotion.
+- Pure helper: [`regime-gating.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/regime-gating.service.ts).
+
+### Position sides (P2/P3)
+
+- Beslissingen krijgen `position_side` (`long` / `short`) uit `decision_payload.proposedOrder.positionSide`. De unique constraint op `trading.decisions` is per `(user, executor, signal, position_side)` — zo kunnen SAR-paren bestaan voor één onderliggend signal.
+- De mediator stamps `position_side` van de gekozen intent; standaard `long` voor pre-P2 / pre-P3 agents.
+
+### Stop-and-Reverse (SAR)
+
+- Op een bevestigde regime flip (`bull→bear→bear` of `bear→bull→bull`, gemeten over de drie laatste regime classifier signalen voor dezelfde markt + user) emitteert de mediator een **paar** decisions op het regime classifier `signal_id`:
+  - **EXIT** op de huidige open kant (alleen als er een open positie is).
+  - **ENTER** op de tegenovergestelde kant (alleen als die kant in `executor.allowed_sides` staat).
+- Voor Bitvavo (long-only) beperkt SAR zich praktisch tot **EXIT-long op een bull→bear flip**; geen short ENTER omdat `allowed_sides` daar geen short toelaat.
+- De executor ontvangt deze beslissingen en verwerkt ze in **EXIT-before-ENTER** volgorde per `(executor, market, bar)` — kritisch voor wallet-sequencing.
+- Helpers: [`regime-flip-detect.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/regime-flip-detect.service.ts), [`sar-decision-emit.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/sar-decision-emit.service.ts), [`sar-mediator-run.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/sar-mediator-run.service.ts).
+- Audit: het `decision_payload` van een SAR-rij bevat `sarFlip = { fromRegime, toRegime, confirmedAtBar }` en `sarReason = sar_exit_old_side` / `sar_enter_new_side`.
+
+### Configuratie samenvatting per executor
+
+Op `trading.executors.mediator_rails_extra` (jsonb):
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `regimeGatingEnabled` | `false` | Schakelt regime gating in (zie boven). |
+| (overige rails uit `MediatorRailsConfig`) | per `@repo/risk` | Risk rails: `maxRiskPerTrade`, `dailyLossLimitEur`, etc. |
+
+Op `trading.executors`:
+
+| Kolom | Effect |
+| --- | --- |
+| `allowed_sides` (`text[]`) | Welke `position_side` waardes deze executor mag handelen. SAR ENTER skipt zwijgend als opposite side ontbreekt. |
+| `wallet_id` (P1) | Per-executor pointer naar `trading.wallets` (shared per `(user, exchange)` voor live/paper, isolated voor historical). |
 
 ---
 
@@ -113,7 +159,8 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 ## Troubleshooting
 
 - **Geen rijen in `trading.trade_decisions`:** controleer `public.automation_actor` / optioneel `SIGNAL_USER_IDS`, of de candle sweep signalen heeft laten schrijven (`signalsUpserted > 0`), of `MEDIATOR_AFTER_SIGNALS_DISABLE` niet `1` is, of er minstens één **enabled** `trading.executors`-rij is voor die gebruiker, en of migraties t/m `20260530120000_trading_executors.sql` zijn toegepast (unique met `executor_id`).
-- **Alleen denied beslissingen met `non_positive_equity` / `invalid_notional`:** controleer `trading.risk_state` voor **die executor** (`equity_eur` > 0) en `default_notional_eur` / `max_risk_per_trade` op `trading.executors`.
+- **Alleen denied beslissingen met `non_positive_equity` / `invalid_notional`:** controleer dat de executor's wallet een positief saldo heeft voor de **quote asset** van de markt (zie [executor-developer.md → Executor balance](./executor-developer.md#executor-balance--assigned-capital-per-asset-per-wallet)) en dat `max_risk_per_trade` redelijk staat op `trading.executors`.
+- **Alleen denied met `quote_asset_not_allowed`:** voor `(executor, market.quote_asset_id)` ontbreekt een rij in `trading.executor_quote_asset_budget`. Voeg via **Executors → Edit → Quote-asset budgets** een rij toe (bedrag in primary fiat).
 - **Upsert-fouten op unique:** `onConflict` moet overeenkomen met `(user_id, executor_id, market_id, timeframe, close_time)`.
 
 ---
@@ -126,4 +173,4 @@ Zie ook [apps/web/README.md](../apps/web/README.md#trade-mediator-env) voor tabe
 
 ---
 
-*Laatste update: Mediator rails + `risk_state` per executor; env `MEDIATOR_RISK_RAILS_JSON` / `MEDIATOR_DEFAULT_NOTIONAL_EUR` vervallen.*
+*Laatste update: P1 (Trading framework v2) — quote-asset budgets vervangen `default_notional_eur`; wallets per `(user, exchange)` voor live/paper, isolated per historische executor.*

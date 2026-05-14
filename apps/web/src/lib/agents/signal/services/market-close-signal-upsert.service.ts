@@ -15,7 +15,19 @@ type SortedBar = {
   low: number;
   close: number;
   closeTimeIso: string;
+  /** Optional — only some upstream callers carry volume today. */
+  volume?: number;
 };
+
+/**
+ * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
+ * Accepts numbers; returns null for missing / non-finite values so the
+ * eval services treat the bound as not-configured (no-op gate).
+ */
+function parseGateNumber(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return raw;
+}
 
 /**
  * Upserts `trading.signals` for one catalog close using preloaded ascending bars (same agents as catalog-close).
@@ -57,7 +69,12 @@ export async function upsertSignalsForMarketCloseFromBars(
     return tf.includes(body.timeframe);
   });
 
-  const barsAsc: MaCrossBar[] = body.sortedBarsAsc.map((r) => ({ close: r.close, closeTimeIso: r.closeTimeIso }));
+  const barsAsc: MaCrossBar[] = body.sortedBarsAsc.map((r) => ({
+    close: r.close,
+    closeTimeIso: r.closeTimeIso,
+    high: r.high,
+    low: r.low,
+  }));
   const targetRow = body.sortedBarsAsc.find((r) => closeTimesMatch(r.closeTimeIso, body.closeTimeIso));
   const candleId = targetRow?.id ?? null;
 
@@ -68,6 +85,8 @@ export async function upsertSignalsForMarketCloseFromBars(
       | ReturnType<typeof evaluateMaCrossAtClose>
       | ReturnType<typeof evaluateRsiReversionAtClose>
       | ReturnType<typeof evaluateBreakoutAtrAtClose>;
+    const minAtrPct = parseGateNumber(cfg.minAtrPct);
+    const maxAtrPct = parseGateNumber(cfg.maxAtrPct);
     if (agent.agent_id === "ma-cross-15m-v1") {
       const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
       const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
@@ -76,31 +95,50 @@ export async function upsertSignalsForMarketCloseFromBars(
         targetCloseTimeIso: body.closeTimeIso,
         fastPeriod,
         slowPeriod,
+        minAtrPct,
+        maxAtrPct,
       });
     } else if (agent.agent_id === "rsi-reversion-15m-v1") {
       const rsiPeriod = Math.floor(Number(cfg.rsiPeriod ?? 14));
       const oversold = Number(cfg.oversold ?? 30);
+      const overbought = parseGateNumber(cfg.overbought);
+      const maxAdx = parseGateNumber(cfg.maxAdx);
       ev = evaluateRsiReversionAtClose({
         barsAsc,
         targetCloseTimeIso: body.closeTimeIso,
         rsiPeriod,
         oversold,
+        overbought,
+        minAtrPct,
+        maxAtrPct,
+        maxAdx,
       });
     } else if (agent.agent_id === "breakout-atr-15m-v1") {
       const lookbackBars = Math.floor(Number(cfg.lookbackBars ?? 20));
       const atrPeriod = Math.floor(Number(cfg.atrPeriod ?? 14));
       const atrMultiplier = Number(cfg.atrMultiplier ?? 1.2);
+      const volumeConfirmationMultiplier = parseGateNumber(cfg.volumeConfirmationMultiplier);
+      const volumeLookbackBars = parseGateNumber(cfg.volumeLookbackBars);
+      const minAdx = parseGateNumber(cfg.minAdx);
       ev = evaluateBreakoutAtrAtClose({
         barsAsc: body.sortedBarsAsc.map((r) => ({
           high: r.high,
           low: r.low,
           close: r.close,
           closeTimeIso: r.closeTimeIso,
+          volume: r.volume,
         })),
         targetCloseTimeIso: body.closeTimeIso,
         lookbackBars,
         atrPeriod,
         atrMultiplier,
+        minAtrPct,
+        maxAtrPct,
+        volumeConfirmationMultiplier,
+        ...(volumeLookbackBars != null
+          ? { volumeLookbackBars: Math.max(2, Math.floor(volumeLookbackBars)) }
+          : {}),
+        minAdx,
       });
     } else {
       continue;
@@ -113,6 +151,7 @@ export async function upsertSignalsForMarketCloseFromBars(
         signal_agent_id: agent.id,
         candle_id: candleId,
         intent: ev.intent,
+        signal_side: ev.signalSide ?? "long",
         confidence: ev.confidence,
         reasons: ev.reasons,
         metadata: {

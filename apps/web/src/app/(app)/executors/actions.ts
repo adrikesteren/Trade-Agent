@@ -50,6 +50,59 @@ async function assertExchangeIsBitvavo(
   }
 }
 
+export type PositionSideValue = "long" | "short";
+
+/**
+ * Parse the multi-checkbox `allowed_sides` form field into a deduplicated array.
+ * Defaults to `["long"]` so legacy clients (or empty submissions) still match the
+ * pre-P2 behaviour. The caller is expected to additionally validate each entry
+ * against the selected exchange's capability flags via {@link assertSidesAllowedByExchange}.
+ */
+function parseAllowedSides(formData: FormData): PositionSideValue[] {
+  const all = formData.getAll("allowed_sides");
+  const out = new Set<PositionSideValue>();
+  for (const v of all) {
+    const s = String(v ?? "").trim().toLowerCase();
+    if (s === "long" || s === "short") out.add(s);
+  }
+  if (out.size === 0) {
+    // DB CHECK requires at least one element. Default to long which matches
+    // the pre-P2 behaviour and works on every exchange that supports spot buy.
+    return ["long"];
+  }
+  return [...out];
+}
+
+/**
+ * Reject a side that the exchange does not support before we hit the DB. The
+ * mediator + executor enforce this again at runtime, but rejecting at the form
+ * boundary gives a clearer error message and keeps invalid rows out of the table.
+ */
+async function assertSidesAllowedByExchange(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  exchangeId: string,
+  sides: PositionSideValue[],
+): Promise<void> {
+  const { data, error } = await supabase
+    .schema("catalog")
+    .from("exchanges")
+    .select("supports_spot_buy, supports_spot_sell, supports_margin_long, supports_margin_short")
+    .eq("id", exchangeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Exchange not found.");
+  const longSupported = Boolean(data.supports_spot_buy) || Boolean(data.supports_margin_long);
+  const shortSupported = Boolean(data.supports_margin_short);
+  for (const s of sides) {
+    if (s === "long" && !longSupported) {
+      throw new Error("This exchange does not support long entries (no spot buy and no margin long).");
+    }
+    if (s === "short" && !shortSupported) {
+      throw new Error("This exchange does not support short selling.");
+    }
+  }
+}
+
 function parseAssetIds(formData: FormData): string[] {
   const all = formData.getAll("filter_asset_ids");
   const out: string[] = [];
@@ -58,12 +111,6 @@ function parseAssetIds(formData: FormData): string[] {
     if (s) out.push(s);
   }
   return [...new Set(out)];
-}
-
-function parsePositiveFinite(name: string, raw: FormDataEntryValue | null): number {
-  const n = Number(String(raw ?? "").trim());
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} must be a positive number.`);
-  return n;
 }
 
 function parseNonNegInt(name: string, raw: FormDataEntryValue | null): number {
@@ -122,7 +169,6 @@ function parseUnitInterval(name: string, raw: FormDataEntryValue | null, allowZe
 
 function mediatorFieldsFromForm(formData: FormData) {
   return {
-    default_notional_eur: parsePositiveFinite("Default notional (EUR)", formData.get("default_notional_eur")),
     max_risk_per_trade: parseMaxRiskPerTrade(formData.get("max_risk_per_trade")),
     max_open_positions: parseNonNegInt("Max open positions", formData.get("max_open_positions")),
     max_exposure_per_symbol_eur: parseNonNegNumber(
@@ -143,6 +189,68 @@ function mediatorFieldsFromForm(formData: FormData) {
     ),
     moving_floor_timeframe: String(formData.get("moving_floor_timeframe") ?? "15m").trim() || "15m",
   };
+}
+
+type QuoteBudgetRow = {
+  quote_asset_id: string;
+  max_notional_primary: number;
+};
+
+/** Parse paired `quote_budget_quote_asset_id[]` + `quote_budget_max_notional_primary[]` form fields. */
+function parseQuoteBudgetRows(formData: FormData): QuoteBudgetRow[] {
+  const ids = formData.getAll("quote_budget_quote_asset_id").map((v) => String(v ?? "").trim());
+  const amts = formData.getAll("quote_budget_max_notional_primary").map((v) => String(v ?? "").trim());
+  if (ids.length !== amts.length) {
+    throw new Error("Quote-asset budgets are corrupt (id/amount count mismatch).");
+  }
+  if (!ids.length) {
+    throw new Error("Add at least one quote-asset budget so the executor knows what notional to use per trade.");
+  }
+  const rows: QuoteBudgetRow[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i] ?? "";
+    if (!id) {
+      throw new Error("Pick a quote asset for every budget row (or remove empty rows).");
+    }
+    if (seen.has(id)) {
+      throw new Error("Each quote asset can only have one budget row per executor.");
+    }
+    seen.add(id);
+    const amt = Number(amts[i] ?? "");
+    if (!Number.isFinite(amt) || amt <= 0) {
+      throw new Error("Each quote-asset budget needs a positive notional in your primary fiat.");
+    }
+    rows.push({ quote_asset_id: id, max_notional_primary: amt });
+  }
+  return rows;
+}
+
+async function replaceQuoteAssetBudgets(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  executorId: string,
+  rows: QuoteBudgetRow[],
+): Promise<void> {
+  // Delete-and-reinsert under the executor-owner RLS policies.
+  const { error: delErr } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .delete()
+    .eq("executor_id", executorId);
+  if (delErr) throw new Error(`Quote-asset budgets: ${delErr.message}`);
+
+  if (!rows.length) return;
+  const { error: insErr } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .insert(
+      rows.map((r) => ({
+        executor_id: executorId,
+        quote_asset_id: r.quote_asset_id,
+        max_notional_primary: r.max_notional_primary,
+      })),
+    );
+  if (insErr) throw new Error(`Quote-asset budgets: ${insErr.message}`);
 }
 
 export async function createExecutor(formData: FormData): Promise<void> {
@@ -177,6 +285,9 @@ export async function createExecutor(formData: FormData): Promise<void> {
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
+  const quoteBudgets = parseQuoteBudgetRows(formData);
+  const allowed_sides = parseAllowedSides(formData);
+  await assertSidesAllowedByExchange(supabase, exchange_id, allowed_sides);
 
   let historical_start_date: string | null = null;
   let historical_end_date: string | null = null;
@@ -210,6 +321,7 @@ export async function createExecutor(formData: FormData): Promise<void> {
       execution_mode,
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
+      allowed_sides,
       updated_at: new Date().toISOString(),
       slack_trade_notifications_enabled,
       exchange_api_key,
@@ -224,6 +336,7 @@ export async function createExecutor(formData: FormData): Promise<void> {
   if (error) throw new Error(error.message);
   const newId = inserted?.id as string;
   await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId: newId });
+  await replaceQuoteAssetBudgets(supabase, newId, quoteBudgets);
   revalidatePath("/executors");
   redirect(`/executors/${newId}`);
 }
@@ -313,6 +426,9 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
   const filterIdsFinal = asset_filter_mode === "all" ? [] : filter_asset_ids;
   const rails = mediatorFieldsFromForm(formData);
   const exchange_id = parseUuidLike("Exchange", formData.get("exchange_id"));
+  const quoteBudgets = parseQuoteBudgetRows(formData);
+  const allowed_sides = parseAllowedSides(formData);
+  await assertSidesAllowedByExchange(supabase, exchange_id, allowed_sides);
 
   let historical_start_date: string | null = null;
   let historical_end_date: string | null = null;
@@ -361,6 +477,7 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       execution_mode,
       asset_filter_mode,
       filter_asset_ids: filterIdsFinal,
+      allowed_sides,
       updated_at: new Date().toISOString(),
       slack_trade_notifications_enabled,
       exchange_api_key,
@@ -373,5 +490,117 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
     .eq("user_id", user.id);
 
   if (error) throw new Error(error.message);
+  await replaceQuoteAssetBudgets(supabase, executorId, quoteBudgets);
   revalidateExecutorSurface(executorId);
+}
+
+function revalidateQuoteBudgetSurface(executorId: string) {
+  revalidatePath(`/executors/${executorId}`);
+  revalidatePath(`/executors/${executorId}/executor-quote-asset-budgets`);
+}
+
+function parsePositiveAmount(name: string, raw: FormDataEntryValue | null): number {
+  const n = Number(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`${name} must be a positive number.`);
+  }
+  return n;
+}
+
+/**
+ * Insert a single `trading.executor_quote_asset_budget` row for this executor.
+ * Translates the Postgres UNIQUE-violation (23505) into a user-friendly message
+ * since the table has UNIQUE(executor_id, quote_asset_id).
+ */
+export async function createExecutorQuoteBudget(
+  executorId: string,
+  formData: FormData,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const quote_asset_id = parseUuidLike("Quote asset", formData.get("quote_asset_id"));
+  const max_notional_primary = parsePositiveAmount(
+    "Max notional",
+    formData.get("max_notional_primary"),
+  );
+
+  const { error } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .insert({
+      executor_id: executorId,
+      quote_asset_id,
+      max_notional_primary,
+    });
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("A budget for this quote asset already exists on this executor.");
+    }
+    throw new Error(error.message);
+  }
+
+  revalidateQuoteBudgetSurface(executorId);
+}
+
+/** Update a single `trading.executor_quote_asset_budget` row by id. */
+export async function updateExecutorQuoteBudget(
+  budgetId: string,
+  executorId: string,
+  formData: FormData,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const quote_asset_id = parseUuidLike("Quote asset", formData.get("quote_asset_id"));
+  const max_notional_primary = parsePositiveAmount(
+    "Max notional",
+    formData.get("max_notional_primary"),
+  );
+
+  const { error } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .update({ quote_asset_id, max_notional_primary })
+    .eq("id", budgetId)
+    .eq("executor_id", executorId);
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("A budget for this quote asset already exists on this executor.");
+    }
+    throw new Error(error.message);
+  }
+
+  revalidateQuoteBudgetSurface(executorId);
+}
+
+/** Delete a single `trading.executor_quote_asset_budget` row by id. */
+export async function deleteExecutorQuoteBudget(
+  budgetId: string,
+  executorId: string,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase
+    .schema("trading")
+    .from("executor_quote_asset_budget")
+    .delete()
+    .eq("id", budgetId)
+    .eq("executor_id", executorId);
+
+  if (error) throw new Error(error.message);
+
+  revalidateQuoteBudgetSurface(executorId);
 }

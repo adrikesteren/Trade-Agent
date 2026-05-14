@@ -1,5 +1,5 @@
 import type { AdriObjectMetadata } from "./adri-object-metadata";
-import type { ObjectMetadata } from "./object-metadata";
+import type { ObjectMetadataBase } from "./object-metadata-base";
 import type { ObjectRelationshipMetadata } from "./object-relationship-metadata";
 import type { ObjectFieldMetadata } from "./object-field-metadata";
 import type { IconMetadata } from "./icon-metadata";
@@ -27,8 +27,8 @@ export abstract class AdriObjectRegistry<T extends AdriObjectMetadata> {
   }
 }
 
-export class ObjectMetadataRegistry extends AdriObjectRegistry<ObjectMetadata> {
-  constructor(objects?: ObjectMetadata[]) {
+export class ObjectMetadataRegistry extends AdriObjectRegistry<ObjectMetadataBase> {
+  constructor(objects?: ObjectMetadataBase[]) {
     super(objects);
   }
 
@@ -50,17 +50,17 @@ export class ObjectFieldMetadataRegistry extends AdriObjectRegistry<ObjectFieldM
     super(fields);
   }
 
-  public clone(sourceObject: ObjectMetadata): ObjectFieldMetadataRegistry {
+  public clone(sourceObject: ObjectMetadataBase): ObjectFieldMetadataRegistry {
     if (!sourceObject) {
       throw new SourceObjectIsRequiredException();
     }
-    
+
     const clonedRegistry = new ObjectFieldMetadataRegistry();
-    
+
     for (const registration of Array.from(this.registrations.values())) {
       clonedRegistry.add(registration.clone(sourceObject));
     }
-    
+
     return clonedRegistry;
   }
 }

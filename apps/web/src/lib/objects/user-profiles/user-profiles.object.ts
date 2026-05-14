@@ -8,7 +8,12 @@ export class UserProfilesModel extends ObjectMetadata {
       "user_profiles",
       "user_profiles",
       new ObjectLabelMetadata("User Profile", "User Profiles"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "UPF-{0000}",
+      startNumber: 1,
+    };
   }
 }

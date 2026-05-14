@@ -8,7 +8,12 @@ export class OrdersModel extends ObjectMetadata {
       "orders",
       "orders",
       new ObjectLabelMetadata("Order", "Orders"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "ORD-{0000}",
+      startNumber: 1,
+    };
   }
 }

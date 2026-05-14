@@ -1,3 +1,4 @@
+import { PositionSidePill } from "@/components/position-side-pill";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -28,6 +29,7 @@ type TradeDecisionDetail = {
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
+  position_side: string;
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
@@ -91,6 +93,7 @@ type TradeDecisionRowDb = {
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
+  position_side: string | null;
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
@@ -110,6 +113,7 @@ function flattenTradeDecisionDetail(row: TradeDecisionRowDb, candleById: Map<str
     approved: row.approved,
     reason_codes: row.reason_codes,
     timeframe: row.timeframe,
+    position_side: String(row.position_side ?? "long"),
     decision_payload: row.decision_payload,
     risk_snapshot: row.risk_snapshot,
     created_at: row.created_at,
@@ -141,7 +145,7 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
     .schema("trading")
     .from("decisions")
     .select(
-      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
+      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
     )
     .eq("id", id)
     .maybeSingle();
@@ -214,6 +218,7 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
               type="text"
               value={<span className={approvedClass(dec.approved)}>{dec.approved ? "yes" : "no"}</span>}
             />
+            <Output label="Pos. side" type="text" value={<PositionSidePill side={dec.position_side} />} />
             <Output label="Timeframe" type="text" value={dec.timeframe} />
           </>
         ),

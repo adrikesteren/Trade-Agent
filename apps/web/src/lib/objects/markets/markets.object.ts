@@ -1,21 +1,39 @@
 import { iconRegistry } from "../icons";
-import { ObjectMetadata, ObjectLabelMetadata, ObjectFieldDataTypes, ObjectRelationshipReferenceTypes, ObjectRelationshipMetadata, ObjectFieldMetadata } from "@repo/adricore/metadata";
+import {
+  ObjectMetadata,
+  ObjectLabelMetadata,
+  ObjectFieldDataTypes,
+  ObjectRelationshipReferenceTypes,
+  ObjectRelationshipMetadata,
+  ObjectFieldMetadata,
+} from "@repo/adricore/metadata";
 import { objectRegistry } from "../registry";
 
 export class MarketsModel extends ObjectMetadata {
   constructor() {
     super(
-      "public",
+      "catalog",
       "markets",
       "markets",
       new ObjectLabelMetadata("Market", "Markets"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "formula",
+      description: "base_asset.code + '-' + quote_asset.code",
+      compute: (record) => {
+        const base = (record["base_asset"] as { code?: unknown } | undefined)?.code;
+        const quote = (record["quote_asset"] as { code?: unknown } | undefined)?.code;
+        const baseStr = base != null && String(base).trim() !== "" ? String(base) : "?";
+        const quoteStr = quote != null && String(quote).trim() !== "" ? String(quote) : "?";
+        return `${baseStr}-${quoteStr}`;
+      },
+    };
   }
 
   public connectRelationships(): void {
     const assetObj = objectRegistry.registrations.get("assets");
-    
+
     if (assetObj) {
       this.fieldRegistry.add(
         new ObjectFieldMetadata(
@@ -27,10 +45,10 @@ export class MarketsModel extends ObjectMetadata {
             relationship: new ObjectRelationshipMetadata(
               "markets_by_base_asset",
               ObjectRelationshipReferenceTypes.Lookup,
-              assetObj
-            )
-          }
-        )
+              assetObj,
+            ),
+          },
+        ),
       );
 
       this.fieldRegistry.add(
@@ -43,10 +61,10 @@ export class MarketsModel extends ObjectMetadata {
             relationship: new ObjectRelationshipMetadata(
               "markets_by_quote_asset",
               ObjectRelationshipReferenceTypes.Lookup,
-              assetObj
-            )
-          }
-        )
+              assetObj,
+            ),
+          },
+        ),
       );
     }
   }

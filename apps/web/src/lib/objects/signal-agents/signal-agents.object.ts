@@ -8,7 +8,8 @@ export class SignalAgentsModel extends ObjectMetadata {
       "signal_agents",
       "signal_agents",
       new ObjectLabelMetadata("Signal Agent", "Signal Agents"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = { mode: "manual" };
   }
 }

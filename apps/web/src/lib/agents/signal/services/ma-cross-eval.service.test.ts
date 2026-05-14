@@ -62,4 +62,43 @@ describe("evaluateMaCrossAtClose", () => {
     });
     expect(r.intent).toBe("HOLD");
   });
+
+  it("emits EXIT on a confirmed bearish cross (fast MA crosses below slow MA)", () => {
+    // Up then sharp drop so fast(2) was above slow(3) on prev bar and crosses below on the last bar.
+    const closes = [100, 100, 100, 110, 120, 80];
+    const bars = ascBarsFromCloses(closes, Date.UTC(2026, 0, 3, 10, 0, 0), 900_000);
+    const target = bars[bars.length - 1]!.closeTimeIso;
+    const r = evaluateMaCrossAtClose({
+      barsAsc: bars,
+      targetCloseTimeIso: target,
+      fastPeriod: 2,
+      slowPeriod: 3,
+    });
+    expect(r.intent).toBe("EXIT");
+    expect(r.reasons[0]).toContain("ma_cross_down");
+  });
+
+  it("blocks ENTER under low volatility when minAtrPct gate is set", () => {
+    // Bullish cross with tiny price moves so ATR% stays well below the gate.
+    // ATR includes the gap |high-prevClose|, so we need very small moves
+    // overall (no jumps) for atrPct to stay under 0.02.
+    const closes = [100, 100, 100, 100, 100, 100.001];
+    const bars = closes.map((close, i) => ({
+      close,
+      high: close + 0.0005,
+      low: close - 0.0005,
+      closeTimeIso: new Date(Date.UTC(2026, 0, 4, 10, 0, 0) + i * 900_000).toISOString(),
+    }));
+    const target = bars[bars.length - 1]!.closeTimeIso;
+    const r = evaluateMaCrossAtClose({
+      barsAsc: bars,
+      targetCloseTimeIso: target,
+      fastPeriod: 2,
+      slowPeriod: 3,
+      minAtrPct: 0.02,
+      atrPeriod: 3,
+    });
+    expect(r.intent).toBe("HOLD");
+    expect((r.reasons[0] ?? "").toLowerCase()).toContain("vol");
+  });
 });

@@ -8,7 +8,12 @@ export class SystemSettingsModel extends ObjectMetadata {
       "system_settings",
       "system_settings",
       new ObjectLabelMetadata("System Setting", "System Settings"),
-      iconRegistry.registrations.get("Database")!
+      iconRegistry.registrations.get("Database")!,
     );
+    this.nameField = {
+      mode: "autoNumber",
+      displayFormat: "SYS-{0000}",
+      startNumber: 1,
+    };
   }
 }
