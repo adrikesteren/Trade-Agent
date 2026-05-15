@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -23,7 +23,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type OrderRow = {
@@ -149,7 +149,7 @@ export async function OrdersListView({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
-  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
   const fmtQty = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
   const fmtEur = (v: string | number | null | undefined) =>
@@ -204,12 +204,12 @@ export async function OrdersListView({
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
           model={objectRegistry.registrations.get("orders")!}
-          title={parentExecutor ? `Orders · ${parentExecutor.name}` : undefined}
+          title={parentExecutor ? `Orders Â· ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={
             executorIdFilter
-              ? `Filtered by executor · sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
-              : `Sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
+              ? `Filtered by executor Â· sorted by created (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
+              : `Sorted by created (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
           }
           actions={
             <>
@@ -264,15 +264,15 @@ export async function OrdersListView({
                       row.market_id && symbolByMarketId.has(row.market_id)
                         ? symbolByMarketId.get(row.market_id)!
                         : row.market_id
-                          ? `${row.market_id.slice(0, 8)}…`
-                          : "—";
-                    const ext = row.external_id?.trim() || "—";
-                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
+                          ? `${row.market_id.slice(0, 8)}â€¦`
+                          : "â€”";
+                    const ext = row.external_id?.trim() || "â€”";
+                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "â€¦";
                     return (
                       <tr key={row.id}>
                         <Td>
                           <Link href={`/orders/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
+                            {row.id.slice(0, 8)}â€¦
                           </Link>
                         </Td>
                         <Td>
@@ -304,9 +304,9 @@ export async function OrdersListView({
                         </Td>
                         <Td className="font-mono">
                           {row.decision_id ? (
-                            <span title={row.decision_id}>{row.decision_id.slice(0, 8)}…</span>
+                            <span title={row.decision_id}>{row.decision_id.slice(0, 8)}â€¦</span>
                           ) : (
-                            "—"
+                            "â€”"
                           )}
                         </Td>
                         <Td className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</Td>

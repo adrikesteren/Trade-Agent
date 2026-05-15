@@ -1,4 +1,4 @@
-import {
+﻿import {
   ExecutorForm,
   type AssetOption,
   type ExchangeOption,
@@ -11,7 +11,7 @@ import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-ca
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Alert, Stack } from "@repo/adricore/blocks";
+import { Alert, Stack } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -118,7 +118,7 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
 
   const title = cloneInitial ? "Clone executor" : "New executor";
   const subtitle = cloneInitial
-    ? `Settings copied from "${cloneSourceName ?? "executor"}". Exchange API keys are not copied — use paper mode or enter new keys for live. Balance and related records stay on the original.`
+    ? `Settings copied from "${cloneSourceName ?? "executor"}". Exchange API keys are not copied â€” use paper mode or enter new keys for live. Balance and related records stay on the original.`
     : "Create a portfolio with its own paper/live mode, optional asset whitelist or blacklist, then add EUR balance on the executor detail page.";
 
   return (

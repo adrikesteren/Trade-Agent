@@ -11,7 +11,7 @@ import {
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 

@@ -1,4 +1,4 @@
-import {
+﻿import {
   USER_DATE_FORMAT_CHOICES,
   USER_DECIMAL_FORMAT_CHOICES,
   USER_TIME_FORMAT_CHOICES,
@@ -6,7 +6,7 @@ import {
 } from "@/lib/locale/choices";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { createClient } from "@/lib/supabase/server";
-import { Button, Card, CardBody, Stack } from "@repo/adricore/blocks";
+import { Button, Card, CardBody, Stack } from "@adrikesteren/adricore/blocks";
 import { updateUserLocalePreferences } from "./actions";
 
 export default async function MePreferencesPage() {

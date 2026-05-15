@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -27,7 +27,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type DecisionRow = {
@@ -64,7 +64,7 @@ function payloadString(payload: Record<string, unknown> | null, key: string): st
 function resolvedIntentFromRow(row: DecisionRow): string {
   const fromPayload = payloadString(row.decision_payload, "resolvedIntent");
   if (fromPayload) return fromPayload;
-  return "—";
+  return "â€”";
 }
 
 function intentClass(intent: string): string {
@@ -81,7 +81,7 @@ function approvedClass(approved: boolean): string {
 }
 
 function formatReasonCodes(codes: string[] | null | undefined): string {
-  if (!codes?.length) return "—";
+  if (!codes?.length) return "â€”";
   return codes.join(", ");
 }
 
@@ -166,8 +166,8 @@ async function fetchExecutorNamesById(
 function marketLabel(row: DecisionRow, symbolByMarketId: Map<string, string>): string {
   const fromPayload = payloadString(row.decision_payload, "market_symbol");
   if (fromPayload) return fromPayload;
-  if (!row.market_id) return "—";
-  return symbolByMarketId.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`;
+  if (!row.market_id) return "â€”";
+  return symbolByMarketId.get(row.market_id) ?? `${row.market_id.slice(0, 8)}â€¦`;
 }
 
 export type TradeDecisionsListViewProps = {
@@ -189,7 +189,7 @@ export async function TradeDecisionsListView({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
-  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
 
   let q = supabase
     .schema("trading")
@@ -222,7 +222,7 @@ export async function TradeDecisionsListView({
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
-  const sortLineCore = `Approved first · bar close desc · one row per market · ${totalCount} ranked from last ${TRADE_DECISIONS_FETCH_POOL} rows · Page ${page} of ${pages}`;
+  const sortLineCore = `Approved first Â· bar close desc Â· one row per market Â· ${totalCount} ranked from last ${TRADE_DECISIONS_FETCH_POOL} rows Â· Page ${page} of ${pages}`;
 
   const extraQuery: Record<string, string | undefined> = {};
   if (executorIdFilter) extraQuery.executorId = executorIdFilter;
@@ -232,9 +232,9 @@ export async function TradeDecisionsListView({
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
           model={objectRegistry.registrations.get("trade_decisions")!}
-          title={parentExecutor ? `Trading decisions · ${parentExecutor.name}` : undefined}
+          title={parentExecutor ? `Trading decisions Â· ${parentExecutor.name}` : undefined}
           rowCount={list.length}
-          sortLine={executorIdFilter ? `Filtered by executor · ${sortLineCore}` : sortLineCore}
+          sortLine={executorIdFilter ? `Filtered by executor Â· ${sortLineCore}` : sortLineCore}
           actions={
             <>
               {parentExecutor ? (
@@ -253,7 +253,7 @@ export async function TradeDecisionsListView({
           <Alert tone="info">
             <strong>CRON_SECRET</strong> is een gedeeld geheim in je server-<code className="bk-code">.env</code>: workers
             zoals candle sync, signals en mediator accepteren alleen requests met een geldige{" "}
-            <code className="bk-code">Authorization: Bearer …</code> (jouw <code className="bk-code">CRON_SECRET</code>).
+            <code className="bk-code">Authorization: Bearer â€¦</code> (jouw <code className="bk-code">CRON_SECRET</code>).
             Zo kan niet iedereen op het internet achtergrondjobs starten.
           </Alert>
         ) : null}
@@ -289,12 +289,12 @@ export async function TradeDecisionsListView({
                     const label = marketLabel(row, symbolByMarketId);
                     const resolved = resolvedIntentFromRow(row);
                     const reasons = formatReasonCodes(row.reason_codes);
-                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
+                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "â€¦";
                     return (
                       <tr key={row.id}>
                         <Td>
                           <Link href={`/trade-decisions/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
+                            {row.id.slice(0, 8)}â€¦
                           </Link>
                         </Td>
                         <Td>

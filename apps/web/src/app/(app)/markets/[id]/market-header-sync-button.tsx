@@ -1,7 +1,7 @@
 "use client";
 
 import { enqueueMarketSymbolCloseRelay } from "@/app/(app)/markets/[id]/actions";
-import { Alert, Button } from "@repo/adricore/blocks";
+import { Alert, Button } from "@adrikesteren/adricore/blocks";
 import { useState, useTransition } from "react";
 
 type Props = {

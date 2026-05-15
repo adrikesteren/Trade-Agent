@@ -1,4 +1,4 @@
-import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
+﻿import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
@@ -21,7 +21,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type AssetEmbed = {
@@ -104,7 +104,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
     `Page ${page} of ${pages}`,
     `${exchange?.name ?? "Bitvavo"}`,
     `${pageSize} per page`,
-  ].join(" · ");
+  ].join(" Â· ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -129,7 +129,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
         <span className="bk-form-label" style={{ display: "inline", marginRight: "0.25rem" }}>
           Jobs & history
         </span>
-        — Bitvavo sync (listings + candles), CoinGecko snapshots, and{" "}
+        â€” Bitvavo sync (listings + candles), CoinGecko snapshots, and{" "}
         <code className="bk-code">sync_runs</code> on{" "}
         <Link href="/sync-runs" className="bk-link">
           Sync runs
@@ -159,8 +159,8 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
                 {displayListings.map((row) => {
                   const asset = unwrapAssetEmbed(row.assets);
                   const quote = unwrapAssetEmbed(row.quote_asset);
-                  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
-                  const quoteName = quote?.name?.trim() ? quote.name : (quote?.code ?? "—");
+                  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "â€”");
+                  const quoteName = quote?.name?.trim() ? quote.name : (quote?.code ?? "â€”");
                   const baseMini =
                     asset?.id && asset.code
                       ? { id: String(asset.id), code: String(asset.code), name: asset.name ?? null }

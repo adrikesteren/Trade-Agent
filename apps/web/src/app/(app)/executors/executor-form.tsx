@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Alert, Button, Card, CardBody } from "@repo/adricore/blocks";
+import { Alert, Button, Card, CardBody } from "@adrikesteren/adricore/blocks";
 
 import type { ExecutionModeValue, ExecutorAssetFilterMode } from "./actions";
 import { createExecutor, updateExecutor } from "./actions";
@@ -101,7 +101,7 @@ export function ExecutorForm({
   quoteAssetOptionsByExchange?: Record<string, AssetOption[]>;
   /**
    * Capability flags per `catalog.exchanges.id`. Drives the "Allowed sides"
-   * checkbox visibility — e.g. Bitvavo (spot-only) hides the short option.
+   * checkbox visibility â€” e.g. Bitvavo (spot-only) hides the short option.
    */
   exchangeCapabilitiesById?: Record<string, ExchangeCapabilities>;
   /** ISO code of the user's primary fiat (e.g. "EUR" / "USD"). Used as the budgets unit label. */
@@ -155,7 +155,7 @@ export function ExecutorForm({
   useEffect(() => {
     setAllowedSides((prev) => {
       const next = prev.filter((s) => (s === "long" ? longSupported : shortSupported));
-      // Never let the array go empty — fall back to "long" when the exchange supports it.
+      // Never let the array go empty â€” fall back to "long" when the exchange supports it.
       if (next.length === 0 && longSupported) return ["long"];
       if (next.length === 0 && shortSupported) return ["short"];
       return next;
@@ -240,8 +240,8 @@ export function ExecutorForm({
               }}
             >
               <option value="paper">Paper (simulated fills)</option>
-              <option value="live">Live (Bitvavo — server API keys)</option>
-              <option value="historical">Historical (backtest date range — paper only)</option>
+              <option value="live">Live (Bitvavo â€” server API keys)</option>
+              <option value="historical">Historical (backtest date range â€” paper only)</option>
             </select>
           </div>
 
@@ -305,7 +305,7 @@ export function ExecutorForm({
             >
               {exchangeOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
-                  {opt.code} — {opt.name}
+                  {opt.code} â€” {opt.name}
                 </option>
               ))}
             </select>
@@ -322,7 +322,7 @@ export function ExecutorForm({
           {mode === "edit" && initial?.exchange_api_credentials_configured ? (
             <p className="bk-text-muted text-xs">
               Credentials are saved. Key ends with{" "}
-              <span className="font-mono text-[var(--text)]">{initial.exchange_api_key_suffix ?? "…"}</span>. Leave the
+              <span className="font-mono text-[var(--text)]">{initial.exchange_api_key_suffix ?? "â€¦"}</span>. Leave the
               fields below empty to keep the current key and secret; fill to replace.
             </p>
           ) : mode === "edit" ? (
@@ -403,7 +403,7 @@ export function ExecutorForm({
                     }}
                     required
                   >
-                    <option value="">— Select quote —</option>
+                    <option value="">â€” Select quote â€”</option>
                     {quoteOptionsForCurrentExchange.length === 0 ? (
                       <option value="" disabled>
                         (no quote markets known for this exchange)
@@ -418,7 +418,7 @@ export function ExecutorForm({
                     {row.quote_asset_id &&
                     !quoteOptionsForCurrentExchange.some((o) => o.id === row.quote_asset_id) ? (
                       <option value={row.quote_asset_id}>
-                        (current: {row.quote_asset_id.slice(0, 8)}…)
+                        (current: {row.quote_asset_id.slice(0, 8)}â€¦)
                       </option>
                     ) : null}
                   </select>
@@ -535,7 +535,7 @@ export function ExecutorForm({
                     });
                   }}
                 />
-                Short (margin short — execution stub for now)
+                Short (margin short â€” execution stub for now)
               </label>
             ) : (
               <p className="bk-text-muted text-xs">
@@ -550,7 +550,7 @@ export function ExecutorForm({
 
           <div>
             <label htmlFor="ex-max-risk" className="bk-form-label">
-              Max risk per trade (0–1)
+              Max risk per trade (0â€“1)
             </label>
             <input
               id="ex-max-risk"
@@ -665,7 +665,7 @@ export function ExecutorForm({
 
           <div>
             <label htmlFor="ex-floor-trail" className="bk-form-label">
-              Moving floor trail percent (0–1)
+              Moving floor trail percent (0â€“1)
             </label>
             <input
               id="ex-floor-trail"
@@ -682,7 +682,7 @@ export function ExecutorForm({
 
           <div>
             <label htmlFor="ex-floor-activation" className="bk-form-label">
-              Activation profit percent (0–1)
+              Activation profit percent (0â€“1)
             </label>
             <input
               id="ex-floor-activation"
@@ -761,7 +761,7 @@ export function ExecutorForm({
                 defaultValue={(initial?.filter_asset_ids ?? [])[0] ?? ""}
                 required
               >
-                <option value="">— Select one asset —</option>
+                <option value="">â€” Select one asset â€”</option>
                 {assetOptions.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.code}

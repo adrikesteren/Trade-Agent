@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { deleteCatalogMarket } from "@/app/(app)/markets/actions";
 import {
@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
@@ -61,7 +61,7 @@ export function MarketListRowActions({
                   {assetLabel(baseAsset)}
                 </Link>
               ) : (
-                "—"
+                "â€”"
               )}
             </p>
             <p>
@@ -71,7 +71,7 @@ export function MarketListRowActions({
                   {assetLabel(quoteAsset)}
                 </Link>
               ) : (
-                "—"
+                "â€”"
               )}
             </p>
           </div>

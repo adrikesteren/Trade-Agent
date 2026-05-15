@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { dateOrderLocale, formatDatetime, formatDecimal } from "@/lib/locale/format";
 import type { UserDateFormat, UserDecimalFormat, UserLocalePreferences, UserTimeFormat, UserTimezone } from "@/lib/locale/types";
@@ -20,7 +20,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { Button, Card, CardBody } from "@repo/adricore/blocks";
+import { Button, Card, CardBody } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -44,7 +44,7 @@ function formatChartCrosshairTime(t: Time, timeZone: string, tickLocale: string,
 
 /**
  * v5: `localization.timeFormatter` only affects the crosshair label, not time-axis ticks.
- * Tick marks use the same display timezone (≤8 chars where possible).
+ * Tick marks use the same display timezone (â‰¤8 chars where possible).
  */
 function formatChartTickMark(
   time: Time,
@@ -125,7 +125,7 @@ function hoverTooltipLayout(
   let left: number;
   let transform: string;
   if (placeLeft) {
-    // `left` is the right edge of the box before translate(-100%, …)
+    // `left` is the right edge of the box before translate(-100%, â€¦)
     left = Math.max(estW + pad, Math.min(ax - gap, chartWidth - pad));
     transform = "translate(-100%, -50%)";
   } else {
@@ -448,7 +448,7 @@ export function MarketCandleChart({
         setCandles(body.candles ?? []);
         setChangePct(body.changePct ?? computeChange(body.candles ?? []));
       } catch {
-        /* background refresh — ignore */
+        /* background refresh â€” ignore */
       }
     };
 
@@ -544,7 +544,7 @@ export function MarketCandleChart({
               Price chart
             </h2>
             <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-              Candlesticks + volume · OHLCV + bar close time in tooltip
+              Candlesticks + volume Â· OHLCV + bar close time in tooltip
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -595,7 +595,7 @@ export function MarketCandleChart({
               <span className="font-normal bk-text-muted">(in view)</span>
             </span>
           ) : null}
-          {loading ? <span className="bk-text-muted text-xs">Loading…</span> : null}
+          {loading ? <span className="bk-text-muted text-xs">Loadingâ€¦</span> : null}
           {error ? (
             <span className="text-xs" style={{ color: "var(--bk-color-error)" }}>
               {error}
@@ -635,7 +635,7 @@ export function MarketCandleChart({
                   Bar closes
                 </dt>
                 <dd className="text-right font-mono" style={{ color: "var(--bk-color-text)" }}>
-                  {hoverOhlcv.closeTimeLabel ?? "—"}
+                  {hoverOhlcv.closeTimeLabel ?? "â€”"}
                 </dd>
                 <dt className="opacity-80">O</dt>
                 <dd className="text-right" style={{ color: "var(--bk-color-text)" }}>

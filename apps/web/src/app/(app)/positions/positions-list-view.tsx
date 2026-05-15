@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -9,7 +9,7 @@ import {
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 const CHUNK = 120;
@@ -84,12 +84,12 @@ export async function PositionsListView({
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
           model={objectRegistry.registrations.get("positions")!}
-          title={parentExecutor ? `Positions · ${parentExecutor.name}` : undefined}
+          title={parentExecutor ? `Positions Â· ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={
             executorIdFilter
-              ? `Filtered by executor · sorted by updated date (newest first) · Page ${page} of ${pages} · ${totalCount} total`
-              : `Sorted by updated date (newest first) · Page ${page} of ${pages} · ${totalCount} total`
+              ? `Filtered by executor Â· sorted by updated date (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
+              : `Sorted by updated date (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
           }
           actions={
             parentExecutor ? (

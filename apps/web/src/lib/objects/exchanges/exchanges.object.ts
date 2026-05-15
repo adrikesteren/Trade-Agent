@@ -1,10 +1,10 @@
-import { iconRegistry } from "../icons";
+﻿import { iconRegistry } from "../icons";
 import {
   ObjectFieldDataTypes,
   ObjectFieldMetadata,
   ObjectLabelMetadata,
   ObjectMetadata,
-} from "@repo/adricore/metadata";
+} from "@adrikesteren/adricore/metadata";
 
 export class ExchangesModel extends ObjectMetadata {
   constructor() {
@@ -17,7 +17,7 @@ export class ExchangesModel extends ObjectMetadata {
     );
     this.nameField = { mode: "manual" };
 
-    // P2 — exchange capability flags. Mirrors columns added by
+    // P2 â€” exchange capability flags. Mirrors columns added by
     // 20260723110000_exchange_capabilities.sql. The executor form filters its
     // "allowed sides" choices using these booleans (UI gate); the mediator and
     // executor reject sides outside this set at decision/execution time.

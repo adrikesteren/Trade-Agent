@@ -1,4 +1,4 @@
-import { SyncRunsLiveClient, type SyncRunRow } from "@/components/sync-runs-live-client";
+﻿import { SyncRunsLiveClient, type SyncRunRow } from "@/components/sync-runs-live-client";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -12,7 +12,7 @@ import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
-import { listViewOutlineActionClass } from "@repo/adricore/blocks";
+import { listViewOutlineActionClass } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {
@@ -63,7 +63,7 @@ export default async function SyncRunsPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("sync_runs")!}
         rowCount={n}
-        sortLine={sortLineParts.join(" · ")}
+        sortLine={sortLineParts.join(" Â· ")}
         title="Run history"
         subtitle={
           <>

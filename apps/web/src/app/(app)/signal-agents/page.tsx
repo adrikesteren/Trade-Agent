@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -18,7 +18,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {
@@ -54,7 +54,7 @@ export default async function SignalAgentsPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("signal_agents")!}
         rowCount={list.length}
-        sortLine={`Sorted by Created date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Sorted by Created date Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
         actions={
           <Link href="/signals" className={listViewOutlineActionClass}>
             Signals
@@ -87,21 +87,21 @@ export default async function SignalAgentsPage({ searchParams }: PageProps) {
                       </Link>
                     </Td>
                     <Td>{row.enabled ? "Yes" : "No"}</Td>
-                    <Td>{(row.version as string | null)?.trim() || "—"}</Td>
+                    <Td>{(row.version as string | null)?.trim() || "â€”"}</Td>
                     <Td className="max-w-md truncate" title={(row.description as string | null) ?? undefined}>
-                      {(row.description as string | null)?.trim() || "—"}
+                      {(row.description as string | null)?.trim() || "â€”"}
                     </Td>
                     <Td className="whitespace-nowrap font-mono">
                       {row.updated_at
                         ? String(row.updated_at).slice(0, 19).replace("T", " ")
-                        : "—"}
+                        : "â€”"}
                     </Td>
                   </tr>
                 ))}
                 {!list.length ? (
                   <tr>
                     <Td colSpan={5} muted className="py-8 text-center">
-                      No signal agents. Run migrations — the seed inserts <code className="bk-code">ma-cross-15m-v1</code>.
+                      No signal agents. Run migrations â€” the seed inserts <code className="bk-code">ma-cross-15m-v1</code>.
                     </Td>
                   </tr>
                 ) : null}

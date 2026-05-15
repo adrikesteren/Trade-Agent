@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 import { syncCoingeckoCoinIdsFromOverview } from "@/app/(app)/overview/actions";
-import { Alert, Button } from "@repo/adricore/blocks";
+import { Alert, Button } from "@adrikesteren/adricore/blocks";
 import { useState, useTransition } from "react";
 
 export function OverviewSyncCoingeckoCoinIdsButton() {
@@ -28,8 +28,8 @@ export function OverviewSyncCoingeckoCoinIdsButton() {
               if (r.via === "relay") {
                 const gid = r.relayMessageGroupIds?.[0];
                 const tail = gid
-                  ? `message-group ${gid.slice(0, 8)}… · ${r.published} job(s).`
-                  : `${r.published} job(s) · ${r.relayMessageIds.length} message id(s).`;
+                  ? `message-group ${gid.slice(0, 8)}â€¦ Â· ${r.published} job(s).`
+                  : `${r.published} job(s) Â· ${r.relayMessageIds.length} message id(s).`;
                 setFeedback({
                   tone: "success",
                   text: `CoinGecko coin id discovery queued on Relay (${tail}). Ensure Relay dispatch is running.`,
@@ -44,7 +44,7 @@ export function OverviewSyncCoingeckoCoinIdsButton() {
                 if (r.failureCount > 0) bits.push(`${r.failureCount} row errors`);
                 setFeedback({
                   tone: "success",
-                  text: `CoinGecko coin id: ${bits.join(" · ")}.`,
+                  text: `CoinGecko coin id: ${bits.join(" Â· ")}.`,
                 });
               }
             } else {
@@ -53,7 +53,7 @@ export function OverviewSyncCoingeckoCoinIdsButton() {
           });
         }}
       >
-        {pending ? "Syncing…" : "Sync Assets With Coingecko Id"}
+        {pending ? "Syncingâ€¦" : "Sync Assets With Coingecko Id"}
       </Button>
     </div>
   );

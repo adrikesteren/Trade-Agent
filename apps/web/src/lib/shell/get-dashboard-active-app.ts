@@ -1,6 +1,6 @@
-import "server-only";
+﻿import "server-only";
 
-import { ACTIVE_APP_COOKIE_NAME, type AppMetadata } from "@repo/adricore/metadata";
+import { ACTIVE_APP_COOKIE_NAME, type AppMetadata } from "@adrikesteren/adricore/metadata";
 import { cookies } from "next/headers";
 
 import {

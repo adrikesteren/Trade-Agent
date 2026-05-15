@@ -1,11 +1,11 @@
-import {
+﻿import {
   buildAssetCoingeckoMetricsRow,
   type AssetCoingeckoMetricsRow,
   type AssetLiveCoingeckoDb,
 } from "@/components/asset-coingecko-metrics-block";
 import { formatDecimal, formatPercentSigned, formatUsdAmount, formatUsdSigned } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
-import { Output } from "@repo/adricore/blocks";
+import { Output } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 function num(v: number | string | null | undefined): number | null {
@@ -15,19 +15,19 @@ function num(v: number | string | null | undefined): number | null {
 }
 
 function fmtInt(prefs: UserLocalePreferences, v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  if (v === null || v === undefined || !Number.isFinite(v)) return "â€”";
   return formatDecimal(Math.round(v), prefs, { maximumFractionDigits: 0, minimumFractionDigits: 0 });
 }
 
 function fmtSupply(prefs: UserLocalePreferences, v: number | string | null | undefined): string {
   const n = num(v);
-  if (n === null) return "—";
+  if (n === null) return "â€”";
   return formatDecimal(n, prefs, { notation: "compact", maximumFractionDigits: 2, minimumFractionDigits: 0 });
 }
 
 function rowOutputs(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences, formatDt: (v: string | number | Date) => string) {
   const cgHref =
-    row.coingecko_id && row.coingecko_id !== "—"
+    row.coingecko_id && row.coingecko_id !== "â€”"
       ? `https://www.coingecko.com/en/coins/${encodeURIComponent(row.coingecko_id)}`
       : null;
 
@@ -36,7 +36,7 @@ function rowOutputs(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences,
       <Output label="CoinGecko coin id" type="text" value={row.coingecko_id} span="full" />
       <Output label="CoinGecko fetched at" type="datetime" value={row.fetched_at} formatDatetime={formatDt} />
       <Output label="Price (USD)" type="text" value={formatUsdAmount(row.price_usd, prefs, { compactAbove: 1_000_000 })} />
-      <Output label="24h Δ (USD)" type="text" value={formatUsdSigned(row.price_change_24h_usd, prefs)} />
+      <Output label="24h Î” (USD)" type="text" value={formatUsdSigned(row.price_change_24h_usd, prefs)} />
       <Output label="Market cap (USD)" type="text" value={formatUsdAmount(row.market_cap_usd, prefs, { compactAbove: 1_000_000 })} />
       <Output label="24h volume (USD)" type="text" value={formatUsdAmount(row.total_volume_usd, prefs, { compactAbove: 1_000_000 })} />
       <Output label="FDV (USD)" type="text" value={formatUsdAmount(row.fully_diluted_valuation_usd, prefs, { compactAbove: 1_000_000 })} />
@@ -56,13 +56,13 @@ function rowOutputs(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences,
       <Output
         label="Circ. / total / max supply"
         type="text"
-        value={`${fmtSupply(prefs, row.circulating_supply)} · ${fmtSupply(prefs, row.total_supply)} · ${fmtSupply(prefs, row.max_supply)}`}
+        value={`${fmtSupply(prefs, row.circulating_supply)} Â· ${fmtSupply(prefs, row.total_supply)} Â· ${fmtSupply(prefs, row.max_supply)}`}
         span="full"
       />
       <Output
         label="ATH (USD) / vs ATH"
         type="text"
-        value={`${formatUsdAmount(row.ath_usd, prefs)} · ${formatPercentSigned(row.ath_change_pct, prefs)}`}
+        value={`${formatUsdAmount(row.ath_usd, prefs)} Â· ${formatPercentSigned(row.ath_change_pct, prefs)}`}
         span="full"
       />
       {cgHref ? (
@@ -71,7 +71,7 @@ function rowOutputs(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences,
           type="text"
           value={
             <Link href={cgHref} target="_blank" rel="noopener noreferrer" className="bk-link">
-              Open on CoinGecko ↗
+              Open on CoinGecko â†—
             </Link>
           }
           span="full"
@@ -82,13 +82,13 @@ function rowOutputs(row: AssetCoingeckoMetricsRow, prefs: UserLocalePreferences,
 }
 
 function emptySnapshotOutputs(coinIdDisplay: string) {
-  const dash = "—";
+  const dash = "â€”";
   return (
     <>
       <Output label="CoinGecko coin id" type="text" value={coinIdDisplay} span="full" />
       <Output label="CoinGecko fetched at" type="text" value={dash} />
       <Output label="Price (USD)" type="text" value={dash} />
-      <Output label="24h Δ (USD)" type="text" value={dash} />
+      <Output label="24h Î” (USD)" type="text" value={dash} />
       <Output label="Market cap (USD)" type="text" value={dash} />
       <Output label="24h volume (USD)" type="text" value={dash} />
       <Output label="FDV (USD)" type="text" value={dash} />
@@ -129,7 +129,7 @@ export function AssetCoingeckoDetailOutputs({
   formatDt: (v: string | number | Date) => string;
 }) {
   const row = buildAssetCoingeckoMetricsRow(asset, metadataCoingeckoId);
-  const coinIdDisplay = asset.coingecko_coin_id?.trim() || metadataCoingeckoId?.trim() || "—";
+  const coinIdDisplay = asset.coingecko_coin_id?.trim() || metadataCoingeckoId?.trim() || "â€”";
 
   if (row) {
     return rowOutputs(row, localePrefs, formatDt);

@@ -11,7 +11,7 @@ import {
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };

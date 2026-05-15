@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
 import { ListViewPagination } from "@/components/list-view-pagination";
@@ -25,7 +25,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 
 export default async function SystemSettingsListPage({
   searchParams,
@@ -38,7 +38,7 @@ export default async function SystemSettingsListPage({
   const isAdmin = await isDashboardAdministrator();
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date | null) =>
-    v == null || v === "" ? "—" : formatDatetime(v, prefs);
+    v == null || v === "" ? "â€”" : formatDatetime(v, prefs);
 
   if (!isAdmin) {
     return (
@@ -93,7 +93,7 @@ export default async function SystemSettingsListPage({
     `Page ${page} of ${pages}`,
     "public.system_settings",
     "Open a row for Edit (dialog) or Delete (confirm)",
-  ].join(" · ");
+  ].join(" Â· ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">

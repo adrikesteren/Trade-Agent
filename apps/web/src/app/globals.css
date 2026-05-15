@@ -1,5 +1,4 @@
-/* Relative path: Turbopack/Tailwind PostCSS does not resolve @repo/* CSS package exports. */
-@import "../../../../packages/adricore/src/blocks/styles/blocks.css";
+@import "@adrikesteren/adricore/blocks/styles.css";
 @import "tailwindcss";
 
 :root {

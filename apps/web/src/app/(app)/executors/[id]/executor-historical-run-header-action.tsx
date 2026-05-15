@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button } from "@repo/adricore/blocks";
+import { Button } from "@adrikesteren/adricore/blocks";
 
 /** Header action: POST historical replay (paper). Feedback stays inline under the button. */
 export function ExecutorHistoricalRunHeaderAction(props: { executorId: string }) {

@@ -1,4 +1,4 @@
-import { RecordPageTabs } from "@/components/record-page-tabs";
+﻿import { RecordPageTabs } from "@/components/record-page-tabs";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
@@ -9,7 +9,7 @@ import {
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type LogDetail = {
@@ -28,7 +28,7 @@ function isUuidLike(s: string): boolean {
 
 type LogsDetailViewProps = { recordId: string };
 
-/** Log detail — used by `(app)/[tabSlug]/[recordId]` when `tabSlug` is `logs`. */
+/** Log detail â€” used by `(app)/[tabSlug]/[recordId]` when `tabSlug` is `logs`. */
 export async function LogsDetailView({ recordId }: LogsDetailViewProps) {
   const id = recordId;
   if (!isUuidLike(id)) notFound();
@@ -63,7 +63,7 @@ export async function LogsDetailView({ recordId }: LogsDetailViewProps) {
         highlights: (
           <>
             <Output label="Created" type="datetime" value={log.created_at} formatDatetime={formatDt} />
-            <Output label="Context" type="text" value={log.context ?? "—"} />
+            <Output label="Context" type="text" value={log.context ?? "â€”"} />
           </>
         ),
         subtitle: log.message,
@@ -77,7 +77,7 @@ export async function LogsDetailView({ recordId }: LogsDetailViewProps) {
                   <Output label="Log ID" type="text" value={log.id} span="full" />
                   <Output label="User ID" type="text" value={log.user_id} span="full" />
                   <Output label="Level" type="text" value={log.level} />
-                  <Output label="Context" type="text" value={log.context ?? "—"} />
+                  <Output label="Context" type="text" value={log.context ?? "â€”"} />
                   <Output label="Created" type="datetime" value={log.created_at} formatDatetime={formatDt} />
                   <Output label="Message" type="text" value={log.message} span="full" />
                 </RecordPageGrid>

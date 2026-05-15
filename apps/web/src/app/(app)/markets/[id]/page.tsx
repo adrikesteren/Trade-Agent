@@ -20,7 +20,7 @@ import {
   RecordPageGrid,
   RecordPageSection,
   RecordRelatedList,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 

@@ -1,5 +1,5 @@
-import { iconRegistry } from "../icons";
-import { ObjectMetadata, ObjectLabelMetadata } from "@repo/adricore/metadata";
+﻿import { iconRegistry } from "../icons";
+import { ObjectMetadata, ObjectLabelMetadata } from "@adrikesteren/adricore/metadata";
 
 export class UserPreferencesModel extends ObjectMetadata {
   constructor() {

@@ -4,8 +4,8 @@ This file orients coding agents and contributors: **routing**, **UI/blocks**, **
 
 ## AdriCore vs this app
 
-- [`@repo/adricore`](packages/adricore/README.md) is a **framework** package (reusable blocks, metadata OOP classes, generic tab URL helpers). It does **not** contain Trade Agent–specific routes, navigation entries, or object registries.
-- **This product** composes AdriCore in **`apps/web`**: each business object is modeled with a **subclass of [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.tsx)** or, for high-volume / append-only tables, [`HighVolumeObjectMetadata`](packages/adricore/src/metadata/high-volume-object-metadata.tsx). Both extend the shared [`ObjectMetadataBase`](packages/adricore/src/metadata/object-metadata-base.tsx). Shell nav lives in [`apps/web/src/config/app-shell.ts`](apps/web/src/config/app-shell.ts) (`appRegistry` + cookie-driven active `AppMetadata`; see `DEFAULT_APP_ID` / `ACTIVE_APP_COOKIE_NAME` in `@repo/adricore/metadata`). The OOP class structure carries the **standard column contract**:
+- [`@adrikesteren/adricore`](packages/adricore/README.md) is a **framework** package (reusable blocks, metadata OOP classes, generic tab URL helpers). It does **not** contain Trade Agent–specific routes, navigation entries, or object registries.
+- **This product** composes AdriCore in **`apps/web`**: each business object is modeled with a **subclass of [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.tsx)** or, for high-volume / append-only tables, [`HighVolumeObjectMetadata`](packages/adricore/src/metadata/high-volume-object-metadata.tsx). Both extend the shared [`ObjectMetadataBase`](packages/adricore/src/metadata/object-metadata-base.tsx). Shell nav lives in [`apps/web/src/config/app-shell.ts`](apps/web/src/config/app-shell.ts) (`appRegistry` + cookie-driven active `AppMetadata`; see `DEFAULT_APP_ID` / `ACTIVE_APP_COOKIE_NAME` in `@adrikesteren/adricore/metadata`). The OOP class structure carries the **standard column contract**:
   - `ObjectMetadataBase` (the base) → `id`, `created_by`, `created_at`, `updated_by`, `updated_at` (registry: `baseObjectFieldRegistry`).
   - `ObjectMetadata` → adds a user-facing `name` column + `nameField: NameFieldSpec` (registry: `standardObjectFieldRegistry`).
   - `HighVolumeObjectMetadata` → no `name`, no `nameField`. `getRecordTitle` falls back to id.
@@ -29,7 +29,7 @@ Develop and test on **localhost** (`pnpm dev`, repo-root `.env`, local Supabase)
 | URL pattern | Purpose |
 |-------------|---------|
 | `/{objectSlug}` | **List** view. Page header should include **New** (dialog/sheet), not only a separate `/new` route unless you intentionally support deep links. |
-| `/{objectSlug}/{id}` | **Record detail**. Use **`DetailPageLayout`** from `@repo/adricore/blocks` (it wraps `RecordDetailLayout`). Header actions: **Edit** (dialog), **Delete** (confirm). |
+| `/{objectSlug}/{id}` | **Record detail**. Use **`DetailPageLayout`** from `@adrikesteren/adricore/blocks` (it wraps `RecordDetailLayout`). Header actions: **Edit** (dialog), **Delete** (confirm). |
 | `/{objectSlug}/{id}/{relatedSlug}` | **Related list**: same list chrome as the top-level list, filtered by the parent record `id` on the appropriate FK. Example: [`/executors/[id]/orders`](apps/web/src/app/(app)/executors/[id]/orders/page.tsx). |
 
 **`objectSlug`**: URL-friendly segment (often plural kebab-case: `trade-decisions`, `signal-agents`). It may differ from the Postgres table name; the **model** (below) maps slug → `schema.table`.
@@ -38,7 +38,7 @@ Develop and test on **localhost** (`pnpm dev`, repo-root `.env`, local Supabase)
 
 **Exceptions**: User prefs [`/me/preferences`](apps/web/src/app/(app)/me/preferences/page.tsx), internal docs [`/docs`](apps/web/src/app/docs/page.tsx), legacy redirects under [`/settings`](apps/web/src/app/(app)/settings/page.tsx).
 
-## UI / `@repo/adricore/blocks`
+## UI / `@adrikesteren/adricore/blocks`
 
 - **List shell**: [`ListViewLayout`](packages/adricore/src/blocks/components/list-view-layout.tsx) — soft page background for list/overview pages; pair with [`ObjectListViewHeader`](apps/web/src/components/object-list-view-header.tsx) (wraps `PageHeader` variant `list`).
 - **Detail shell**: [`DetailPageLayout`](packages/adricore/src/blocks/components/detail-page-layout.tsx) — full detail chrome; **prefer this** over using `RecordDetailLayout` alone unless you only need the bare background.
@@ -59,7 +59,7 @@ Conventions:
 - One folder per object; the metadata class file uses the suffix **`.object.ts`** (kebab-case) — for example [`assets/assets.object.ts`](apps/web/src/lib/objects/assets/assets.object.ts), [`executors/executors.object.ts`](apps/web/src/lib/objects/executors/executors.object.ts), [`high-volume-objects/logs/logs.object.ts`](apps/web/src/lib/high-volume-objects/logs/logs.object.ts).
 - Cross-cutting object files live at the root of `lib/objects/`: [`registry.ts`](apps/web/src/lib/objects/registry.ts) (central `objectRegistry`, also registers the high-volume objects) and [`icons.ts`](apps/web/src/lib/objects/icons.ts) (icon registry).
 - Per-object services (when they exist) belong in `lib/objects/<object>/services/<name>.service.ts` — **not** in `lib/agents/`. Create the `services/` subfolder only when the first service is added.
-- **New objects:** add a class extending [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.tsx) (user-facing rows) or [`HighVolumeObjectMetadata`](packages/adricore/src/metadata/high-volume-object-metadata.tsx) (append-only / millions of rows). Import metadata types directly from [`@repo/adricore/metadata`](packages/adricore/src/metadata/index.ts) (provides OOP base classes for `ObjectMetadataBase`, `ObjectMetadata`, `HighVolumeObjectMetadata`, `ObjectFieldMetadata`, `ObjectRelationshipMetadata`, and Registries). Wire the new class into `lib/objects/registry.ts` and the UI as needed.
+- **New objects:** add a class extending [`ObjectMetadata`](packages/adricore/src/metadata/object-metadata.tsx) (user-facing rows) or [`HighVolumeObjectMetadata`](packages/adricore/src/metadata/high-volume-object-metadata.tsx) (append-only / millions of rows). Import metadata types directly from [`@adrikesteren/adricore/metadata`](packages/adricore/src/metadata/index.ts) (provides OOP base classes for `ObjectMetadataBase`, `ObjectMetadata`, `HighVolumeObjectMetadata`, `ObjectFieldMetadata`, `ObjectRelationshipMetadata`, and Registries). Wire the new class into `lib/objects/registry.ts` and the UI as needed.
 
 Use these as the checklist source when adding migrations + routes. AdriCore authoring: [`packages/adricore/docs/new-table.md`](packages/adricore/docs/new-table.md), list/detail UI: [`packages/adricore/docs/ui-list-detail.md`](packages/adricore/docs/ui-list-detail.md), package overview: [`packages/adricore/README.md`](packages/adricore/README.md).
 

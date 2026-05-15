@@ -1,8 +1,8 @@
-import {
+﻿import {
   ListViewPlaceholderToolbar,
   ListViewTitlePickerPlaceholder,
-} from "@repo/adricore/blocks";
-import type { ObjectMetadata } from "@repo/adricore/metadata";
+} from "@adrikesteren/adricore/blocks";
+import type { ObjectMetadata } from "@adrikesteren/adricore/metadata";
 import type { ReactNode } from "react";
 
 /**
@@ -60,7 +60,7 @@ export function ObjectListViewHeader({
 }: ObjectListViewHeaderProps) {
   const summaryParts = [`${rowCount} row${rowCount === 1 ? "" : "s"}`, sortLine];
   if (!uncapped) summaryParts.push(`Max ${maxRows} rows`);
-  const derivedSummary = summary ?? summaryParts.join(" · ");
+  const derivedSummary = summary ?? summaryParts.join(" Â· ");
 
   return model.CreateListPageHeader({
     rowCount,

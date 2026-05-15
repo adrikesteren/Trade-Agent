@@ -1,5 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
-import { ListViewObjectIcon, RecordRelatedList } from "@repo/adricore/blocks";
+﻿import { createClient } from "@/lib/supabase/server";
+import { ListViewObjectIcon, RecordRelatedList } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 export type RecordTasksRelatedCardProps = {
@@ -58,7 +58,7 @@ export async function RecordTasksRelatedCard({
             </Link>
             <span className="bk-text-muted shrink-0" style={{ fontSize: "0.75rem" }}>
               <span className="font-mono">{t.status}</span>
-              <span> · </span>
+              <span> Â· </span>
               <span className="font-mono">{t.task_type}</span>
             </span>
           </div>

@@ -1,10 +1,10 @@
-import { AppMetadataRegistry, AppMetadata, TabMetadataRegistry, ObjectTabMetadata, RouteTabMetadata, RouteMetadata, DEFAULT_APP_ID, ACTIVE_APP_COOKIE_NAME } from "@repo/adricore/metadata";
+﻿import { AppMetadataRegistry, AppMetadata, TabMetadataRegistry, ObjectTabMetadata, RouteTabMetadata, RouteMetadata, DEFAULT_APP_ID, ACTIVE_APP_COOKIE_NAME } from "@adrikesteren/adricore/metadata";
 import { objectRegistry } from "../lib/objects/registry";
 import { iconRegistry } from "../lib/objects/icons";
 
 /**
  * Trade Agent dashboard: all shell apps (`AppMetadata` per registry key).
- * Cookie `ACTIVE_APP_COOKIE_NAME` selects which entry is active; invalid/missing → `DEFAULT_APP_ID`.
+ * Cookie `ACTIVE_APP_COOKIE_NAME` selects which entry is active; invalid/missing â†’ `DEFAULT_APP_ID`.
  */
 
 export const tabRegistry = new TabMetadataRegistry([

@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { useId, useState, useTransition } from "react";
 
 import { enqueueMarketBackfillCandlesViaRelay } from "@/app/(app)/markets/[id]/actions";

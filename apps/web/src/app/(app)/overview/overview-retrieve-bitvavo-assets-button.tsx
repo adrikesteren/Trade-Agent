@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 import { retrieveBitvavoCatalogAssets } from "@/app/(app)/overview/actions";
-import { Alert, Button } from "@repo/adricore/blocks";
+import { Alert, Button } from "@adrikesteren/adricore/blocks";
 import { useState, useTransition } from "react";
 
 const DEFAULT_LABEL = "Retrieve Assets from Bitvavo";
@@ -42,7 +42,7 @@ export function OverviewRetrieveBitvavoAssetsButton({ label = DEFAULT_LABEL }: P
           });
         }}
       >
-        {pending ? "Retrieving…" : label}
+        {pending ? "Retrievingâ€¦" : label}
       </Button>
     </div>
   );

@@ -41,7 +41,7 @@ import {
   RecordPageSection,
   RecordRelatedList,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 

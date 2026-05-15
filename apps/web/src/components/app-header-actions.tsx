@@ -1,4 +1,4 @@
-import { menuTriggerPlainClass } from "@repo/adricore/blocks";
+﻿import { menuTriggerPlainClass } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 import { SignOutButton } from "@/components/sign-out-button";

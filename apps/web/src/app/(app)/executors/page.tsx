@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -19,7 +19,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -82,7 +82,7 @@ export default async function ExecutorsListPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("executors")!}
         rowCount={list.length}
-        sortLine={`Portfolios: paper, live, historical backtest, and asset filters · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Portfolios: paper, live, historical backtest, and asset filters Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
         actions={
           <Link href="/executors/new" className={listViewOutlineActionClass}>
             New executor

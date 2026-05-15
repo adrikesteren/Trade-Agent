@@ -1,4 +1,4 @@
-import { ListViewPagination } from "@/components/list-view-pagination";
+﻿import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -17,7 +17,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {
@@ -60,7 +60,7 @@ export default async function ExchangesIndexPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("exchanges")!}
         rowCount={list.length}
-        sortLine={sortLineParts.join(" · ")}
+        sortLine={sortLineParts.join(" Â· ")}
         subtitle={
           <>
             Venues that host{" "}

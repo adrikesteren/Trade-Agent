@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -11,7 +11,7 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type LogListRow = {
@@ -31,10 +31,10 @@ const MESSAGE_PREVIEW_LEN = 120;
 function previewMessage(s: string): string {
   const t = s.trim();
   if (t.length <= MESSAGE_PREVIEW_LEN) return t;
-  return `${t.slice(0, MESSAGE_PREVIEW_LEN)}…`;
+  return `${t.slice(0, MESSAGE_PREVIEW_LEN)}â€¦`;
 }
 
-/** Logs list — used by `(app)/[tabSlug]` when `tabSlug` is `logs`. */
+/** Logs list â€” used by `(app)/[tabSlug]` when `tabSlug` is `logs`. */
 export async function LogsListView({ searchParams }: LogsListViewProps) {
   const sp = (await searchParams) ?? {};
   const pageRaw = parseListPage(sp);
@@ -65,7 +65,7 @@ export async function LogsListView({ searchParams }: LogsListViewProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("logs")!}
         rowCount={list.length}
-        sortLine={`Append-only events (errors, warnings, info) · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Append-only events (errors, warnings, info) Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
 
@@ -87,10 +87,10 @@ export async function LogsListView({ searchParams }: LogsListViewProps) {
               <tbody>
                 {list.map((row) => (
                   <tr key={row.id}>
-                    <Td className="whitespace-nowrap">{row.created_at ? formatDt(row.created_at) : "—"}</Td>
+                    <Td className="whitespace-nowrap">{row.created_at ? formatDt(row.created_at) : "â€”"}</Td>
                     <Td className="font-mono">{row.level}</Td>
                     <Td className="max-w-[24rem]">{previewMessage(row.message)}</Td>
-                    <Td className="font-mono text-balance">{row.context ?? "—"}</Td>
+                    <Td className="font-mono text-balance">{row.context ?? "â€”"}</Td>
                     <Td>
                       <Link href={`/logs/${row.id}`} className="bk-link">
                         Open

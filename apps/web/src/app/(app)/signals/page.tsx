@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import { DASHBOARD_LIST_VIEW_LIMIT, SIGNALS_LIST_RAW_FETCH_CAP } from "@/lib/dashboard/list-view-limit";
@@ -23,7 +23,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type SignalRow = {
@@ -49,7 +49,7 @@ function normalizeSignalRow(r: SignalRowRaw, candleById: Map<string, CatalogCand
   const close_time =
     candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : r.created_at;
   const market_id = candle?.market_id ? candle.market_id.trim() : "";
-  const timeframe = candle?.timeframe ? candle.timeframe.trim() || "—" : "—";
+  const timeframe = candle?.timeframe ? candle.timeframe.trim() || "â€”" : "â€”";
   return {
     id: r.id,
     signal_agent_id: r.signal_agent_id,
@@ -119,14 +119,14 @@ function resolveMarketLabel(row: SignalRow, catalogByMarketId: Map<string, Marke
   if (!row.market_id) {
     const meta = marketSymbolFromMetadata(row);
     if (meta) return meta;
-    return row.id.slice(0, 8) + "…";
+    return row.id.slice(0, 8) + "â€¦";
   }
   const c = catalogByMarketId.get(row.market_id);
   if (c?.marketSymbol) return c.marketSymbol;
   if (c?.assetCode) return c.assetCode;
   const meta = marketSymbolFromMetadata(row);
   if (meta) return meta;
-  return row.market_id.slice(0, 8) + "…";
+  return row.market_id.slice(0, 8) + "â€¦";
 }
 
 /** ENTER first, EXIT second, all other intents last (each block sorted by mcap desc, then newest). */
@@ -148,7 +148,7 @@ function compareSignals(
   return Date.parse(b.created_at) - Date.parse(a.created_at);
 }
 
-/** After global relevance sort, keep the first row per (market, agent) — top-ranked signal per agent per market. */
+/** After global relevance sort, keep the first row per (market, agent) â€” top-ranked signal per agent per market. */
 function topSignalPerMarketAndAgent(sorted: SignalRow[]): SignalRow[] {
   const seen = new Set<string>();
   return sorted.filter((row) => {
@@ -212,7 +212,7 @@ export default async function SignalsPage({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
-  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
   const fmtConfidence = (v: number | string | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const { data: rows, error } = await supabase
@@ -245,7 +245,7 @@ export default async function SignalsPage({
     `Page ${page} of ${pages}`,
     raw.length !== ranked.length ? `${raw.length} signals loaded` : null,
     "one row per market + agent (top rank each)",
-    "ENTER → EXIT → other · mcap desc · tie: newest",
+    "ENTER â†’ EXIT â†’ other Â· mcap desc Â· tie: newest",
     `${pageSize} per page`,
   ].filter((s): s is string => Boolean(s));
 
@@ -254,7 +254,7 @@ export default async function SignalsPage({
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("signals")!}
         rowCount={list.length}
-        sortLine={sortLineParts.join(" · ")}
+        sortLine={sortLineParts.join(" Â· ")}
         actions={
           <Link href="/signal-agents" className={listViewOutlineActionClass}>
             Signal agents
@@ -265,7 +265,7 @@ export default async function SignalsPage({
       {raw.length > 0 ? (
         <Alert tone="info">
           One row per market and signal agent: for each pair we show the highest-ranked signal after the sort below
-          (ENTER → EXIT → other, then mcap, then newest). Other bars for the same market+agent stay in{" "}
+          (ENTER â†’ EXIT â†’ other, then mcap, then newest). Other bars for the same market+agent stay in{" "}
           <code className="bk-code">trading.signals</code> but are not listed here.
         </Alert>
       ) : null}
@@ -297,7 +297,7 @@ export default async function SignalsPage({
                     <tr key={row.id}>
                       <Td>
                         <Link href={`/signals/${row.id}`} className="bk-link font-mono" title={row.id}>
-                          {row.id.slice(0, 8)}…
+                          {row.id.slice(0, 8)}â€¦
                         </Link>
                       </Td>
                       <Td>
@@ -312,7 +312,7 @@ export default async function SignalsPage({
                       <Td className="text-right font-mono">{formatUsdMetric(mcapDisplay, prefs)}</Td>
                       <Td className="max-w-[10rem] truncate" title={agentSlug ?? row.signal_agent_id}>
                         <Link href={`/signal-agents/${row.signal_agent_id}`} className="bk-link font-mono">
-                          {agentSlug ?? row.signal_agent_id.slice(0, 8) + "…"}
+                          {agentSlug ?? row.signal_agent_id.slice(0, 8) + "â€¦"}
                         </Link>
                       </Td>
                       <Td>{row.timeframe}</Td>

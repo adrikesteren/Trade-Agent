@@ -1,4 +1,4 @@
-import { DEFAULT_APP_ID } from "@repo/adricore/metadata";
+﻿import { DEFAULT_APP_ID } from "@adrikesteren/adricore/metadata";
 import { describe, expect, it } from "vitest";
 
 import { resolveActiveAppId } from "./app-shell";

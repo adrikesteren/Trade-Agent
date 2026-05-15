@@ -1,4 +1,4 @@
-import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-assets-button";
+﻿import { OverviewRetrieveBitvavoAssetsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-assets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -20,7 +20,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type AssetRow = {
@@ -77,7 +77,7 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("assets")!}
         rowCount={sortedRows.length}
-        sortLine={sortLineParts.join(" · ")}
+        sortLine={sortLineParts.join(" Â· ")}
         title="All listings"
         subtitle={
           <>

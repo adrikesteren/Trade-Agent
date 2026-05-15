@@ -1,5 +1,5 @@
-import { iconRegistry } from "../icons";
-import { ObjectMetadata, ObjectLabelMetadata, ObjectRelationshipMetadata, ObjectRelationshipReferenceTypes, ObjectFieldDataTypes, ObjectFieldMetadata } from "@repo/adricore/metadata";
+﻿import { iconRegistry } from "../icons";
+import { ObjectMetadata, ObjectLabelMetadata, ObjectRelationshipMetadata, ObjectRelationshipReferenceTypes, ObjectFieldDataTypes, ObjectFieldMetadata } from "@adrikesteren/adricore/metadata";
 import { objectRegistry } from "../registry";
 
 export class ExecutorsModel extends ObjectMetadata {

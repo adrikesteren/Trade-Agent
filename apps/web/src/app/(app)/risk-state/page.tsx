@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody } from "@adrikesteren/adricore/blocks";
 import { redirect } from "next/navigation";
 
 type RiskStatePageProps = {
@@ -70,8 +70,8 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
         rowCount={list.length}
         sortLine={
           executorIdFilter
-            ? `Filtered by executor · sorted by Updated date · Page ${page} of ${pages}`
-            : `Sorted by Updated date · Page ${page} of ${pages}`
+            ? `Filtered by executor Â· sorted by Updated date Â· Page ${page} of ${pages}`
+            : `Sorted by Updated date Â· Page ${page} of ${pages}`
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}

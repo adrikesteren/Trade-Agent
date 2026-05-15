@@ -1,10 +1,10 @@
-import { AppHeaderActions } from "@/components/app-header-actions";
+﻿import { AppHeaderActions } from "@/components/app-header-actions";
 import { AppSchemaNav, type TabInfo } from "@/components/app-schema-nav";
 import { AppShellAppSwitcher } from "@/components/app-shell-app-switcher";
 import { listDashboardAppSwitchOptions } from "@/config/app-shell";
 import { getDashboardActiveApp } from "@/lib/shell/get-dashboard-active-app";
 import { getDashboardSession } from "@/lib/supabase/dashboard-session";
-import { AppHeader, AppMain, AppShell } from "@repo/adricore/blocks";
+import { AppHeader, AppMain, AppShell } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 

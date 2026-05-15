@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody, ListViewObjectIcon } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody, ListViewObjectIcon } from "@adrikesteren/adricore/blocks";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -52,7 +52,7 @@ export default async function SignalRunsPage({ searchParams }: PageProps) {
           </ListViewObjectIcon>
         }
         rowCount={list.length}
-        sortLine={`Sorted by Started date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Sorted by Started date Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
 
