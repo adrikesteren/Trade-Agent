@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ReplayCandleBar } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 
 import { upsertSignalsForMarketCloseFromBars } from "./market-close-signal-upsert.service";
 
@@ -45,20 +46,15 @@ export async function replayMissingSignalsForBars(
   admin: SupabaseClient,
   args: ReplayMissingSignalsForBarsArgs,
 ): Promise<ReplayMissingSignalsForBarsResult> {
-  const { data: agentRows, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, allowed_timeframes")
-    .eq("enabled", true);
-  if (agentErr) throw new Error(agentErr.message);
+  const agentRows = await SignalAgentsSelector.selectActiveIdAndTimeframes(admin);
 
-  const activeAgentIds = (agentRows ?? [])
+  const activeAgentIds = agentRows
     .filter((a) => {
-      const tf = (a as { allowed_timeframes: string[] | null }).allowed_timeframes;
+      const tf = a.allowed_timeframes;
       if (!tf || tf.length === 0) return true;
       return tf.includes(args.timeframe);
     })
-    .map((a) => String((a as { id: string }).id));
+    .map((a) => a.id);
 
   const activeAgentIdSet = new Set(activeAgentIds);
   const expectedCount = activeAgentIdSet.size;

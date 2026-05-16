@@ -17,6 +17,7 @@ import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } fro
 
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 
 /**
  * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
@@ -235,20 +236,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     };
   }
 
-  const { data: agentRows, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, config, allowed_timeframes")
-    .eq("enabled", true);
-  if (agentErr) throw new Error(agentErr.message);
-
-  const agents = (agentRows ?? []) as {
-    id: string;
-    agent_id: string;
-    enabled: boolean;
-    config: unknown;
-    allowed_timeframes: string[] | null;
-  }[];
+  const agents = await SignalAgentsSelector.selectActiveWithConfig(admin);
 
   const activeAgents = agents.filter((a) => {
     const tf = a.allowed_timeframes;

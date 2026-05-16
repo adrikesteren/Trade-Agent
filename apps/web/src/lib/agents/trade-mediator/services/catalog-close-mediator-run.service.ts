@@ -24,6 +24,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
@@ -509,11 +510,12 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               signalsSyncRunId: body.signalsSyncRunId,
               mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
             });
-            const { error: skipErr } = await admin
-              .schema("trading")
-              .from("decisions")
-              .upsert(skipRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
-            if (skipErr) throw new Error(`${marketSymbol}: decisions skip upsert: ${skipErr.message}`);
+            try {
+              await DecisionsSelector.upsertOneByExecutorSignalSide(admin, skipRow);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              throw new Error(`${marketSymbol}: decisions skip upsert: ${msg}`);
+            }
             decisionsUpserted += 1;
           }
           continue;
@@ -677,10 +679,12 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           },
         };
 
-        const { error: upErr } = await admin.schema("trading").from("decisions").upsert(decisionRow, {
-          onConflict: "user_id,executor_id,signal_id,position_side",
-        });
-        if (upErr) throw new Error(`${marketSymbol}: decisions upsert: ${upErr.message}`);
+        try {
+          await DecisionsSelector.upsertOneByExecutorSignalSide(admin, decisionRow);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${marketSymbol}: decisions upsert: ${msg}`);
+        }
         decisionsUpserted += 1;
 
         // P3: SAR (Stop-and-Reverse). Independent of the primary decision —

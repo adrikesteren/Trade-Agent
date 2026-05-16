@@ -19,6 +19,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { fetchMarketAssetIds } from "@/lib/agents/executor/services/executors-lookup.service";
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/agents/executor/services/executor-wallet.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 function batchSize(): number {
@@ -170,39 +171,28 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   }
 
   const execIds = [...new Set(orders.map((o) => o.executor_id))];
-  const { data: execRows, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, name, exchange_id, execution_mode, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
-    )
-    .in("id", execIds);
-  if (exErr) throw new Error(exErr.message);
+  const execRows = await ExecutorsSelector.selectReconcileByIds(admin, execIds);
 
   const bitvavoCredsByExecutor = new Map<string, BitvavoExchangeCredentials>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const creds = bitvavoCredentialsFromExchangeApiFields(
-      (e as { exchange_api_key?: string }).exchange_api_key,
-      (e as { exchange_api_secret?: string }).exchange_api_secret,
-    );
+  for (const e of execRows) {
+    const id = e.id;
+    const creds = bitvavoCredentialsFromExchangeApiFields(e.exchange_api_key, e.exchange_api_secret);
     if (creds) bitvavoCredsByExecutor.set(id, creds);
   }
 
   const slackTradeNotifyByExecutor = new Map<string, boolean>();
   const executorNameById = new Map<string, string>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const raw = (e as { slack_trade_notifications_enabled?: boolean | null }).slack_trade_notifications_enabled;
-    slackTradeNotifyByExecutor.set(id, raw !== false);
-    const nm = String((e as { name?: string | null }).name ?? "").trim();
+  for (const e of execRows) {
+    const id = e.id;
+    slackTradeNotifyByExecutor.set(id, e.slack_trade_notifications_enabled !== false);
+    const nm = String(e.name ?? "").trim();
     executorNameById.set(id, nm || "—");
   }
 
   const catalogExchangeIds = [
     ...new Set(
-      (execRows ?? [])
-        .map((e) => String((e as { exchange_id?: string | null }).exchange_id ?? "").trim())
+      execRows
+        .map((e) => String(e.exchange_id ?? "").trim())
         .filter(Boolean),
     ),
   ];
@@ -217,16 +207,14 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
     }
   }
   const slackExchangeNameByExecutorId = new Map<string, string>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const xid = String((e as { exchange_id?: string | null }).exchange_id ?? "").trim();
+  for (const e of execRows) {
+    const id = e.id;
+    const xid = String(e.exchange_id ?? "").trim();
     slackExchangeNameByExecutorId.set(id, xid ? (exchangeNameByCatalogId.get(xid) ?? xid) : "—");
   }
 
   const liveExecutor = new Set(
-    (execRows ?? [])
-      .filter((e) => String(e.execution_mode) === "live")
-      .map((e) => e.id as string),
+    execRows.filter((e) => String(e.execution_mode) === "live").map((e) => e.id),
   );
 
   const liveOrders = orders.filter((o) => liveExecutor.has(o.executor_id));

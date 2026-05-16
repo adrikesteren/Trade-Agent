@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 
 export type TradeFillSlackSource = "executor-catalog-close" | "bitvavo-reconcile";
 
@@ -32,12 +33,11 @@ export function primaryAgentSlugFromDecisionPayload(
 /** All agents (small table): slug → display label. */
 export async function fetchTradeFillSignalAgentLabels(admin: SupabaseClient): Promise<Map<string, string>> {
   const m = new Map<string, string>();
-  const { data, error } = await admin.schema("trading").from("signal_agents").select("agent_id, description");
-  if (error) throw new Error(error.message);
-  for (const row of data ?? []) {
-    const slug = String((row as { agent_id?: string }).agent_id ?? "").trim();
+  const rows = await SignalAgentsSelector.selectSlugAndDescription(admin);
+  for (const row of rows) {
+    const slug = String(row.agent_id ?? "").trim();
     if (!slug) continue;
-    const desc = String((row as { description?: string | null }).description ?? "").trim();
+    const desc = String(row.description ?? "").trim();
     m.set(slug, desc || slug);
   }
   return m;

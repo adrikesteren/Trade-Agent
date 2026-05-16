@@ -6,6 +6,8 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -142,16 +144,13 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const { data: decRow, error: decErr } = await supabase
-    .schema("trading")
-    .from("decisions")
-    .select(
-      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (decErr || !decRow) notFound();
+  let decRow: DecisionsSelector.DecisionDetailRow | null = null;
+  try {
+    decRow = await DecisionsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!decRow) notFound();
 
   const rowDb = decRow as TradeDecisionRowDb;
   const cid = String(unwrapOne(rowDb.signals)?.candle_id ?? "").trim();
@@ -163,13 +162,13 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
     : null;
   const marketSym = dec.market_id ? String(mRow?.market_symbol ?? "").trim() : "";
 
-  const { data: exRow } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("name")
-    .eq("id", dec.executor_id)
-    .maybeSingle();
-  const execName = String((exRow as { name?: string | null } | null)?.name ?? "").trim();
+  let exName: string | null = null;
+  try {
+    exName = await ExecutorsSelector.selectNameById(supabase, dec.executor_id);
+  } catch {
+    /* preserve original soft-fail behavior — execName falls through to "" */
+  }
+  const execName = String(exName ?? "").trim();
 
   const { data: ordRows, count: ordCount, error: ordErr } = await supabase
     .schema("trading")

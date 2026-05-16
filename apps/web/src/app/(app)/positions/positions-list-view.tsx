@@ -7,6 +7,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@adrikesteren/adricore/blocks";
@@ -23,13 +24,15 @@ async function fetchExecutorNamesById(
   const unique = [...new Set(executorIds)];
   for (let i = 0; i < unique.length; i += CHUNK) {
     const chunk = unique.slice(i, i + CHUNK);
-    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
-    if (error) {
-      console.error("positions list: executors batch:", error.message);
+    let rows: Awaited<ReturnType<typeof ExecutorsSelector.selectIdAndNameByIds>>;
+    try {
+      rows = await ExecutorsSelector.selectIdAndNameByIds(supabase, chunk);
+    } catch (e) {
+      console.error("positions list: executors batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const e of data ?? []) {
-      map.set(e.id as string, String(e.name ?? "").trim() || (e.id as string));
+    for (const e of rows) {
+      map.set(e.id, String(e.name ?? "").trim() || e.id);
     }
   }
   return map;

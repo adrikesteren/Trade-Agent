@@ -29,6 +29,8 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -340,17 +342,12 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       : formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, updated_at, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
-    )
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (exErr) return <Alert tone="error">{exErr.message}</Alert>;
+  let ex: ExecutorsSelector.ExecutorDetailRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectDetailByIdAndUser(supabase, { id, userId: user.id });
+  } catch (e) {
+    return <Alert tone="error">{e instanceof Error ? e.message : String(e)}</Alert>;
+  }
   if (!ex) notFound();
 
   const { data: budgetRows, error: budgetErr } = await supabase
@@ -410,15 +407,10 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       .eq("executor_id", id)
       .order("created_at", { ascending: false })
       .limit(DASHBOARD_LIST_VIEW_LIMIT),
-    supabase
-      .schema("trading")
-      .from("decisions")
-      .select("id, signal_id, approved, created_at, signals ( candle_id )", {
-        count: "exact",
-      })
-      .eq("executor_id", id)
-      .order("created_at", { ascending: false })
-      .limit(EXECUTOR_DETAIL_TRADE_DECISION_POOL),
+    DecisionsSelector.selectExecutorRecentWithCount(supabase, {
+      executorId: id,
+      limit: EXECUTOR_DETAIL_TRADE_DECISION_POOL,
+    }),
     supabase
       .schema("trading")
       .from("positions")

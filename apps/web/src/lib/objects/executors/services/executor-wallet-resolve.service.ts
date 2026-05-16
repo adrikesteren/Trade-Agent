@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+
 /**
  * Returns the wallet that an executor's transactions should land in.
  *
@@ -17,14 +19,8 @@ export async function resolveExecutorWalletId(
   const executorId = String(args.executorId ?? "").trim();
   if (!executorId) return null;
 
-  const { data: ex, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select("wallet_id")
-    .eq("id", executorId)
-    .maybeSingle();
-  if (exErr) throw new Error(exErr.message);
-  const direct = String((ex as { wallet_id?: string | null } | null)?.wallet_id ?? "").trim();
+  const walletIdRaw = await ExecutorsSelector.selectWalletIdById(admin, executorId);
+  const direct = String(walletIdRaw ?? "").trim();
   if (direct) return direct;
 
   // Defensive fallback: shared wallets have wallet.executor_id = null, so this only ever

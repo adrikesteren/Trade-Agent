@@ -26,6 +26,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "./executors-lookup.service";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import {
@@ -513,16 +514,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       const signalIds = [...new Set((sigRows ?? []).map((r) => String((r as { id: string }).id)))];
       if (!signalIds.length) continue;
 
-      const { data: decList, error: decErr } = await admin
-        .schema("trading")
-        .from("decisions")
-        .select("id, user_id, signal_id, approved, timeframe, decision_payload")
-        .eq("user_id", ownerId)
-        .eq("executor_id", ex.id)
-        .in("signal_id", signalIds);
-      if (decErr) throw new Error(decErr.message);
+      const decList = await DecisionsSelector.selectRunRowsForExecutorAndSignals(admin, {
+        userId: ownerId,
+        executorId: ex.id,
+        signalIds,
+      });
 
-      const candidates = (decList ?? []) as DecisionRow[];
+      const candidates = decList as DecisionRow[];
       // P3: process EXIT-style decisions first so SAR pairs sequence wallet /
       // position changes correctly (close old side → free quote balance →
       // open new side). Lexical id is the secondary sort for stable ordering.

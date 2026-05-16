@@ -11,6 +11,7 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -123,13 +124,15 @@ async function fetchExecutorNamesById(
   const unique = [...new Set(executorIds)];
   for (let i = 0; i < unique.length; i += MARKET_ID_CHUNK) {
     const chunk = unique.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
-    if (error) {
-      console.error("orders list: executors batch:", error.message);
+    let rows: Awaited<ReturnType<typeof ExecutorsSelector.selectIdAndNameByIds>>;
+    try {
+      rows = await ExecutorsSelector.selectIdAndNameByIds(supabase, chunk);
+    } catch (e) {
+      console.error("orders list: executors batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const e of data ?? []) {
-      map.set(e.id as string, String(e.name ?? "").trim() || (e.id as string));
+    for (const e of rows) {
+      map.set(e.id, String(e.name ?? "").trim() || e.id);
     }
   }
   return map;

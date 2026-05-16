@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+
 /**
  * Clears simulated trading state for a historical replay on one market, without touching the balance ledger.
  * Caller should pass the same close-time bounds used for the replay window.
@@ -16,17 +19,14 @@ export async function wipeHistoricalExecutorSimulationState(
     closeTimeLte: string;
   },
 ): Promise<void> {
-  const { data: decs, error: dErr } = await admin
-    .schema("trading")
-    .from("decisions")
-    .select("id")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .gte("close_time", args.closeTimeGte)
-    .lte("close_time", args.closeTimeLte);
-  if (dErr) throw new Error(dErr.message);
-  const decisionIds = (decs ?? []).map((r) => r.id as string).filter(Boolean);
+  const decs = await DecisionsSelector.selectIdsForHistoricalWipe(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+    closeTimeGte: args.closeTimeGte,
+    closeTimeLte: args.closeTimeLte,
+  });
+  const decisionIds = decs.map((r) => r.id).filter(Boolean);
   if (decisionIds.length) {
     /** Keep PostgREST filter URLs under typical reverse-proxy limits (avoid `URI TOO LONG`). */
     const chunk = 80;
@@ -48,8 +48,7 @@ export async function wipeHistoricalExecutorSimulationState(
           if (oDel) throw new Error(oDel.message);
         }
       }
-      const { error: tdDel } = await admin.schema("trading").from("decisions").delete().in("id", part);
-      if (tdDel) throw new Error(tdDel.message);
+      await DecisionsSelector.deleteByIds(admin, part);
     }
   }
 
@@ -71,19 +70,8 @@ export async function wipeHistoricalExecutorSimulationState(
     .eq("market_id", args.marketId);
   if (flDel) throw new Error(flDel.message);
 
-  const { error: rsUp } = await admin
-    .schema("trading")
-    .from("executors")
-    .update({
-      risk_open_position_count: 0,
-      risk_exposure_by_market: {},
-      risk_daily_pnl_eur: 0,
-      risk_runtime_max_drawdown_eur: 0,
-      risk_consecutive_losses: 0,
-      risk_kill_switch: false,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", args.userId)
-    .eq("id", args.executorId);
-  if (rsUp) throw new Error(rsUp.message);
+  await ExecutorsSelector.updateRiskStateResetByUserAndId(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+  });
 }

@@ -3,6 +3,7 @@ import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -21,14 +22,13 @@ export default async function SignalAgentDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const { data: row, error } = await supabase
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, version, description, config, allowed_timeframes, created_at, updated_at")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error || !row) {
+  let row: Awaited<ReturnType<typeof SignalAgentsSelector.selectDetailById>> = null;
+  try {
+    row = await SignalAgentsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!row) {
     notFound();
   }
 

@@ -6,6 +6,7 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -140,13 +141,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
     : null;
   const marketSym = order.market_id ? String(mRow?.market_symbol ?? "").trim() : "";
 
-  const { data: exRow } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("name")
-    .eq("id", order.executor_id)
-    .maybeSingle();
-  const execName = String((exRow as { name?: string | null } | null)?.name ?? "").trim();
+  let exName: string | null = null;
+  try {
+    exName = await ExecutorsSelector.selectNameById(supabase, order.executor_id);
+  } catch {
+    /* preserve original soft-fail behavior — execName falls through to "" */
+  }
+  const execName = String(exName ?? "").trim();
 
   const { data: fillRows, count: fillCount, error: fillErr } = await supabase
     .schema("trading")

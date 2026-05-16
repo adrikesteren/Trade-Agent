@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { executorAllowsMarketAsset, type ExecutionMode, type ExecutorAssetFilterMode } from "./executor-rules.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type PositionSide = "long" | "short";
@@ -70,32 +71,15 @@ export function sortExecutorsForDefaultPick(rows: ExecutorRow[]): ExecutorRow[] 
   });
 }
 
-const EXECUTOR_ROW_SELECT =
-  "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, created_at, updated_at, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses";
-
 export async function fetchExecutorById(admin: SupabaseClient, executorId: string): Promise<ExecutorRow | null> {
-  const { data, error } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(EXECUTOR_ROW_SELECT)
-    .eq("id", executorId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data ?? null) as ExecutorRow | null;
+  return (await ExecutorsSelector.selectFullById(admin, executorId)) as ExecutorRow | null;
 }
 
 export async function fetchExecutorsForUsers(
   admin: SupabaseClient,
   userIds: string[],
 ): Promise<ExecutorRow[]> {
-  if (!userIds.length) return [];
-  const { data, error } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(EXECUTOR_ROW_SELECT)
-    .in("user_id", userIds);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as ExecutorRow[];
+  return (await ExecutorsSelector.selectFullByUserIds(admin, userIds)) as ExecutorRow[];
 }
 
 export async function fetchExchangeIdByCode(admin: SupabaseClient, code: string): Promise<string> {
@@ -131,10 +115,14 @@ export async function ensureDefaultExecutorsForUsers(
     updated_at: new Date().toISOString(),
   }));
 
-  const { data: inserted, error } = await admin.schema("trading").from("executors").insert(rows).select("id, user_id");
-  if (error) throw new Error(`ensureDefaultExecutorsForUsers: ${error.message}`);
-  for (const row of inserted ?? []) {
-    await ensureRiskStateForExecutor(admin, { userId: row.user_id as string, executorId: row.id as string });
+  let inserted: { id: string; user_id: string }[];
+  try {
+    inserted = await ExecutorsSelector.insertManyReturningIdAndUserId(admin, rows);
+  } catch (e) {
+    throw new Error(`ensureDefaultExecutorsForUsers: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  for (const row of inserted) {
+    await ensureRiskStateForExecutor(admin, { userId: row.user_id, executorId: row.id });
   }
 }
 
@@ -170,30 +158,19 @@ export async function ensureUserExecutorExists(
   options?: EnsureUserExecutorExistsOptions,
 ): Promise<void> {
   if (!options?.verifiedEmptyExecutorList) {
-    const { count, error } = await supabase
-      .schema("trading")
-      .from("executors")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
-    if (error) throw new Error(error.message);
-    if ((count ?? 0) > 0) return;
+    const count = await ExecutorsSelector.countIdsForUser(supabase, userId);
+    if (count > 0) return;
   }
 
-  const { data: created, error: insErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .insert({
-      user_id: userId,
-      name: "Default",
-      enabled: true,
-      execution_mode: "paper",
-      exchange_id: await fetchExchangeIdByCode(supabase, "bitvavo"),
-      asset_filter_mode: "all",
-      filter_asset_ids: [],
-      updated_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (insErr) throw new Error(insErr.message);
-  await ensureRiskStateForExecutor(supabase, { userId, executorId: created?.id as string });
+  const createdId = await ExecutorsSelector.insertReturningId(supabase, {
+    user_id: userId,
+    name: "Default",
+    enabled: true,
+    execution_mode: "paper",
+    exchange_id: await fetchExchangeIdByCode(supabase, "bitvavo"),
+    asset_filter_mode: "all",
+    filter_asset_ids: [],
+    updated_at: new Date().toISOString(),
+  });
+  await ensureRiskStateForExecutor(supabase, { userId, executorId: createdId });
 }

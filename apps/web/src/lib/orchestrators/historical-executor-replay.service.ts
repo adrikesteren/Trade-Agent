@@ -9,6 +9,7 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { runExecutorCatalogCloseDrain } from "@/lib/agents/executor/services/catalog-close-executor-run.service";
 import { runMediatorCatalogCloseDrain } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-run.service";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 import { replaySignalsForBars } from "@/lib/agents/signal/services/replay-signals-for-bars.service";
 
@@ -36,29 +37,11 @@ export async function runHistoricalExecutorReplay(
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
   const quote = "EUR";
 
-  const { data: exRow, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, historical_start_date, historical_end_date",
-    )
-    .eq("id", args.executorId)
-    .eq("user_id", args.userId)
-    .maybeSingle();
-  if (exErr) throw new Error(exErr.message);
-  if (!exRow) throw new Error("Executor not found.");
-  const ex = exRow as {
-    id: string;
-    user_id: string;
-    exchange_id: string;
-    name: string;
-    enabled: boolean;
-    execution_mode: string;
-    asset_filter_mode: string;
-    filter_asset_ids: string[] | null;
-    historical_start_date?: string | null;
-    historical_end_date?: string | null;
-  };
+  const ex = await ExecutorsSelector.selectHistoricalReplayByIdAndUser(admin, {
+    id: args.executorId,
+    userId: args.userId,
+  });
+  if (!ex) throw new Error("Executor not found.");
   if (ex.execution_mode !== "historical") {
     throw new Error("Executor is not in historical mode.");
   }

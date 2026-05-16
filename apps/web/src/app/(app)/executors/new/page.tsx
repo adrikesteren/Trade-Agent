@@ -11,6 +11,7 @@ import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-ca
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Stack } from "@adrikesteren/adricore/blocks";
@@ -62,6 +63,16 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
   const sp = (await searchParams) ?? {};
   const cloneFromId = parseCloneFromParam(sp.from);
 
+  const cloneRowPromise: Promise<{ data: ExecutorsSelector.ExecutorCloneRow | null; error: { message: string } | null }> =
+    cloneFromId
+      ? ExecutorsSelector.selectCloneByIdAndUser(supabase, { id: cloneFromId, userId: user.id })
+          .then((data) => ({ data, error: null }))
+          .catch((e: unknown) => ({
+            data: null,
+            error: { message: e instanceof Error ? e.message : String(e) },
+          }))
+      : Promise.resolve({ data: null, error: null });
+
   const [assetOptions, exchangeOptions, quoteAssetOptionsByExchange, exchangeCapabilitiesById, prefs, cloneRow] =
     await Promise.all([
       fetchAssetOptions(supabase),
@@ -69,17 +80,7 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
       fetchQuoteAssetOptionsByExchange(supabase),
       fetchExchangeCapabilitiesById(supabase),
       getUserLocalePreferences(),
-      cloneFromId
-        ? supabase
-            .schema("trading")
-            .from("executors")
-            .select(
-              "id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date",
-            )
-            .eq("id", cloneFromId)
-            .eq("user_id", user.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null as { message: string } | null }),
+      cloneRowPromise,
     ]);
 
   let cloneInitial: ExecutorFormInitial | undefined;

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval.service";
@@ -53,20 +54,7 @@ export async function upsertSignalsForMarketCloseFromBars(
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, body.signalUserIds);
   if (!signalUserIds.length) return 0;
 
-  const { data: agentRows, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, config, allowed_timeframes")
-    .eq("enabled", true);
-  if (agentErr) throw new Error(agentErr.message);
-
-  const agents = (agentRows ?? []) as {
-    id: string;
-    agent_id: string;
-    enabled: boolean;
-    config: unknown;
-    allowed_timeframes: string[] | null;
-  }[];
+  const agents = await SignalAgentsSelector.selectActiveWithConfig(admin);
 
   const filterSet = body.agentIdFilter && body.agentIdFilter.length > 0 ? new Set(body.agentIdFilter) : null;
   const activeAgents = agents.filter((a) => {

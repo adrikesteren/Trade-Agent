@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensureRiskStateForExecutor } from "@/lib/agents/executor/services/executors-lookup.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 function revalidateExecutorSurface(executorId: string) {
   revalidatePath("/executors");
@@ -304,31 +305,23 @@ export async function createExecutor(formData: FormData): Promise<void> {
     }
   }
 
-  const { data: inserted, error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .insert({
-      user_id: user.id,
-      exchange_id,
-      name,
-      enabled,
-      execution_mode,
-      asset_filter_mode,
-      filter_asset_ids: filterIdsFinal,
-      allowed_sides,
-      updated_at: new Date().toISOString(),
-      slack_trade_notifications_enabled,
-      exchange_api_key,
-      exchange_api_secret,
-      historical_start_date,
-      historical_end_date,
-      ...rails,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw new Error(error.message);
-  const newId = inserted?.id as string;
+  const newId = await ExecutorsSelector.insertReturningId(supabase, {
+    user_id: user.id,
+    exchange_id,
+    name,
+    enabled,
+    execution_mode,
+    asset_filter_mode,
+    filter_asset_ids: filterIdsFinal,
+    allowed_sides,
+    updated_at: new Date().toISOString(),
+    slack_trade_notifications_enabled,
+    exchange_api_key,
+    exchange_api_secret,
+    historical_start_date,
+    historical_end_date,
+    ...rails,
+  });
   await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId: newId });
   await replaceQuoteAssetBudgets(supabase, newId, quoteBudgets);
   revalidatePath("/executors");
@@ -437,21 +430,16 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
   const slack_trade_notifications_enabled =
     execution_mode === "historical" ? false : formData.has("slack_trade_notifications_enabled");
 
-  const { data: curRow, error: curErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("exchange_api_key, exchange_api_secret")
-    .eq("id", executorId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (curErr) throw new Error(curErr.message);
+  const curRow = await ExecutorsSelector.selectApiCredentialsByIdAndUser(supabase, {
+    id: executorId,
+    userId: user.id,
+  });
   if (!curRow) throw new Error("Executor not found.");
 
   const formKey = String(formData.get("exchange_api_key") ?? "").trim();
   const formSecret = String(formData.get("exchange_api_secret") ?? "").trim();
-  const exchange_api_key = formKey || String((curRow as { exchange_api_key?: string }).exchange_api_key ?? "");
-  const exchange_api_secret =
-    formSecret || String((curRow as { exchange_api_secret?: string }).exchange_api_secret ?? "");
+  const exchange_api_key = formKey || String(curRow.exchange_api_key ?? "");
+  const exchange_api_secret = formSecret || String(curRow.exchange_api_secret ?? "");
 
   if (execution_mode === "live") {
     if (!String(exchange_api_key).trim() || !String(exchange_api_secret).trim()) {
@@ -461,10 +449,10 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
     }
   }
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .update({
+  await ExecutorsSelector.updateByIdAndUser(supabase, {
+    id: executorId,
+    userId: user.id,
+    patch: {
       name,
       exchange_id,
       enabled,
@@ -479,11 +467,8 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       historical_start_date,
       historical_end_date,
       ...rails,
-    })
-    .eq("id", executorId)
-    .eq("user_id", user.id);
-
-  if (error) throw new Error(error.message);
+    },
+  });
   await replaceQuoteAssetBudgets(supabase, executorId, quoteBudgets);
   revalidateExecutorSurface(executorId);
 }

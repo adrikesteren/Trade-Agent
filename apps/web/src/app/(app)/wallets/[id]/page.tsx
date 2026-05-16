@@ -1,6 +1,7 @@
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -41,10 +42,15 @@ export default async function WalletDetailPage({ params }: PageProps) {
   if (error || !row) notFound();
 
   const executorId = String((row as { executor_id?: string }).executor_id ?? "").trim();
-  const { data: exRow } = executorId
-    ? await supabase.schema("trading").from("executors").select("name").eq("id", executorId).maybeSingle()
-    : { data: null };
-  const executorName = String((exRow as { name?: string } | null)?.name ?? "").trim() || "—";
+  let exName: string | null = null;
+  if (executorId) {
+    try {
+      exName = await ExecutorsSelector.selectNameById(supabase, executorId);
+    } catch {
+      /* preserve original soft-fail behavior — executorName falls back to "—" */
+    }
+  }
+  const executorName = String(exName ?? "").trim() || "—";
 
   return (
     <DetailPageLayout

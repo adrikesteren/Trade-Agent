@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+
 import { detectRegimeFlip, type RegimePoint, type RegimeLabel } from "./regime-flip-detect.service";
 import { emitSarDecisions, type PositionSide, type SarOpenPosition } from "./sar-decision-emit.service";
 
@@ -28,14 +31,12 @@ async function fetchPreviousRegimeSignals(
   args: { userId: string; marketId: string; beforeCloseTimeIso: string; limit: number },
 ): Promise<RegimePoint[]> {
   // Lookup signal_agents.id for the regime classifier agent.
-  const { data: agentRow, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id")
-    .eq("agent_id", REGIME_AGENT_SLUG)
-    .maybeSingle();
-  if (agentErr || !agentRow) return [];
-  const signalAgentId = (agentRow as { id?: string }).id;
+  let signalAgentId: string | null = null;
+  try {
+    signalAgentId = await SignalAgentsSelector.selectIdByAgentSlug(admin, REGIME_AGENT_SLUG);
+  } catch {
+    return [];
+  }
   if (!signalAgentId) return [];
 
   const { data, error } = await admin
@@ -221,13 +222,12 @@ export async function evaluateAndEmitSar(args: EvaluateAndEmitSarArgs): Promise<
       },
     };
 
-    const { error: upErr } = await args.admin
-      .schema("trading")
-      .from("decisions")
-      .upsert(sarRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
-    if (upErr) {
+    try {
+      await DecisionsSelector.upsertOneByExecutorSignalSide(args.admin, sarRow);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error(
-        `[mediator/sar] ${args.marketSymbol} ${args.executorName} ${proposal.intent} ${proposal.positionSide}: ${upErr.message}`,
+        `[mediator/sar] ${args.marketSymbol} ${args.executorName} ${proposal.intent} ${proposal.positionSide}: ${msg}`,
       );
       continue;
     }

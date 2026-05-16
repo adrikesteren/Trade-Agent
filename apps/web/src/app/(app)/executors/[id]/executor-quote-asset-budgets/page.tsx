@@ -7,6 +7,7 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -54,16 +55,15 @@ export default async function ExecutorQuoteAssetBudgetsRelatedPage({ params }: P
   const fmtDt = (v: string | number | Date | null) =>
     v == null || v === "" ? "—" : formatDatetime(v, prefs);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id, name, exchange_id")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (exErr || !ex) notFound();
-  const executorName = String(ex.name ?? "").trim() || (ex.id as string);
-  const executorExchangeId = String((ex as { exchange_id?: string | null }).exchange_id ?? "").trim();
+  let ex: ExecutorsSelector.ExecutorIdNameExchangeRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectIdNameExchangeByIdAndUser(supabase, { id, userId: user.id });
+  } catch {
+    notFound();
+  }
+  if (!ex) notFound();
+  const executorName = String(ex.name ?? "").trim() || ex.id;
+  const executorExchangeId = String(ex.exchange_id ?? "").trim();
 
   const [{ data: rows, error: budgetsErr }, quoteAssetOptionsByExchange] = await Promise.all([
     supabase

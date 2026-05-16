@@ -3,6 +3,7 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -47,16 +48,15 @@ export default async function ExecutorWalletAssetBalanceRelatedPage({ params }: 
   const fmtDt = (v: string | number | Date | null) =>
     v == null || v === "" ? "—" : formatDatetime(v, prefs);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id, wallet_id, name")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (exErr || !ex) notFound();
+  let ex: ExecutorsSelector.ExecutorIdWalletNameRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectIdWalletNameByIdAndUser(supabase, { id, userId: user.id });
+  } catch {
+    notFound();
+  }
+  if (!ex) notFound();
 
-  const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
+  const walletIdFromExecutor = String(ex.wallet_id ?? "").trim();
   let walletId = walletIdFromExecutor;
   if (!walletId) {
     const { data: walletRow } = await supabase
@@ -93,7 +93,7 @@ export default async function ExecutorWalletAssetBalanceRelatedPage({ params }: 
     }
   }
 
-  const executorName = String(ex.name ?? "").trim() || (ex.id as string);
+  const executorName = String(ex.name ?? "").trim() || ex.id;
 
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
