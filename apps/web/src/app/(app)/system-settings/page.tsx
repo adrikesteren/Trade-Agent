@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
 import { ListViewPagination } from "@/components/list-view-pagination";
@@ -12,6 +12,7 @@ import {
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as SystemSettingsSelector from "@/lib/selectors/system-settings-selector";
 import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
 import { listNumericSystemSettingDefs } from "@/lib/system-settings/registry";
 import { objectRegistry } from "@/lib/objects/registry";
@@ -25,7 +26,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 
 export default async function SystemSettingsListPage({
   searchParams,
@@ -38,7 +39,7 @@ export default async function SystemSettingsListPage({
   const isAdmin = await isDashboardAdministrator();
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date | null) =>
-    v == null || v === "" ? "—" : formatDatetime(v, prefs);
+    v == null || v === "" ? "â€”" : formatDatetime(v, prefs);
 
   if (!isAdmin) {
     return (
@@ -58,17 +59,15 @@ export default async function SystemSettingsListPage({
   const defs = listNumericSystemSettingDefs();
   const keys = defs.map((d) => d.key);
 
-  const { data: dbRows, error: dbErr } =
-    keys.length === 0
-      ? { data: [] as { key: string; value: unknown; updated_at: string | null }[], error: null }
-      : await admin.from("system_settings").select("key, value, updated_at").in("key", keys);
+  let dbRows: SystemSettingsSelector.SystemSettingRow[] = [];
+  let dbErr: { message: string } | null = null;
+  try {
+    dbRows = await SystemSettingsSelector.selectByKeys(admin, keys);
+  } catch (e) {
+    dbErr = { message: e instanceof Error ? e.message : String(e) };
+  }
 
-  const byKey = new Map(
-    (dbRows ?? []).map((r) => {
-      const row = r as { key: string; value: unknown; updated_at: string | null };
-      return [row.key, row] as const;
-    }),
-  );
+  const byKey = new Map(dbRows.map((row) => [row.key, row] as const));
 
   const rows = await Promise.all(
     defs.map(async (def) => {
@@ -93,7 +92,7 @@ export default async function SystemSettingsListPage({
     `Page ${page} of ${pages}`,
     "public.system_settings",
     "Open a row for Edit (dialog) or Delete (confirm)",
-  ].join(" · ");
+  ].join(" Â· ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">

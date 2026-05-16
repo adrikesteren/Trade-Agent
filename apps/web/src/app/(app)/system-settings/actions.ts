@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
+import * as SystemSettingsSelector from "@/lib/selectors/system-settings-selector";
 import { getNumericSystemSettingDef } from "@/lib/system-settings/registry";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -48,13 +49,10 @@ export async function saveNumericSystemSetting(
   }
 
   const admin = createServiceRoleClient();
-  const { error } = await admin.from("system_settings").upsert(
-    { key: def.key, value: n, updated_at: new Date().toISOString() },
-    { onConflict: "key" },
-  );
-
-  if (error) {
-    return { ok: false, error: error.message };
+  try {
+    await SystemSettingsSelector.upsertByKey(admin, { key: def.key, value: n });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   revalidateSystemSettingPaths(def.key);
   return { ok: true };
@@ -77,10 +75,10 @@ export async function deleteAutomationSetting(
   }
 
   const admin = createServiceRoleClient();
-  const { error } = await admin.from("system_settings").delete().eq("key", key);
-
-  if (error) {
-    return { ok: false, error: error.message };
+  try {
+    await SystemSettingsSelector.deleteByKey(admin, key);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   revalidateSystemSettingPaths(key);
   return { ok: true };

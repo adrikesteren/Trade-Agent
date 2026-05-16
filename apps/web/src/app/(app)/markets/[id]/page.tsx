@@ -1,7 +1,7 @@
 import { MarketBackfillCandlesDialog } from "@/app/(app)/markets/[id]/market-backfill-candles-dialog";
+import { MarketBackfillSignalsButton } from "@/app/(app)/markets/[id]/market-backfill-signals-button";
 import { MarketDeleteSignalsDialog } from "@/app/(app)/markets/[id]/market-delete-signals-dialog";
 import { MarketHeaderEvaluateSignalsButton } from "@/app/(app)/markets/[id]/market-header-evaluate-signals-button";
-import { MarketHeaderSyncButton } from "@/app/(app)/markets/[id]/market-header-sync-button";
 import { MarketCandleChart } from "@/components/market-candle-chart";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
@@ -17,6 +17,9 @@ import {
   type RegimeInsufficientHistoryHint,
 } from "@/lib/markets/fetch-market-chart-signals";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -26,7 +29,7 @@ import {
   RecordPageGrid,
   RecordPageSection,
   RecordRelatedList,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -137,28 +140,13 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
   const chartDisplayIana = resolveChartDisplayIana(userTimezoneToIana(prefs.timezone));
 
-  const { data: market, error } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      id,
-      market_symbol,
-      quote_asset_id,
-      status,
-      metadata,
-      created_at,
-      exchange_id,
-      asset_id,
-      assets!markets_asset_id_fkey ( id, code, kind, name ),
-      quote_asset:assets!markets_quote_asset_id_fkey ( id, code, kind, name ),
-      exchanges ( id, code, name )
-    `,
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error || !market) {
+  let market: Awaited<ReturnType<typeof MarketsSelector.selectDetailById>>;
+  try {
+    market = await MarketsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!market) {
     notFound();
   }
 
@@ -221,14 +209,16 @@ export default async function MarketDetailPage({ params }: PageProps) {
         : String(market.metadata);
 
   const metaByCandleId = new Map<string, { close_time: string; timeframe: string }>();
-  const { data: barRowsForSignals } = await supabase
-    .schema("catalog")
-    .from("candles")
-    .select("id, timeframe, candle_timestamps ( close_time )")
-    .eq("market_id", id)
-    .order("close_time", { ascending: false, foreignTable: "candle_timestamps" })
-    .limit(2500);
-  for (const br of barRowsForSignals ?? []) {
+  let barRowsForSignals: Awaited<ReturnType<typeof CandlesSelector.selectIdTimeframeCloseForMarketLatest>> = [];
+  try {
+    barRowsForSignals = await CandlesSelector.selectIdTimeframeCloseForMarketLatest(supabase, {
+      marketId: id,
+      limit: 2500,
+    });
+  } catch (e) {
+    console.error("market detail: bar metadata fetch:", e instanceof Error ? e.message : String(e));
+  }
+  for (const br of barRowsForSignals) {
     const bid = String((br as { id: string }).id ?? "").trim();
     if (!bid) continue;
     const ct = unwrapMarketSignal((br as { candle_timestamps?: unknown }).candle_timestamps);
@@ -243,16 +233,13 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const SIGNAL_IN_CHUNK = 100;
   for (let i = 0; i < candleIdsForSignals.length; i += SIGNAL_IN_CHUNK) {
     const chunk = candleIdsForSignals.slice(i, i + SIGNAL_IN_CHUNK);
-    const { data: sigPart, error: sigPartErr } = await supabase
-      .schema("trading")
-      .from("signals")
-      .select("id, signal_agent_id, created_at, intent, confidence, candle_id, signal_agents ( agent_id )")
-      .in("candle_id", chunk);
-    if (sigPartErr) {
-      console.error("market detail: signals by candle_id batch:", sigPartErr.message);
+    try {
+      const sigPart = await SignalsSelector.selectForMarketRelatedByCandleIds(supabase, chunk);
+      signalRowsRaw.push(...(sigPart as MarketRelatedSignalRaw[]));
+    } catch (e) {
+      console.error("market detail: signals by candle_id batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    signalRowsRaw.push(...((sigPart ?? []) as MarketRelatedSignalRaw[]));
   }
 
   const relatedSignals = sortMarketRelatedSignals(
@@ -305,9 +292,9 @@ export default async function MarketDetailPage({ params }: PageProps) {
         actions: (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <MarketBackfillCandlesDialog marketId={id} marketSymbol={market.market_symbol} />
+            <MarketBackfillSignalsButton marketId={id} />
             <MarketHeaderEvaluateSignalsButton marketId={id} />
             <MarketDeleteSignalsDialog marketId={id} marketSymbol={market.market_symbol} />
-            <MarketHeaderSyncButton marketId={id} />
           </div>
         ),
       })}

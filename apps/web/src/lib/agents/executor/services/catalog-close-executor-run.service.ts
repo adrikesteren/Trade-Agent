@@ -27,6 +27,15 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "./executors-lookup.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import {
   applyExecutorTradeSellCredit,
   applyExecutorTradeBuyDebit,
@@ -107,15 +116,12 @@ async function fetchCandlesForMarket(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; barLimit: number },
 ): Promise<CandleRow[]> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .limit(args.barLimit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as CandleRow[];
+  const data = await CandlesSelector.selectOhlcvWithOpenCloseForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: args.barLimit,
+  });
+  return data as CandleRow[];
 }
 
 function parseProposedBuy(payload: Record<string, unknown> | null): { symbol: string; notionalEur: number } | null {
@@ -183,7 +189,7 @@ export function exitFirstRank(payload: Record<string, unknown> | null): 0 | 1 {
 type DecisionRow = {
   id: string;
   user_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
@@ -215,15 +221,11 @@ async function upsertPositionAfterBuy(
     price: number;
   },
 ): Promise<void> {
-  const { data: pos, error: selErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("id, quantity, avg_price")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
+  const pos = await PositionsSelector.selectIdQtyAvgByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   const existingQty = Number(pos?.quantity ?? 0);
   const existingAvg = pos?.avg_price != null ? Number(pos.avg_price) : null;
@@ -244,10 +246,12 @@ async function upsertPositionAfterBuy(
     updated_at: new Date().toISOString(),
   };
 
-  const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
-    onConflict: "user_id,executor_id,market_id",
-  });
-  if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
+  try {
+    await PositionsSelector.upsertOneByTrio(admin, row);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`positions upsert: ${msg}`);
+  }
 }
 
 async function upsertPositionAfterSell(
@@ -259,43 +263,31 @@ async function upsertPositionAfterSell(
     sellQty: number;
   },
 ): Promise<void> {
-  const { data: pos, error: selErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("quantity, avg_price, paper")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
+  const pos = await PositionsSelector.selectQtyAvgPaperByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   const existingQty = Number(pos?.quantity ?? 0);
   if (!Number.isFinite(existingQty) || existingQty <= 0) return;
   const nextQty = Math.max(0, existingQty - args.sellQty);
 
   if (nextQty <= 0) {
-    const { error: delErr } = await admin
-      .schema("trading")
-      .from("positions")
-      .delete()
-      .eq("user_id", args.userId)
-      .eq("executor_id", args.executorId)
-      .eq("market_id", args.marketId);
-    if (delErr) throw new Error(delErr.message);
+    await PositionsSelector.deleteByTrio(admin, {
+      userId: args.userId,
+      executorId: args.executorId,
+      marketId: args.marketId,
+    });
     return;
   }
 
-  const { error: upErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .update({
-      quantity: nextQty,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId);
-  if (upErr) throw new Error(upErr.message);
+  await PositionsSelector.updateQuantityByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+    quantity: nextQty,
+  });
 }
 
 export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): Promise<RunExecutorCatalogCloseResult> {
@@ -323,9 +315,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
@@ -344,13 +334,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   let rows: { id: string; market_symbol: string }[];
 
   if (onlyMarketId) {
-    const { data: mrow, error: oneErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, exchange_id")
-      .eq("id", onlyMarketId)
-      .maybeSingle();
-    if (oneErr) throw new Error(oneErr.message);
+    const mrow = await MarketsSelector.selectIdSymbolExchangeById(admin, onlyMarketId);
     if (!mrow) {
       return {
         ok: true,
@@ -377,17 +361,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       };
     }
   } else {
-    let countQuery = admin
-      .schema("catalog")
-      .from("markets")
-      .select("id", { count: "exact", head: true })
-      .eq("exchange_id", exchangeId);
-    if (quoteAssetIdFilter) {
-      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
-    }
-    const { count: totalMarkets, error: countErr } = await countQuery;
-    if (countErr) throw new Error(countErr.message);
-    const total = totalMarkets ?? 0;
+    const total = await MarketsSelector.countByExchangeAndOptionalQuote(admin, {
+      exchangeId,
+      quoteAssetId: quoteAssetIdFilter,
+    });
     const maxTotal = maxTotalMarkets();
     effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
@@ -467,16 +444,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   const catalogExchangeIds = [...new Set(executorRows.map((e) => e.exchange_id).filter(Boolean))];
   const exchangeNameByCatalogId = new Map<string, string>();
   if (catalogExchangeIds.length) {
-    const { data: cexRows, error: cexErr } = await admin
-      .schema("catalog")
-      .from("exchanges")
-      .select("id, name, code")
-      .in("id", catalogExchangeIds);
-    if (cexErr) throw new Error(cexErr.message);
-    for (const row of cexRows ?? []) {
-      const rid = row.id as string;
-      const nm = String((row as { name?: string | null }).name ?? "").trim();
-      const code = String((row as { code?: string | null }).code ?? "").trim();
+    const cexRows = await ExchangesSelector.selectByIds(admin, catalogExchangeIds);
+    for (const row of cexRows) {
+      const rid = row.id;
+      const nm = String(row.name ?? "").trim();
+      const code = String(row.code ?? "").trim();
       exchangeNameByCatalogId.set(rid, nm || code || rid);
     }
   }
@@ -499,14 +471,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
-    const { data: mQuoteRow, error: mqErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("quote_asset_id")
-      .eq("id", marketId)
-      .maybeSingle();
-    if (mqErr) throw new Error(mqErr.message);
-    const quoteAssetIdForMarket = mQuoteRow?.quote_asset_id as string | undefined;
+    const quoteAssetIdForMarket = (await MarketsSelector.selectQuoteAssetIdById(admin, marketId)) ?? undefined;
     if (!quoteAssetIdForMarket) {
       throw new Error(`${marketSymbol}: market missing quote_asset_id`);
     }
@@ -535,26 +500,22 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       const barPx = await findClosePriceForBar(admin, { marketId, timeframe, closeTimeIso });
       if (!barPx?.candleId) continue;
 
-      const { data: sigRows, error: sigErr } = await admin
-        .schema("trading")
-        .from("signals")
-        .select("id")
-        .eq("user_id", ownerId)
-        .eq("candle_id", barPx.candleId);
-      if (sigErr) throw new Error(sigErr.message);
-      const signalIds = [...new Set((sigRows ?? []).map((r) => String((r as { id: string }).id)))];
-      if (!signalIds.length) continue;
+      const sigRows = await SignalsSelector.selectIdsByUserAndCandle(admin, {
+        userId: ownerId,
+        candleId: barPx.candleId,
+      });
+      // Plan 2: decisions are keyed by candle now (not signal). We still gate
+      // on "at least one signal for this user/candle existed" to skip bars
+      // that the signal pipeline hasn't processed yet.
+      if (!sigRows.length) continue;
 
-      const { data: decList, error: decErr } = await admin
-        .schema("trading")
-        .from("decisions")
-        .select("id, user_id, signal_id, approved, timeframe, decision_payload")
-        .eq("user_id", ownerId)
-        .eq("executor_id", ex.id)
-        .in("signal_id", signalIds);
-      if (decErr) throw new Error(decErr.message);
+      const decList = await DecisionsSelector.selectRunRowsForExecutorAndCandle(admin, {
+        userId: ownerId,
+        executorId: ex.id,
+        candleId: barPx.candleId,
+      });
 
-      const candidates = (decList ?? []) as DecisionRow[];
+      const candidates = decList as DecisionRow[];
       // P3: process EXIT-style decisions first so SAR pairs sequence wallet /
       // position changes correctly (close old side → free quote balance →
       // open new side). Lexical id is the secondary sort for stable ordering.
@@ -588,20 +549,24 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       if (!allowedSides.includes(decisionPositionSide)) {
         const inferredSide = proposedSell ? "sell" : "buy";
         const inferredNotional = proposedBuy?.notionalEur ?? 0;
-        const { error: rejErr } = await admin.schema("trading").from("orders").insert({
-          user_id: ownerId,
-          executor_id: ex.id,
-          decision_id: dec.id,
-          side: inferredSide,
-          quantity: 0,
-          notional_eur: inferredNotional,
-          status: "rejected",
-          paper: ex.execution_mode !== "live",
-          position_side: decisionPositionSide,
-          external_id: null,
-        });
-        if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
-          throw new Error(`${marketSymbol}: side_not_allowed reject insert: ${rejErr.message}`);
+        try {
+          await OrdersSelector.insertOne(admin, {
+            user_id: ownerId,
+            executor_id: ex.id,
+            decision_id: dec.id,
+            side: inferredSide,
+            quantity: 0,
+            notional_eur: inferredNotional,
+            status: "rejected",
+            paper: ex.execution_mode !== "live",
+            position_side: decisionPositionSide,
+            external_id: null,
+          });
+        } catch (rejErr) {
+          const msg = rejErr instanceof Error ? rejErr.message : String(rejErr);
+          if (!/duplicate|unique/i.test(msg)) {
+            throw new Error(`${marketSymbol}: side_not_allowed reject insert: ${msg}`);
+          }
         }
         continue;
       }
@@ -633,33 +598,31 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         continue;
       }
       if (decisionPositionSide === "short") {
-        const { error: rejShortErr } = await admin.schema("trading").from("orders").insert({
-          user_id: ownerId,
-          executor_id: ex.id,
-          decision_id: dec.id,
-          side: proposedSell ? "sell" : "buy",
-          quantity: 0,
-          notional_eur: proposedBuy?.notionalEur ?? 0,
-          status: "rejected",
-          paper: ex.execution_mode !== "live",
-          position_side: "short",
-          external_id: null,
-        });
-        if (rejShortErr && !/duplicate|unique/i.test(rejShortErr.message)) {
-          throw new Error(
-            `${marketSymbol}: short_execution_not_implemented reject insert: ${rejShortErr.message}`,
-          );
+        try {
+          await OrdersSelector.insertOne(admin, {
+            user_id: ownerId,
+            executor_id: ex.id,
+            decision_id: dec.id,
+            side: proposedSell ? "sell" : "buy",
+            quantity: 0,
+            notional_eur: proposedBuy?.notionalEur ?? 0,
+            status: "rejected",
+            paper: ex.execution_mode !== "live",
+            position_side: "short",
+            external_id: null,
+          });
+        } catch (rejShortErr) {
+          const msg = rejShortErr instanceof Error ? rejShortErr.message : String(rejShortErr);
+          if (!/duplicate|unique/i.test(msg)) {
+            throw new Error(
+              `${marketSymbol}: short_execution_not_implemented reject insert: ${msg}`,
+            );
+          }
         }
         continue;
       }
 
-        const { data: existingOrder, error: ordSelErr } = await admin
-          .schema("trading")
-          .from("orders")
-          .select("id")
-          .eq("decision_id", dec.id)
-          .maybeSingle();
-        if (ordSelErr) throw new Error(ordSelErr.message);
+        const existingOrder = await OrdersSelector.selectIdByDecisionId(admin, dec.id);
         if (existingOrder) continue;
 
         const paperExecution = ex.execution_mode !== "live";
@@ -688,10 +651,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
             marketId,
           });
 
-          const { data: inserted, error: insOrdErr } = await admin
-            .schema("trading")
-            .from("orders")
-            .insert({
+          let orderId: string;
+          try {
+            orderId = await OrdersSelector.insertOneReturningId(admin, {
               user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
@@ -701,20 +663,24 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               status: "filled",
               paper: paperExecution,
               external_id: null,
-            })
-            .select("id")
-            .single();
-          if (insOrdErr) throw new Error(`${marketSymbol}: order insert: ${insOrdErr.message}`);
-          const orderId = inserted?.id as string;
+            });
+          } catch (insOrdErr) {
+            throw new Error(
+              `${marketSymbol}: order insert: ${insOrdErr instanceof Error ? insOrdErr.message : String(insOrdErr)}`,
+            );
+          }
 
-          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: ownerId,
-            order_id: orderId,
-            price: px.price,
-            quantity: qty,
-            fee: feeEur,
-          });
-          if (fillErr) throw new Error(`${marketSymbol}: fill insert: ${fillErr.message}`);
+          try {
+            await FillsSelector.insertOne(admin, {
+              user_id: ownerId,
+              order_id: orderId,
+              price: px.price,
+              quantity: qty,
+              fee: feeEur,
+            });
+          } catch (e) {
+            throw new Error(`${marketSymbol}: fill insert: ${e instanceof Error ? e.message : String(e)}`);
+          }
 
           try {
             await upsertPositionAfterBuy(admin, {
@@ -732,7 +698,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               debitEur,
             });
           } catch (e) {
-            await admin.schema("trading").from("orders").delete().eq("id", orderId);
+            await OrdersSelector.deleteById(admin, orderId);
             await restoreExecutorPositionSnapshot(admin, {
               userId: ownerId,
               executorId: ex.id,
@@ -771,10 +737,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           const creditEur = tradeSellCreditEur(grossNotional, feeEur);
           if (!Number.isFinite(creditEur) || creditEur <= 0) continue;
 
-          const { data: inserted, error: insOrdErr } = await admin
-            .schema("trading")
-            .from("orders")
-            .insert({
+          let orderId: string;
+          try {
+            orderId = await OrdersSelector.insertOneReturningId(admin, {
               user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
@@ -784,20 +749,24 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               status: "filled",
               paper: paperExecution,
               external_id: null,
-            })
-            .select("id")
-            .single();
-          if (insOrdErr) throw new Error(`${marketSymbol}: sell order insert: ${insOrdErr.message}`);
-          const orderId = inserted?.id as string;
+            });
+          } catch (insOrdErr) {
+            throw new Error(
+              `${marketSymbol}: sell order insert: ${insOrdErr instanceof Error ? insOrdErr.message : String(insOrdErr)}`,
+            );
+          }
 
-          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: ownerId,
-            order_id: orderId,
-            price: px.price,
-            quantity: sellQty,
-            fee: feeEur,
-          });
-          if (fillErr) throw new Error(`${marketSymbol}: sell fill insert: ${fillErr.message}`);
+          try {
+            await FillsSelector.insertOne(admin, {
+              user_id: ownerId,
+              order_id: orderId,
+              price: px.price,
+              quantity: sellQty,
+              fee: feeEur,
+            });
+          } catch (e) {
+            throw new Error(`${marketSymbol}: sell fill insert: ${e instanceof Error ? e.message : String(e)}`);
+          }
 
           try {
             await upsertPositionAfterSell(admin, {
@@ -812,15 +781,13 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               orderId,
               creditEur,
             });
-            await admin
-              .schema("trading")
-              .from("executor_moving_floors")
-              .delete()
-              .eq("user_id", ownerId)
-              .eq("executor_id", ex.id)
-              .eq("market_id", marketId);
+            await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+              userId: ownerId,
+              executorId: ex.id,
+              marketId,
+            });
           } catch (e) {
-            await admin.schema("trading").from("orders").delete().eq("id", orderId);
+            await OrdersSelector.deleteById(admin, orderId);
             await restoreExecutorPositionSnapshot(admin, {
               userId: ownerId,
               executorId: ex.id,
@@ -846,19 +813,23 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         try {
           const bitvavoCreds = bitvavoCredentialsFromExchangeApiFields(ex.exchange_api_key, ex.exchange_api_secret);
           if (!bitvavoCreds) {
-            const { error: credRejErr } = await admin.schema("trading").from("orders").insert({
-              user_id: ownerId,
-              executor_id: ex.id,
-              decision_id: dec.id,
-              side: orderSide,
-              quantity: 0,
-              notional_eur: notionalEur,
-              status: "rejected",
-              paper: false,
-              external_id: null,
-            });
-            if (credRejErr && !/duplicate|unique/i.test(credRejErr.message)) {
-              throw new Error(`${marketSymbol}: missing API credentials reject insert: ${credRejErr.message}`);
+            try {
+              await OrdersSelector.insertOne(admin, {
+                user_id: ownerId,
+                executor_id: ex.id,
+                decision_id: dec.id,
+                side: orderSide,
+                quantity: 0,
+                notional_eur: notionalEur,
+                status: "rejected",
+                paper: false,
+                external_id: null,
+              });
+            } catch (credRejErr) {
+              const msg = credRejErr instanceof Error ? credRejErr.message : String(credRejErr);
+              if (!/duplicate|unique/i.test(msg)) {
+                throw new Error(`${marketSymbol}: missing API credentials reject insert: ${msg}`);
+              }
             }
             console.error(
               `${marketSymbol}: live order skipped — set exchange_api_key and exchange_api_secret on executor ${ex.id}`,
@@ -875,19 +846,23 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               quoteAssetId: quoteAssetIdForMarket,
             });
             if (liveEquity < estDebit) {
-              const { error: skipInsErr } = await admin.schema("trading").from("orders").insert({
-                user_id: ownerId,
-                executor_id: ex.id,
-                decision_id: dec.id,
-                side: "buy",
-                quantity: 0,
-                notional_eur: notionalEur,
-                status: "rejected",
-                paper: false,
-                external_id: null,
-              });
-              if (skipInsErr && !/duplicate|unique/i.test(skipInsErr.message)) {
-                throw new Error(`${marketSymbol}: insufficient balance reject insert: ${skipInsErr.message}`);
+              try {
+                await OrdersSelector.insertOne(admin, {
+                  user_id: ownerId,
+                  executor_id: ex.id,
+                  decision_id: dec.id,
+                  side: "buy",
+                  quantity: 0,
+                  notional_eur: notionalEur,
+                  status: "rejected",
+                  paper: false,
+                  external_id: null,
+                });
+              } catch (skipInsErr) {
+                const msg = skipInsErr instanceof Error ? skipInsErr.message : String(skipInsErr);
+                if (!/duplicate|unique/i.test(msg)) {
+                  throw new Error(`${marketSymbol}: insufficient balance reject insert: ${msg}`);
+                }
               }
               continue;
             }
@@ -915,10 +890,9 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                   clientOrderId: dec.id,
                 });
           const dbStatus = mapBitvavoOrderStatusToDb(live.status);
-          const { data: insLive, error: insLiveErr } = await admin
-            .schema("trading")
-            .from("orders")
-            .insert({
+          let localOrderId: string;
+          try {
+            localOrderId = await OrdersSelector.insertOneReturningId(admin, {
               user_id: ownerId,
               executor_id: ex.id,
               decision_id: dec.id,
@@ -928,11 +902,12 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               status: dbStatus,
               paper: false,
               external_id: live.orderId,
-            })
-            .select("id")
-            .single();
-          if (insLiveErr) throw new Error(`${marketSymbol}: live order insert: ${insLiveErr.message}`);
-          const localOrderId = insLive?.id as string;
+            });
+          } catch (insLiveErr) {
+            throw new Error(
+              `${marketSymbol}: live order insert: ${insLiveErr instanceof Error ? insLiveErr.message : String(insLiveErr)}`,
+            );
+          }
 
           const fills = live.raw.fills;
           if (dbStatus === "filled") {
@@ -952,13 +927,17 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                   : Number(live.raw.price ?? Number.NaN);
             }
             if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
-              await admin.schema("trading").from("fills").insert({
-                user_id: ownerId,
-                order_id: localOrderId,
-                price: fillPrice,
-                quantity: fillQty,
-                fee: Number.isFinite(fillFee) ? fillFee : 0,
-              });
+              try {
+                await FillsSelector.insertOne(admin, {
+                  user_id: ownerId,
+                  order_id: localOrderId,
+                  price: fillPrice,
+                  quantity: fillQty,
+                  fee: Number.isFinite(fillFee) ? fillFee : 0,
+                });
+              } catch {
+                /* preserve original fire-and-forget semantics (error was not checked). */
+              }
               if (orderSide === "buy") {
                 await upsertPositionAfterBuy(admin, {
                   userId: ownerId,
@@ -976,11 +955,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                   sellQty: fillQty,
                 });
               }
-              await admin
-                .schema("trading")
-                .from("orders")
-                .update({ quantity: fillQty, updated_at: new Date().toISOString() })
-                .eq("id", localOrderId);
+              await OrdersSelector.updateById(admin, {
+                id: localOrderId,
+                patch: { quantity: fillQty, updated_at: new Date().toISOString() },
+              });
               try {
                 if (orderSide === "buy") {
                   const debitLive = tradeBuyDebitEur(notionalEur, Number.isFinite(fillFee) ? fillFee : 0);
@@ -999,13 +977,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                     orderId: localOrderId,
                     creditEur: creditLive,
                   });
-                  await admin
-                    .schema("trading")
-                    .from("executor_moving_floors")
-                    .delete()
-                    .eq("user_id", ownerId)
-                    .eq("executor_id", ex.id)
-                    .eq("market_id", marketId);
+                  await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+                    userId: ownerId,
+                    executorId: ex.id,
+                    marketId,
+                  });
                 }
               } catch (ledgerErr) {
                 console.error(`${marketSymbol}: live fill ledger update failed`, ledgerErr);
@@ -1024,19 +1000,23 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
           ordersInserted += 1;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          const { error: rejErr } = await admin.schema("trading").from("orders").insert({
-            user_id: ownerId,
-            executor_id: ex.id,
-            decision_id: dec.id,
-            side: orderSide,
-            quantity: 0,
-            notional_eur: notionalEur,
-            status: "rejected",
-            paper: false,
-            external_id: null,
-          });
-          if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
-            throw new Error(`${marketSymbol}: live reject insert: ${rejErr.message}`);
+          try {
+            await OrdersSelector.insertOne(admin, {
+              user_id: ownerId,
+              executor_id: ex.id,
+              decision_id: dec.id,
+              side: orderSide,
+              quantity: 0,
+              notional_eur: notionalEur,
+              status: "rejected",
+              paper: false,
+              external_id: null,
+            });
+          } catch (rejErr) {
+            const rmsg = rejErr instanceof Error ? rejErr.message : String(rejErr);
+            if (!/duplicate|unique/i.test(rmsg)) {
+              throw new Error(`${marketSymbol}: live reject insert: ${rmsg}`);
+            }
           }
           console.error(`executor live order failed ${marketSymbol}:`, msg);
         }

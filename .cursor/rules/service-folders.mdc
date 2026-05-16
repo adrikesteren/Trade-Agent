@@ -34,7 +34,7 @@ Never place agent-specific logic at the bare root of `lib/`, and never put orche
 
 - One folder per object: `apps/web/src/lib/objects/<object>/<object>.object.ts` containing the `ObjectMetadata` subclass.
 - Cross-cutting object files at the root: `lib/objects/registry.ts` (central `objectRegistry`) and `lib/objects/icons.ts` (icon registry).
-- Import metadata types from `@repo/adricore/metadata`. Wire each new object class into `lib/objects/registry.ts`.
+- Import metadata types from `@adrikesteren/adricore/metadata`. Wire each new object class into `lib/objects/registry.ts`.
 
 ## Naming rules (always)
 

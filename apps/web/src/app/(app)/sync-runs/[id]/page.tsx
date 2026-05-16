@@ -4,6 +4,7 @@ import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as SyncRunsSelector from "@/lib/selectors/sync-runs-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -11,22 +12,10 @@ import {
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
-
-type SyncRunDetail = {
-  id: string;
-  job_key: string;
-  status: string;
-  trigger_source: string | null;
-  created_at: string | null;
-  ended_at: string | null;
-  updated_at: string | null;
-  reason: string | null;
-  metadata: Record<string, unknown> | null;
-};
 
 function isUuidLike(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
@@ -40,17 +29,17 @@ export default async function SyncRunDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const { data: row, error } = await supabase
-    .schema("automation")
-    .from("sync_runs")
-    .select("id, job_key, status, trigger_source, created_at, ended_at, updated_at, reason, metadata")
-    .eq("id", id)
-    .in("job_key", [...SYNC_RUN_DASHBOARD_JOB_KEYS])
-    .maybeSingle();
+  let run: SyncRunsSelector.SyncRunDetailRow | null;
+  try {
+    run = await SyncRunsSelector.selectDetailByIdAndJobKeys(supabase, {
+      id,
+      jobKeys: SYNC_RUN_DASHBOARD_JOB_KEYS,
+    });
+  } catch {
+    notFound();
+  }
 
-  if (error || !row) notFound();
-
-  const run = row as SyncRunDetail;
+  if (!run) notFound();
   const metadataJson =
     run.metadata && typeof run.metadata === "object" && !Array.isArray(run.metadata)
       ? JSON.stringify(run.metadata, null, 2)

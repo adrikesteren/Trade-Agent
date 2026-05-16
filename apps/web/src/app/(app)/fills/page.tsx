@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -9,8 +9,9 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody } from "@adrikesteren/adricore/blocks";
 
 type FillsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -23,28 +24,24 @@ export default async function FillsPage({ searchParams }: FillsPageProps) {
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  let countQ = supabase.schema("trading").from("fills").select("*", { count: "exact", head: true });
-  if (orderIdFilter) {
-    countQ = countQ.eq("order_id", orderIdFilter);
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = await FillsSelector.countAll(supabase, { orderIdFilter });
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { count: totalRaw, error: countError } = await countQ;
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("fills")
-    .select("id, user_id, order_id, price, quantity, fee, created_at")
-    .order("created_at", { ascending: false })
-    .range(from, to);
-  if (orderIdFilter) {
-    q = q.eq("order_id", orderIdFilter);
+  let list: Awaited<ReturnType<typeof FillsSelector.selectListPaginated>> = [];
+  let error: { message: string } | null = null;
+  try {
+    list = await FillsSelector.selectListPaginated(supabase, { from, to, orderIdFilter });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { data: rows, error } = await q;
-
-  const list = rows ?? [];
   const extraQuery: Record<string, string | undefined> = {};
   if (orderIdFilter) extraQuery.orderId = orderIdFilter;
 
@@ -55,8 +52,8 @@ export default async function FillsPage({ searchParams }: FillsPageProps) {
         rowCount={list.length}
         sortLine={
           orderIdFilter
-            ? `Filtered by order · sorted by created date (newest first) · Page ${page} of ${pages}`
-            : `Sorted by created date (newest first) · Page ${page} of ${pages}`
+            ? `Filtered by order Â· sorted by created date (newest first) Â· Page ${page} of ${pages}`
+            : `Sorted by created date (newest first) Â· Page ${page} of ${pages}`
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}

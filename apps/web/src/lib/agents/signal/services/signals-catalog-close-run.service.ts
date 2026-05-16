@@ -18,6 +18,12 @@ import { evaluateMultiTfConfluenceAtClose } from "./multi-timeframe-confluence-e
 import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids.service";
 import { aggregateReplayBarsToTimeframe } from "@/lib/markets/aggregate-replay-bars";
 
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
+
 /**
  * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
  * Accepts numbers; returns null for missing / non-finite values so the
@@ -111,17 +117,12 @@ async function fetchCandlesForMarket(
   args: { marketId: string; timeframe: string; barLimit: number },
 ): Promise<CandleRow[]> {
   // Newest bars first, then cap — unbounded LIMIT without ORDER can omit the latest close (wrong eval / missing target bar).
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, open, high, low, close, volume, candle_timestamps!inner ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .order("close_time", { ascending: false, foreignTable: "candle_timestamps" })
-    .limit(args.barLimit);
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as CandleRow[];
+  const data = await CandlesSelector.selectOhlcvWithOpenCloseInnerOrderedDescForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: args.barLimit,
+  });
+  return data as CandleRow[];
 }
 
 export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Promise<RunSignalsCatalogCloseResult> {
@@ -147,9 +148,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
@@ -168,13 +167,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
   let rows: { id: string; market_symbol: string }[];
 
   if (onlyMarketId) {
-    const { data: mrow, error: oneErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, exchange_id")
-      .eq("id", onlyMarketId)
-      .maybeSingle();
-    if (oneErr) throw new Error(oneErr.message);
+    const mrow = await MarketsSelector.selectIdSymbolExchangeById(admin, onlyMarketId);
     if (!mrow) {
       return {
         ok: true,
@@ -201,17 +194,10 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
       };
     }
   } else {
-    let countQuery = admin
-      .schema("catalog")
-      .from("markets")
-      .select("id", { count: "exact", head: true })
-      .eq("exchange_id", exchangeId);
-    if (quoteAssetIdFilter) {
-      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
-    }
-    const { count: totalMarkets, error: countErr } = await countQuery;
-    if (countErr) throw new Error(countErr.message);
-    const total = totalMarkets ?? 0;
+    const total = await MarketsSelector.countByExchangeAndOptionalQuote(admin, {
+      exchangeId,
+      quoteAssetId: quoteAssetIdFilter,
+    });
     const maxTotal = signalMaxTotalMarkets();
     effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
@@ -250,20 +236,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     };
   }
 
-  const { data: agentRows, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, config, allowed_timeframes")
-    .eq("enabled", true);
-  if (agentErr) throw new Error(agentErr.message);
-
-  const agents = (agentRows ?? []) as {
-    id: string;
-    agent_id: string;
-    enabled: boolean;
-    config: unknown;
-    allowed_timeframes: string[] | null;
-  }[];
+  const agents = await SignalAgentsSelector.selectActiveWithConfig(admin);
 
   const activeAgents = agents.filter((a) => {
     const tf = a.allowed_timeframes;
@@ -421,10 +394,11 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
             },
           };
 
-          const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-            onConflict: "user_id,signal_agent_id,candle_id",
-          });
-          if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
+          try {
+            await SignalsSelector.upsertOneByUserAgentCandle(admin, row);
+          } catch (e) {
+            throw new Error(`${m.market_symbol}: signals upsert: ${e instanceof Error ? e.message : String(e)}`);
+          }
           signalsUpserted += 1;
         }
       }

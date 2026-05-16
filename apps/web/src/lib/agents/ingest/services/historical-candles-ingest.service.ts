@@ -10,6 +10,8 @@ import {
   countCandlesForMarketByCloseTimeRange,
   type WarmupAgentInput,
 } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { computeHistoricalCandleWindow } from "./historical-candle-window.service";
 
@@ -106,23 +108,11 @@ export async function ingestHistoricalCandles(
     };
   }
 
-  const { data: mrow, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id, exchange_id")
-    .eq("id", args.marketId)
-    .maybeSingle();
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectCoreById(admin, args.marketId);
   if (!mrow) throw new Error("market not found");
 
-  const { data: quoteRow, error: qErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", mrow.quote_asset_id as string)
-    .maybeSingle();
-  if (qErr) throw new Error(qErr.message);
-  const quote = String(quoteRow?.code ?? args.quote).toUpperCase();
+  const quoteCode = await AssetsSelector.selectCodeById(admin, mrow.quote_asset_id as string);
+  const quote = String(quoteCode ?? args.quote).toUpperCase();
   if (!quote) {
     throw new Error("market missing quote asset code");
   }

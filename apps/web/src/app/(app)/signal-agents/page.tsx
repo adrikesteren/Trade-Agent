@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -8,6 +8,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -18,7 +19,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {
@@ -31,30 +32,31 @@ export default async function SignalAgentsPage({ searchParams }: PageProps) {
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  const { count: totalRaw, error: countError } = await supabase
-    .schema("trading")
-    .from("signal_agents")
-    .select("*", { count: "exact", head: true });
-  const totalCount = totalRaw ?? 0;
+  let totalCount = 0;
+  let countError: Error | null = null;
+  try {
+    totalCount = await SignalAgentsSelector.countAll(supabase);
+  } catch (e) {
+    countError = e instanceof Error ? e : new Error(String(e));
+  }
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: rows, error } = await supabase
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, version, description, created_at, updated_at")
-    .order("created_at", { ascending: false })
-    .range(from, to);
-
-  const list = rows ?? [];
+  let list: Awaited<ReturnType<typeof SignalAgentsSelector.selectAllPaginatedOrderedByCreatedAt>> = [];
+  let error: Error | null = null;
+  try {
+    list = await SignalAgentsSelector.selectAllPaginatedOrderedByCreatedAt(supabase, { from, to });
+  } catch (e) {
+    error = e instanceof Error ? e : new Error(String(e));
+  }
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("signal_agents")!}
         rowCount={list.length}
-        sortLine={`Sorted by Created date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Sorted by Created date Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
         actions={
           <Link href="/signals" className={listViewOutlineActionClass}>
             Signals
@@ -87,21 +89,21 @@ export default async function SignalAgentsPage({ searchParams }: PageProps) {
                       </Link>
                     </Td>
                     <Td>{row.enabled ? "Yes" : "No"}</Td>
-                    <Td>{(row.version as string | null)?.trim() || "—"}</Td>
+                    <Td>{(row.version as string | null)?.trim() || "â€”"}</Td>
                     <Td className="max-w-md truncate" title={(row.description as string | null) ?? undefined}>
-                      {(row.description as string | null)?.trim() || "—"}
+                      {(row.description as string | null)?.trim() || "â€”"}
                     </Td>
                     <Td className="whitespace-nowrap font-mono">
                       {row.updated_at
                         ? String(row.updated_at).slice(0, 19).replace("T", " ")
-                        : "—"}
+                        : "â€”"}
                     </Td>
                   </tr>
                 ))}
                 {!list.length ? (
                   <tr>
                     <Td colSpan={5} muted className="py-8 text-center">
-                      No signal agents. Run migrations — the seed inserts <code className="bk-code">ma-cross-15m-v1</code>.
+                      No signal agents. Run migrations â€” the seed inserts <code className="bk-code">ma-cross-15m-v1</code>.
                     </Td>
                   </tr>
                 ) : null}

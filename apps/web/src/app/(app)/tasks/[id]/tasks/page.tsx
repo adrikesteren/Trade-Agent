@@ -2,6 +2,7 @@ import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -12,7 +13,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -30,17 +31,21 @@ export default async function TaskSubtasksPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const { data: parent, error: pErr } = await supabase.from("tasks").select("id, title").eq("id", id).maybeSingle();
+  let parent: Awaited<ReturnType<typeof TasksSelector.selectIdAndTitleById>>;
+  try {
+    parent = await TasksSelector.selectIdAndTitleById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!parent) notFound();
 
-  if (pErr || !parent) notFound();
-
-  const { data: rows, error } = await supabase
-    .from("tasks")
-    .select("id, title, status, task_type, created_at")
-    .eq("parent_task_id", id)
-    .order("created_at", { ascending: false });
-
-  const list = rows ?? [];
+  let list: Awaited<ReturnType<typeof TasksSelector.selectSubtasksByParentId>> = [];
+  let error: { message: string } | null = null;
+  try {
+    list = await TasksSelector.selectSubtasksByParentId(supabase, { parentId: id });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
+  }
 
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -52,7 +57,7 @@ export default async function TaskSubtasksPage({ params }: PageProps) {
         uncapped
         actions={
           <Link href={`/tasks/${id}`} className="bk-link text-sm">
-            ← {(parent as { title?: string }).title ?? "Parent task"}
+            ← {parent.title ?? "Parent task"}
           </Link>
         }
       />
@@ -76,16 +81,16 @@ export default async function TaskSubtasksPage({ params }: PageProps) {
                   <tr key={t.id}>
                     <Td>
                       <Link href={`/tasks/${t.id}`} className="bk-link font-medium">
-                        {(t as { title: string }).title}
+                        {t.title}
                       </Link>
                     </Td>
                     <Td>
-                      <span className="font-mono text-xs">{(t as { status: string }).status}</span>
+                      <span className="font-mono text-xs">{t.status}</span>
                     </Td>
                     <Td>
-                      <span className="font-mono text-xs">{(t as { task_type: string }).task_type}</span>
+                      <span className="font-mono text-xs">{t.task_type}</span>
                     </Td>
-                    <Td className="whitespace-nowrap text-xs">{formatDt((t as { created_at: string }).created_at)}</Td>
+                    <Td className="whitespace-nowrap text-xs">{formatDt(t.created_at)}</Td>
                   </tr>
                 ))}
               </tbody>

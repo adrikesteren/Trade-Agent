@@ -1,4 +1,4 @@
-import { SyncRunsLiveClient, type SyncRunRow } from "@/components/sync-runs-live-client";
+﻿import { SyncRunsLiveClient, type SyncRunRow } from "@/components/sync-runs-live-client";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -11,8 +11,9 @@ import {
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as SyncRunsSelector from "@/lib/selectors/sync-runs-selector";
 import { createClient } from "@/lib/supabase/server";
-import { listViewOutlineActionClass } from "@repo/adricore/blocks";
+import { listViewOutlineActionClass } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type PageProps = {
@@ -28,26 +29,21 @@ export default async function SyncRunsPage({ searchParams }: PageProps) {
 
   const jobKeys = [...SYNC_RUN_DASHBOARD_JOB_KEYS];
 
-  const { count: totalRaw, error: countError } = await supabase
-    .schema("automation")
-    .from("sync_runs")
-    .select("*", { count: "exact", head: true })
-    .in("job_key", jobKeys);
+  const { count: totalCount, error: countError } = await SyncRunsSelector.countByJobKeys(
+    supabase,
+    jobKeys,
+  );
 
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: runRows, error: runsError } = await supabase
-    .schema("automation")
-    .from("sync_runs")
-    .select("id, job_key, status, trigger_source, created_at, ended_at, reason, metadata")
-    .in("job_key", jobKeys)
-    .order("created_at", { ascending: false })
-    .range(from, to);
+  const { data: runRows, error: runsError } = await SyncRunsSelector.selectListPaginatedByJobKeys(
+    supabase,
+    { jobKeys, from, to },
+  );
 
-  const runsSafe = (runsError ? [] : (runRows ?? [])) as SyncRunRow[];
+  const runsSafe = (runsError ? [] : runRows) as SyncRunRow[];
   const n = runsSafe.length;
   const sortLineParts = [
     `${totalCount} total`,
@@ -63,7 +59,7 @@ export default async function SyncRunsPage({ searchParams }: PageProps) {
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("sync_runs")!}
         rowCount={n}
-        sortLine={sortLineParts.join(" · ")}
+        sortLine={sortLineParts.join(" Â· ")}
         title="Run history"
         subtitle={
           <>

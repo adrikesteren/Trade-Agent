@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchAllCandleTimestampIdsInCloseTimeRange } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 
 import { computeHistoricalCandleWindow } from "./historical-candle-window.service";
 
@@ -165,17 +166,35 @@ async function loadCandlesThroughRange(
   const out: CandleRowDb[] = [];
   for (let i = 0; i < tsIds.length; i += CANDLE_TS_IN_CHUNK) {
     const part = tsIds.slice(i, i + CANDLE_TS_IN_CHUNK);
-    const { data: cRows, error: cErr } = await admin
-      .schema("catalog")
-      .from("candles")
-      .select("id, open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
-      .eq("market_id", args.marketId)
-      .eq("timeframe", args.timeframe)
-      .in("candle_timestamp_id", part);
-    if (cErr) throw new Error(cErr.message);
-    out.push(...((cRows ?? []) as CandleRowDb[]));
+    const cRows = await CandlesSelector.selectOhlcvWithOpenCloseByCandleTimestampIds(admin, {
+      marketId: args.marketId,
+      timeframe: args.timeframe,
+      candleTimestampIds: part,
+    });
+    out.push(...(cRows as CandleRowDb[]));
   }
   return mapCandleRows(out);
+}
+
+/** Count `catalog.candles` rows for a market/timeframe whose bucket `close_time` lies in the range. */
+export async function countCandlesForMarketByCloseTimeRange(
+  admin: SupabaseClient,
+  args: { marketId: string; timeframe: string; closeTimeGteIso: string; closeTimeLteIso: string },
+): Promise<number> {
+  const tsIds = await fetchAllCandleTimestampIdsInCloseTimeRange(admin, {
+    closeTimeGteIso: args.closeTimeGteIso,
+    closeTimeLteIso: args.closeTimeLteIso,
+  });
+  let total = 0;
+  for (let i = 0; i < tsIds.length; i += CANDLE_TS_IN_CHUNK) {
+    const part = tsIds.slice(i, i + CANDLE_TS_IN_CHUNK);
+    total += await CandlesSelector.countByMarketTimeframeAndCandleTimestampIds(admin, {
+      marketId: args.marketId,
+      timeframe: args.timeframe,
+      candleTimestampIds: part,
+    });
+  }
+  return total;
 }
 
 /**
@@ -386,27 +405,3 @@ export async function loadHistoricalCandlesForReplay(
   };
 }
 
-/** Count `catalog.candles` rows for a market/timeframe whose bucket `close_time` lies in the range. */
-export async function countCandlesForMarketByCloseTimeRange(
-  admin: SupabaseClient,
-  args: { marketId: string; timeframe: string; closeTimeGteIso: string; closeTimeLteIso: string },
-): Promise<number> {
-  const tsIds = await fetchAllCandleTimestampIdsInCloseTimeRange(admin, {
-    closeTimeGteIso: args.closeTimeGteIso,
-    closeTimeLteIso: args.closeTimeLteIso,
-  });
-  let total = 0;
-  for (let i = 0; i < tsIds.length; i += CANDLE_TS_IN_CHUNK) {
-    const part = tsIds.slice(i, i + CANDLE_TS_IN_CHUNK);
-    const { count, error } = await admin
-      .schema("catalog")
-      .from("candles")
-      .select("id", { count: "exact", head: true })
-      .eq("market_id", args.marketId)
-      .eq("timeframe", args.timeframe)
-      .in("candle_timestamp_id", part);
-    if (error) throw new Error(error.message);
-    total += count ?? 0;
-  }
-  return total;
-}

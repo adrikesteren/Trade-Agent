@@ -4,6 +4,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 /**
  * One full catalog-timeframe candle fetch for a single Bitvavo market (by `markets.id`).
@@ -13,38 +16,17 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
   supabase: SupabaseClient,
   marketId: string,
 ): Promise<{ candleRowsUpserted: number; marketSymbol: string }> {
-  const { data: mrow, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id, exchange_id")
-    .eq("id", marketId)
-    .maybeSingle();
-
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectCoreById(supabase, marketId);
   if (!mrow) throw new Error("market not found");
 
-  const { data: exRow, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("code")
-    .eq("id", mrow.exchange_id as string)
-    .maybeSingle();
-
-  if (exErr) throw new Error(exErr.message);
-  const exCode = String(exRow?.code ?? "").toLowerCase();
+  const exCodeRaw = await ExchangesSelector.selectCodeById(supabase, mrow.exchange_id as string);
+  const exCode = String(exCodeRaw ?? "").toLowerCase();
   if (exCode !== "bitvavo") {
     return { candleRowsUpserted: 0, marketSymbol: String(mrow.market_symbol) };
   }
 
-  const { data: quoteRow, error: qErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", mrow.quote_asset_id as string)
-    .maybeSingle();
-
-  if (qErr) throw new Error(qErr.message);
-  const quote = String(quoteRow?.code ?? "").toUpperCase();
+  const quoteCode = await AssetsSelector.selectCodeById(supabase, mrow.quote_asset_id as string);
+  const quote = String(quoteCode ?? "").toUpperCase();
   if (!quote) {
     throw new Error("market missing quote asset code");
   }

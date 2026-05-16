@@ -13,7 +13,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 

@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval.service";
@@ -35,9 +37,13 @@ function parseGateNumber(raw: unknown): number | null {
 /**
  * Upserts `trading.signals` for one catalog close using preloaded ascending bars (same agents as catalog-close).
  *
- * `onlyAgentIds` (optional): when set, restrict evaluation to those `signal_agents.id` values
- * (used by `runMarketEvaluateAllSignals` to skip agent/candle pairs that already have signals).
- * Absent = legacy behavior (all enabled agents whose `allowed_timeframes` matches).
+ * Optional caller-side filters that skip already-evaluated `(agent, candle)` pairs:
+ * - `onlyAgentIds` (Set): restrict evaluation to those `signal_agents.id` values — used by
+ *   `runMarketEvaluateAllSignals` / `replaySignalsForBars`.
+ * - `agentIdFilter` (array): same intent, array shape — used by the "Backfill Signals" wrapper.
+ *
+ * Either filter being non-empty narrows the agent set; both empty = legacy behavior (all
+ * enabled agents whose `allowed_timeframes` matches).
  */
 export async function upsertSignalsForMarketCloseFromBars(
   admin: SupabaseClient,
@@ -50,30 +56,23 @@ export async function upsertSignalsForMarketCloseFromBars(
     signalUserIds: string[];
     candleSyncRunId?: string | null;
     signalsSyncRunId?: string | null;
+    /** Set form (preferred for the replay/evaluate path that already builds a Set). */
     onlyAgentIds?: ReadonlySet<string>;
+    /** Array form (preferred for the Backfill Signals wrapper that hands off a fresh list). */
+    agentIdFilter?: string[];
   },
 ): Promise<number> {
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, body.signalUserIds);
   if (!signalUserIds.length) return 0;
   if (body.onlyAgentIds && body.onlyAgentIds.size === 0) return 0;
+  if (body.agentIdFilter && body.agentIdFilter.length === 0) return 0;
 
-  const { data: agentRows, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id, agent_id, enabled, config, allowed_timeframes")
-    .eq("enabled", true);
-  if (agentErr) throw new Error(agentErr.message);
+  const agents = await SignalAgentsSelector.selectActiveWithConfig(admin);
 
-  const agents = (agentRows ?? []) as {
-    id: string;
-    agent_id: string;
-    enabled: boolean;
-    config: unknown;
-    allowed_timeframes: string[] | null;
-  }[];
-
+  const filterSet = body.agentIdFilter && body.agentIdFilter.length > 0 ? new Set(body.agentIdFilter) : null;
   const activeAgents = agents.filter((a) => {
     if (body.onlyAgentIds && !body.onlyAgentIds.has(a.id)) return false;
+    if (filterSet && !filterSet.has(a.id)) return false;
     const tf = a.allowed_timeframes;
     if (!tf || tf.length === 0) return true;
     return tf.includes(body.timeframe);
@@ -206,10 +205,11 @@ export async function upsertSignalsForMarketCloseFromBars(
         },
       };
 
-      const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-        onConflict: "user_id,signal_agent_id,candle_id",
-      });
-      if (upErr) throw new Error(`${body.marketSymbol}: signals upsert: ${upErr.message}`);
+      try {
+        await SignalsSelector.upsertOneByUserAgentCandle(admin, row);
+      } catch (e) {
+        throw new Error(`${body.marketSymbol}: signals upsert: ${e instanceof Error ? e.message : String(e)}`);
+      }
       signalsUpserted += 1;
     }
   }

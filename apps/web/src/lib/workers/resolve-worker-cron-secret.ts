@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as SystemSettingsSelector from "@/lib/selectors/system-settings-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 /** `public.system_settings.key` for inline / Relay worker `Authorization: Bearer …`. */
@@ -26,14 +27,10 @@ function parseCronSecretFromJsonb(value: unknown): string | null {
 export async function resolveWorkerCronSecret(): Promise<string | null> {
   try {
     const admin = createServiceRoleClient();
-    const { data, error } = await admin
-      .from("system_settings")
-      .select("value")
-      .eq("key", WORKER_CRON_SECRET_SETTINGS_KEY)
-      .maybeSingle();
+    const row = await SystemSettingsSelector.selectValueByKey(admin, WORKER_CRON_SECRET_SETTINGS_KEY);
 
-    if (!error && data?.value != null) {
-      const parsed = parseCronSecretFromJsonb(data.value);
+    if (row?.value != null) {
+      const parsed = parseCronSecretFromJsonb(row.value);
       if (parsed) return parsed;
     }
   } catch (e) {

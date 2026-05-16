@@ -9,11 +9,15 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { useId, useState, useTransition } from "react";
 
 import { enqueueMarketBackfillCandlesViaRelay } from "@/app/(app)/markets/[id]/actions";
 
+// TODO(v1-migration): this dialog already enqueues a chunked Relay group via the
+// `enqueueMarketBackfillCandlesViaRelay` server action. In a follow-up session this
+// can be swapped to POST `/api/v1/agents/ingest/retrieve-candles` (or its async
+// chunked equivalent) once that route is wired up end-to-end.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function todayUtcYmd(): string {
@@ -90,9 +94,8 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
             Backfill candles{marketSymbol ? ` — ${marketSymbol}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Ingest Bitvavo OHLCV history into the catalog and run the Signal Agent for every closed bar in the
-            range. Dates are inclusive UTC. Leave the end date empty to use today. Long ranges are split into
-            ~30-day chunks and published as a sequential Relay message group.
+            Ingest Bitvavo OHLCV history into the catalog. Dates are inclusive UTC. Leave the end date empty to
+            use today. Long ranges are split into chunks and published as a sequential Relay message group.
           </DialogDescription>
 
           {error ? <Alert tone="error">{error}</Alert> : null}
@@ -140,8 +143,8 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
                 }
                 setSuccess({
                   chunkCount: r.chunkCount ?? 1,
-                  groupId: r.relayMessageGroupId ?? null,
-                  messageId: r.relayMessageId ?? null,
+                  groupId: r.groupId ?? null,
+                  messageId: null,
                   inline: !r.queued,
                 });
               });

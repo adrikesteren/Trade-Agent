@@ -13,6 +13,8 @@ import {
   TASK_TYPE_REQUIRES_MANUAL_COINGECKO_SEARCH,
 } from "@/lib/tasks/constants";
 import { escapeIlikeExactPattern } from "@/lib/agents/ingest/services/primary-market-by-codes-resolve.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 
 function parsePositiveInt(envVal: string | undefined, fallback: number): number {
   if (envVal === undefined || envVal === "") return fallback;
@@ -80,19 +82,14 @@ export type SingleAssetCoinIdSyncResult = {
 export async function listCryptoAssetsNeedingCoinIdSearch(
   admin: SupabaseClient,
 ): Promise<{ rows: CryptoAssetCoinIdRow[]; error?: string }> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, name, metadata, coingecko_coin_id, coingecko_market_cap_usd")
-    .eq("kind", "crypto")
-    .order("coingecko_market_cap_usd", { ascending: false, nullsFirst: false })
-    .order("code", { ascending: true });
-
-  if (error) {
-    return { rows: [], error: error.message };
+  let data: Awaited<ReturnType<typeof AssetsSelector.selectAllCryptoOrderedByMcap>>;
+  try {
+    data = await AssetsSelector.selectAllCryptoOrderedByMcap(admin);
+  } catch (e) {
+    return { rows: [], error: e instanceof Error ? e.message : String(e) };
   }
 
-  const rows = (data ?? []).filter((r) => isCoinIdEmpty((r as CryptoAssetCoinIdRow).coingecko_coin_id)) as CryptoAssetCoinIdRow[];
+  const rows = data.filter((r) => isCoinIdEmpty(r.coingecko_coin_id)) as CryptoAssetCoinIdRow[];
   return { rows };
 }
 
@@ -118,16 +115,11 @@ export async function syncCoingeckoCoinIdForAssetByCode(
     return { ...empty, failures: ["empty assetCode"], skippedReason: "not_found" };
   }
 
-  const { data: r, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, name, metadata, coingecko_coin_id, kind")
-    .eq("kind", "crypto")
-    .ilike("code", escapeIlikeExactPattern(code))
-    .maybeSingle();
-
-  if (selErr) {
-    return { ...empty, failures: [selErr.message] };
+  let r: Awaited<ReturnType<typeof AssetsSelector.selectCryptoByCodeIlike>>;
+  try {
+    r = await AssetsSelector.selectCryptoByCodeIlike(admin, escapeIlikeExactPattern(code));
+  } catch (e) {
+    return { ...empty, failures: [e instanceof Error ? e.message : String(e)] };
   }
   if (!r) {
     return { ...empty, failures: [`no crypto asset with code ${code}`], skippedReason: "not_found" };
@@ -148,9 +140,10 @@ export async function syncCoingeckoCoinIdForAssetByCode(
 
   const mid = coingeckoIdFromMetadata(row.metadata);
   if (mid) {
-    const { error: upErr } = await admin.schema("catalog").from("assets").update({ coingecko_coin_id: mid }).eq("id", row.id);
-    if (upErr) {
-      return { ...empty, assetCode: String(row.code), failures: [upErr.message] };
+    try {
+      await AssetsSelector.updateCoingeckoCoinIdById(admin, row.id, mid);
+    } catch (e) {
+      return { ...empty, assetCode: String(row.code), failures: [e instanceof Error ? e.message : String(e)] };
     }
     return {
       assetCode: String(row.code),
@@ -162,18 +155,20 @@ export async function syncCoingeckoCoinIdForAssetByCode(
     };
   }
 
-  const { data: skipRow, error: skipErr } = await admin
-    .from("tasks")
-    .select("id")
-    .eq("related_schema", "catalog")
-    .eq("related_table", "assets")
-    .eq("related_id", row.id)
-    .eq("status", "open")
-    .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-    .maybeSingle();
-
-  if (skipErr) {
-    return { ...empty, assetCode: String(row.code), failures: [`skip-task query: ${skipErr.message}`] };
+  let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>>;
+  try {
+    skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+      relatedSchema: "catalog",
+      relatedTable: "assets",
+      relatedId: row.id,
+      jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+    });
+  } catch (e) {
+    return {
+      ...empty,
+      assetCode: String(row.code),
+      failures: [`skip-task query: ${e instanceof Error ? e.message : String(e)}`],
+    };
   }
   if (skipRow?.id) {
     return { ...empty, assetCode: String(row.code), skippedReason: "skip_task_open" };
@@ -200,19 +195,19 @@ export async function syncCoingeckoCoinIdForAssetByCode(
 
     if (coinId) {
       const meta = { ...asRecord(row.metadata), coingecko_id: coinId };
-      const { error: upErr } = await admin
-        .schema("catalog")
-        .from("assets")
-        .update({ coingecko_coin_id: coinId, metadata: meta })
-        .eq("id", row.id);
-      if (upErr) {
+      try {
+        await AssetsSelector.updateCoingeckoCoinIdAndMetadataById(admin, row.id, {
+          coingecko_coin_id: coinId,
+          metadata: meta,
+        });
+      } catch (e) {
         return {
           assetCode: String(row.code),
           copiedFromMetadata: 0,
           filledViaSearch: 0,
           tasksCreated: 0,
           searchAttempted: true,
-          failures: [upErr.message],
+          failures: [e instanceof Error ? e.message : String(e)],
         };
       }
       return {
@@ -225,16 +220,18 @@ export async function syncCoingeckoCoinIdForAssetByCode(
       };
     }
 
-    const { data: existingOpen } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", row.id)
-      .eq("status", "open")
-      .eq("task_type", TASK_TYPE_REQUIRES_MANUAL_COINGECKO_SEARCH)
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
+    let existingOpen: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+    try {
+      existingOpen = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: row.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+        taskType: TASK_TYPE_REQUIRES_MANUAL_COINGECKO_SEARCH,
+      });
+    } catch {
+      /* preserve original soft-fail behavior (data only, no error returned) */
+    }
 
     if (existingOpen?.id) {
       return {
@@ -254,7 +251,7 @@ export async function syncCoingeckoCoinIdForAssetByCode(
         ? "CoinGecko /search returned no coins for this ticker. Set `coingecko_coin_id` manually or add metadata.coingecko_id."
         : "CoinGecko /search did not resolve to a unique coin id for this asset (ambiguous symbol or name mismatch). Pick the correct id manually.";
 
-    const { error: insErr } = await admin.from("tasks").insert({
+    const insErr = await TasksSelector.insertOne(admin, {
       user_id: automatedUserId,
       title,
       description,
@@ -332,28 +329,18 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
   const failures: string[] = [];
   let tasksCreated = 0;
 
-  const { data: rows, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, name, metadata, coingecko_coin_id")
-    .eq("kind", "crypto");
-
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
-
-  const list = rows ?? [];
+  const list = await AssetsSelector.selectAllCryptoCoinIds(admin);
   let copiedFromMetadata = 0;
 
   for (const r of list) {
     if (!isCoinIdEmpty(r.coingecko_coin_id as string | null)) continue;
     const mid = coingeckoIdFromMetadata(r.metadata);
     if (!mid) continue;
-    const { error: upErr } = await admin.schema("catalog").from("assets").update({ coingecko_coin_id: mid }).eq("id", r.id);
-    if (upErr) {
-      failures.push(`${r.code}: ${upErr.message}`);
-    } else {
+    try {
+      await AssetsSelector.updateCoingeckoCoinIdById(admin, r.id, mid);
       copiedFromMetadata += 1;
+    } catch (e) {
+      failures.push(`${r.code}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -373,18 +360,16 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
   for (const r of needRows) {
     if (searchAttempts >= COINGECKO_COIN_ID_SEARCH_MAX_PER_RUN) break;
 
-    const { data: skipRow, error: skipErr } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", r.id)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-
-    if (skipErr) {
-      failures.push(`${r.code}: skip-task query: ${skipErr.message}`);
+    let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+    try {
+      skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: r.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+    } catch (e) {
+      failures.push(`${r.code}: skip-task query: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
     if (skipRow?.id) {
@@ -409,8 +394,13 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
     }
   }
 
-  const { data: finalRows } = await admin.schema("catalog").from("assets").select("coingecko_coin_id").eq("kind", "crypto");
-  const stillMissingCoinId = (finalRows ?? []).filter((a) =>
+  let finalRows: Awaited<ReturnType<typeof AssetsSelector.selectAllCryptoCoinIdValues>> = [];
+  try {
+    finalRows = await AssetsSelector.selectAllCryptoCoinIdValues(admin);
+  } catch {
+    /* preserve original soft-fail behavior — final count is non-critical */
+  }
+  const stillMissingCoinId = finalRows.filter((a) =>
     isCoinIdEmpty(a.coingecko_coin_id as string | null),
   ).length;
 

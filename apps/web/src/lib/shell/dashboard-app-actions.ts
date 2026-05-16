@@ -1,6 +1,6 @@
-"use server";
+﻿"use server";
 
-import { ACTIVE_APP_COOKIE_NAME } from "@repo/adricore/metadata";
+import { ACTIVE_APP_COOKIE_NAME } from "@adrikesteren/adricore/metadata";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 

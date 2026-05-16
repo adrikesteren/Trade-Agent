@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+
 export type TradeFillSlackSource = "executor-catalog-close" | "bitvavo-reconcile";
 
 export type TradeFillSlackPayload = {
@@ -30,12 +33,11 @@ export function primaryAgentSlugFromDecisionPayload(
 /** All agents (small table): slug → display label. */
 export async function fetchTradeFillSignalAgentLabels(admin: SupabaseClient): Promise<Map<string, string>> {
   const m = new Map<string, string>();
-  const { data, error } = await admin.schema("trading").from("signal_agents").select("agent_id, description");
-  if (error) throw new Error(error.message);
-  for (const row of data ?? []) {
-    const slug = String((row as { agent_id?: string }).agent_id ?? "").trim();
+  const rows = await SignalAgentsSelector.selectSlugAndDescription(admin);
+  for (const row of rows) {
+    const slug = String(row.agent_id ?? "").trim();
     if (!slug) continue;
-    const desc = String((row as { description?: string | null }).description ?? "").trim();
+    const desc = String(row.description ?? "").trim();
     m.set(slug, desc || slug);
   }
   return m;
@@ -58,12 +60,11 @@ export async function fetchAssetDisplayNameByMarketId(
     const chunk = 200;
     for (let i = 0; i < ids.length; i += chunk) {
       const part = ids.slice(i, i + chunk);
-      const { data, error } = await admin.schema("catalog").from("assets").select("id, name, code").in("id", part);
-      if (error) throw new Error(error.message);
-      for (const r of data ?? []) {
-        const nm = String((r as { name?: string | null }).name ?? "").trim();
-        const code = String((r as { code?: string | null }).code ?? "").trim();
-        byAssetId.set((r as { id: string }).id, nm || code || "—");
+      const data = await AssetsSelector.selectIdCodeNameByIds(admin, part);
+      for (const r of data) {
+        const nm = String(r.name ?? "").trim();
+        const code = String(r.code ?? "").trim();
+        byAssetId.set(r.id, nm || code || "—");
       }
     }
   }

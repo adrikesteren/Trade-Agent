@@ -9,11 +9,16 @@ import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-re
 import {
   buildSymbolClosePipelineUrl,
   downstreamWorkerHeaders,
-  normalizeRelayBaseUrl,
-  postRelayMessageGroup,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
+  toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+
+import type { RelayClient } from "@adrikesteren/relay-client";
 
 export type RunExchangeClosePipelineOptions = {
   exchangeCode: string;
@@ -66,17 +71,15 @@ async function fetchAssetIdToCodeMap(
   const map = new Map<string, string>();
   for (let i = 0; i < assetIds.length; i += ASSET_ID_IN_CHUNK) {
     const slice = assetIds.slice(i, i + ASSET_ID_IN_CHUNK);
-    const { data: aRows, error: aErr } = await admin
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .in("id", slice);
-    if (aErr) {
-      return { ok: false, message: aErr.message };
+    let aRows: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>>;
+    try {
+      aRows = await AssetsSelector.selectIdCodeByIds(admin, slice);
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
-    for (const r of aRows ?? []) {
-      const id = String((r as { id: string }).id).trim();
-      const c = String((r as { code: string }).code).trim();
+    for (const r of aRows) {
+      const id = String(r.id).trim();
+      const c = String(r.code).trim();
       if (id && c) map.set(id, c);
     }
   }
@@ -118,13 +121,10 @@ export async function runExchangeClosePipeline(
 
   const exPattern = escapeIlikeExactPattern(exchangeIn);
 
-  const { data: exRows, error: exErr } = await admin
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code")
-    .ilike("code", exPattern);
-
-  if (exErr) {
+  let exchanges: { id: string; code: string }[];
+  try {
+    exchanges = await ExchangesSelector.selectByCodeIlike(admin, exPattern);
+  } catch (e) {
     return {
       ok: false,
       exchangeCode: exchangeIn,
@@ -132,11 +132,10 @@ export async function runExchangeClosePipeline(
       distinctAssetCodes: [],
       published: 0,
       failures: [],
-      error: exErr.message,
+      error: e instanceof Error ? e.message : String(e),
     };
   }
 
-  const exchanges = (exRows ?? []) as { id: string; code: string }[];
   if (exchanges.length === 0) {
     return {
       ok: false,
@@ -164,22 +163,13 @@ export async function runExchangeClosePipeline(
   const exchangeId = ex.id as string;
   const canonicalExchangeCode = String(ex.code);
 
-  const { data: mRows, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      asset_id,
-      market_symbol,
-      assets!markets_asset_id_fkey (
-        coingecko_market_cap_usd
-      )
-    `,
-    )
-    .eq("exchange_id", exchangeId)
-    .eq("quote_asset_id", quoteAssetId);
-
-  if (mErr) {
+  let marketRows: MarketRowForMcap[];
+  try {
+    marketRows = (await MarketsSelector.selectAssetIdSymbolWithMcapByExchangeAndQuote(admin, {
+      exchangeId,
+      quoteAssetId,
+    })) as MarketRowForMcap[];
+  } catch (e) {
     return {
       ok: false,
       exchangeCode: canonicalExchangeCode,
@@ -187,11 +177,9 @@ export async function runExchangeClosePipeline(
       distinctAssetCodes: [],
       published: 0,
       failures: [],
-      error: mErr.message,
+      error: e instanceof Error ? e.message : String(e),
     };
   }
-
-  const marketRows = (mRows ?? []) as MarketRowForMcap[];
   const sorted = [...marketRows].sort((a, b) => {
     const d = coingeckoMarketCapUsdDescKey(b) - coingeckoMarketCapUsdDescKey(a);
     if (d !== 0) return d;
@@ -249,12 +237,12 @@ export async function runExchangeClosePipeline(
     };
   }
 
-  let relayBase: string;
+  let relay: RelayClient;
   let appBase: string;
   let workerHeaders: Record<string, string>;
   let maxRetries: number;
   try {
-    relayBase = normalizeRelayBaseUrl();
+    relay = makeRelayClient();
     appBase = getAppBaseUrl();
     workerHeaders = await downstreamWorkerHeaders();
     maxRetries = relayMaxRetries();
@@ -281,12 +269,26 @@ export async function runExchangeClosePipeline(
 
   try {
     if (urls.length === 1) {
-      const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
-      relayMessageIds.push(id);
+      const { origin, path } = toRelayOriginAndPath(urls[0]!);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageIds.push(message.id);
     } else {
-      const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
-      relayMessageGroupIds.push(groupId);
-      relayMessageIds.push(...messageIds);
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group, messages } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageGroupIds.push(message_group.id);
+      relayMessageIds.push(...messages.map((m) => m.id));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -12,7 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 
 type ResetResponse = {
   ok?: boolean;

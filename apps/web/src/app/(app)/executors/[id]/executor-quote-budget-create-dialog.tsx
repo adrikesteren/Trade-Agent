@@ -11,7 +11,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import { useRouter } from "next/navigation";
 import { useId, useState, useTransition } from "react";
 

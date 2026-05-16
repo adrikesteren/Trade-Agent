@@ -3,6 +3,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { primaryUnitsToQuoteUnits } from "@/lib/catalog/primary-to-quote";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
+import * as UserPreferencesSelector from "@/lib/selectors/user-preferences-selector";
 
 /**
  * Resolve the per-trade notional for an executor + quote asset, expressed in **quote-asset units**.
@@ -25,33 +28,24 @@ export async function fetchExecutorQuoteBudgetInQuoteUnits(
   if (!executorId || !quoteAssetId) return null;
 
   // Load junction row + executor.user_id (used to find the owner's primary asset).
-  const { data: budgetRow, error: bErr } = await admin
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .select("max_notional_primary, executor_id, quote_asset_id, executors:executor_id ( user_id )")
-    .eq("executor_id", executorId)
-    .eq("quote_asset_id", quoteAssetId)
-    .maybeSingle();
-  if (bErr) throw new Error(bErr.message);
+  const budgetRow = await ExecutorQuoteAssetBudgetSelector.selectWithExecutorByExecutorAndQuote(admin, {
+    executorId,
+    quoteAssetId,
+  });
   if (!budgetRow) return null;
 
-  const maxPrimary = Number((budgetRow as { max_notional_primary?: unknown }).max_notional_primary);
+  const maxPrimary = Number(budgetRow.max_notional_primary);
   if (!Number.isFinite(maxPrimary) || maxPrimary <= 0) return null;
 
   // Resolve ownerId
-  const exJoin = (budgetRow as { executors?: { user_id?: string } | { user_id?: string }[] }).executors;
+  const exJoin = budgetRow.executors;
   const exObj = Array.isArray(exJoin) ? exJoin[0] : exJoin;
   const ownerId = String(exObj?.user_id ?? "").trim();
   if (!ownerId) return null;
 
   // Owner's primary asset id
-  const { data: prefRow, error: pErr } = await admin
-    .from("user_preferences")
-    .select("primary_asset_id")
-    .eq("user_id", ownerId)
-    .maybeSingle();
-  if (pErr) throw new Error(pErr.message);
-  const primaryAssetId = String((prefRow as { primary_asset_id?: string } | null)?.primary_asset_id ?? "").trim();
+  const prefRow = await UserPreferencesSelector.selectPrimaryAssetIdByUserId(admin, ownerId);
+  const primaryAssetId = String(prefRow?.primary_asset_id ?? "").trim();
   if (!primaryAssetId) return null;
 
   // Same fiat as the market quote → just return the number stored as primary units (no conversion needed)
@@ -60,15 +54,10 @@ export async function fetchExecutorQuoteBudgetInQuoteUnits(
   }
 
   // Read both dollar_values for triangulation
-  const { data: dvRows, error: dvErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, dollar_value")
-    .in("id", [primaryAssetId, quoteAssetId]);
-  if (dvErr) throw new Error(dvErr.message);
+  const dvRows = await AssetsSelector.selectIdDollarValueByIds(admin, [primaryAssetId, quoteAssetId]);
 
   const byId = new Map<string, number | null>();
-  for (const row of (dvRows ?? []) as { id: string; dollar_value: unknown }[]) {
+  for (const row of dvRows) {
     const raw = row.dollar_value;
     const n = raw == null ? null : typeof raw === "number" ? raw : Number.parseFloat(String(raw));
     byId.set(String(row.id), Number.isFinite(n) && (n as number) > 0 ? (n as number) : null);

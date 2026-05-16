@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/adricore/blocks";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@adrikesteren/adricore/blocks";
 import * as React from "react";
 
 export type RecordPageTabsProps = {

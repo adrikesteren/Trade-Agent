@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { Alert, Button, FormElement, Input, Stack } from "@repo/adricore/blocks";
+import { Alert, Button, FormElement, Input, Stack } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useId, useState } from "react";
@@ -98,7 +98,7 @@ function RegisterForm() {
             />
           </FormElement>
           <Button type="submit" variant="brand" loading={status === "loading"}>
-            {status === "loading" ? "Creating…" : "Create account"}
+            {status === "loading" ? "Creatingâ€¦" : "Create account"}
           </Button>
         </Stack>
       </form>
@@ -126,7 +126,7 @@ export default function RegisterPage() {
   return (
     <Suspense
       fallback={
-        <div className="bk-container w-full px-6 py-16 text-center bk-text-muted">Loading…</div>
+        <div className="bk-container w-full px-6 py-16 text-center bk-text-muted">Loadingâ€¦</div>
       }
     >
       <RegisterForm />

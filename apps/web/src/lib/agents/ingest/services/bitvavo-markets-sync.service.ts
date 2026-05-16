@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchBitvavoMarkets } from "@/lib/bitvavo/public/markets";
 import { fetchQuoteAssetIdsByCodes } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 
@@ -16,18 +19,7 @@ export async function syncBitvavoMarkets(
 ): Promise<{ upsertedAssets: number; upsertedListings: number; skippedMissingQuote: number }> {
   const markets = await fetchBitvavoMarkets();
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange row missing; apply migrations.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const filtered = markets.filter((m) => {
     if (m.status !== "trading") return false;
@@ -40,20 +32,8 @@ export async function syncBitvavoMarkets(
 
   const quoteIdByCode = await fetchQuoteAssetIdsByCodes(supabase, uniqueQuotes);
 
-  const { data: existingAssets, error: existingErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("kind", "crypto")
-    .in("code", uniqueBases);
-
-  if (existingErr) {
-    throw new Error(existingErr.message);
-  }
-
-  const existingCodes = new Set(
-    (existingAssets ?? []).map((a) => String(a.code).toUpperCase()),
-  );
+  const existingCodesArr = await AssetsSelector.selectExistingCryptoCodes(supabase, uniqueBases);
+  const existingCodes = new Set(existingCodesArr.map((c) => String(c).toUpperCase()));
 
   const newBases = uniqueBases.filter((code) => !existingCodes.has(code));
 
@@ -66,24 +46,13 @@ export async function syncBitvavoMarkets(
       metadata: {},
     }));
 
-    const { error: assetsErr } = await supabase.schema("catalog").from("assets").upsert(assetRows, {
-      onConflict: "kind,code",
-    });
-    if (assetsErr) {
-      throw new Error(assetsErr.message);
-    }
+    await AssetsSelector.upsertManyByKindCode(supabase, assetRows);
     insertedAssets = newBases.length;
   }
 
-  const { data: assetRowsDb, error: selErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("kind", "crypto")
-    .in("code", uniqueBases);
-
-  if (selErr || !assetRowsDb?.length) {
-    throw new Error(selErr?.message ?? "assets select failed");
+  const assetRowsDb = await AssetsSelector.selectCryptoIdCodeByCodes(supabase, uniqueBases);
+  if (!assetRowsDb.length) {
+    throw new Error("assets select failed");
   }
 
   const codeToAssetId = new Map(
@@ -123,12 +92,7 @@ export async function syncBitvavoMarkets(
   const chunkSize = 200;
   for (let i = 0; i < listingRows.length; i += chunkSize) {
     const chunk = listingRows.slice(i, i + chunkSize);
-    const { error: eaErr } = await supabase.schema("catalog").from("markets").upsert(chunk, {
-      onConflict: "exchange_id,market_symbol",
-    });
-    if (eaErr) {
-      throw new Error(eaErr.message);
-    }
+    await MarketsSelector.upsertManyByExchangeAndSymbol(supabase, chunk);
   }
 
   return {
@@ -163,18 +127,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
 
   const markets = await fetchBitvavoMarkets();
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange row missing; apply migrations.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const filtered = markets.filter((m) => {
     if (m.status !== "trading") return false;
@@ -190,17 +143,8 @@ export async function upsertBitvavoMarketsForExistingAssets(
   const codeToAssetId = new Map<string, string>();
   for (let i = 0; i < uniqueBases.length; i += ASSET_CODES_CHUNK) {
     const slice = uniqueBases.slice(i, i + ASSET_CODES_CHUNK);
-    const { data: assetRowsDb, error: selErr } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .eq("kind", "crypto")
-      .in("code", slice);
-
-    if (selErr) {
-      throw new Error(selErr.message);
-    }
-    for (const a of assetRowsDb ?? []) {
+    const assetRowsDb = await AssetsSelector.selectCryptoIdCodeByCodes(supabase, slice);
+    for (const a of assetRowsDb) {
       codeToAssetId.set(String(a.code).toUpperCase(), a.id as string);
     }
   }
@@ -251,12 +195,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
 
   for (let i = 0; i < listingRows.length; i += MARKET_UPSERT_CHUNK) {
     const chunk = listingRows.slice(i, i + MARKET_UPSERT_CHUNK);
-    const { error: eaErr } = await supabase.schema("catalog").from("markets").upsert(chunk, {
-      onConflict: "exchange_id,market_symbol",
-    });
-    if (eaErr) {
-      throw new Error(eaErr.message);
-    }
+    await MarketsSelector.upsertManyByExchangeAndSymbol(supabase, chunk);
   }
 
   return {

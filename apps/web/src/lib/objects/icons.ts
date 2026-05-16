@@ -1,4 +1,4 @@
-import { IconMetadata, IconMetadataRegistry } from "@repo/adricore/metadata";
+﻿import { IconMetadata, IconMetadataRegistry } from "@adrikesteren/adricore/metadata";
 
 export const iconRegistry = new IconMetadataRegistry([
   new IconMetadata("Activity"),

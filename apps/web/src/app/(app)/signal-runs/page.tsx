@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -8,8 +8,9 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as SignalRunsSelector from "@/lib/selectors/signal-runs-selector";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody, ListViewObjectIcon } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody, ListViewObjectIcon } from "@adrikesteren/adricore/blocks";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -21,23 +22,24 @@ export default async function SignalRunsPage({ searchParams }: PageProps) {
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  const { count: totalRaw, error: countError } = await supabase
-    .schema("automation")
-    .from("signal_runs")
-    .select("*", { count: "exact", head: true });
-  const totalCount = totalRaw ?? 0;
+  let totalCount = 0;
+  let countError: Error | null = null;
+  try {
+    totalCount = await SignalRunsSelector.countAll(supabase);
+  } catch (e) {
+    countError = e instanceof Error ? e : new Error(String(e));
+  }
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: rows, error } = await supabase
-    .schema("automation")
-    .from("signal_runs")
-    .select("id, signal_job_id, agent_id, signal_id, status, error, started_at, finished_at")
-    .order("started_at", { ascending: false })
-    .range(from, to);
-
-  const list = rows ?? [];
+  let list: Awaited<ReturnType<typeof SignalRunsSelector.selectAllPaginatedOrderedByStartedAt>> = [];
+  let error: Error | null = null;
+  try {
+    list = await SignalRunsSelector.selectAllPaginatedOrderedByStartedAt(supabase, { from, to });
+  } catch (e) {
+    error = e instanceof Error ? e : new Error(String(e));
+  }
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -52,7 +54,7 @@ export default async function SignalRunsPage({ searchParams }: PageProps) {
           </ListViewObjectIcon>
         }
         rowCount={list.length}
-        sortLine={`Sorted by Started date · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Sorted by Started date Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}
 

@@ -1,4 +1,4 @@
-import { Card, CardBody, Stack } from "@repo/adricore/blocks";
+﻿import { Card, CardBody, Stack } from "@adrikesteren/adricore/blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
 

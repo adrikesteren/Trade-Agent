@@ -10,6 +10,7 @@ import type { AssetOption, ExchangeOption, ExecutorQuoteBudgetInitial } from "@/
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
 import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import {
@@ -28,6 +29,17 @@ import { fetchWalletBalanceForAsset } from "@/lib/agents/executor/services/execu
 import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/services/historical-paper-market.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as WalletAssetBalanceSelector from "@/lib/selectors/wallet-asset-balance-selector";
+import * as WalletsSelector from "@/lib/selectors/wallets-selector";
+import * as WalletTransactionsSelector from "@/lib/selectors/wallet-transactions-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -42,35 +54,33 @@ import {
   RecordPageSection,
   RecordRelatedList,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[]> {
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .in("kind", ["crypto", "fiat"])
-    .order("code", { ascending: true })
-    .limit(400);
-  if (error) {
-    console.error("assets list:", error.message);
+  let data: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByKindsOrderedLimited>>;
+  try {
+    data = await AssetsSelector.selectIdCodeByKindsOrderedLimited(supabase, ["crypto", "fiat"], 400);
+  } catch (e) {
+    console.error("assets list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string }[]).map((a) => ({ id: a.id, code: a.code }));
+  return data.map((a) => ({ id: a.id, code: a.code }));
 }
 
 async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeOption[]> {
-  const { data, error } = await supabase.schema("catalog").from("exchanges").select("id, code, name").order("code");
-  if (error) {
-    console.error("exchanges list:", error.message);
+  let data: Awaited<ReturnType<typeof ExchangesSelector.selectAllOrderedByCode>>;
+  try {
+    data = await ExchangesSelector.selectAllOrderedByCode(supabase);
+  } catch (e) {
+    console.error("exchanges list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string; name: string }[]).map((e) => ({
+  return data.map((e) => ({
     id: e.id,
     code: e.code,
-    name: e.name,
+    name: e.name ?? "",
   }));
 }
 
@@ -79,10 +89,15 @@ async function marketSymbolMap(supabase: SupabaseClient, ids: string[]): Promise
   const uniq = [...new Set(ids)].filter(Boolean);
   for (let i = 0; i < uniq.length; i += 120) {
     const chunk = uniq.slice(i, i + 120);
-    const { data } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
-    for (const m of data ?? []) {
-      const sym = String((m as { id: string; market_symbol?: string | null }).market_symbol ?? "").trim();
-      if (sym) map.set(m.id as string, sym);
+    let rows: Awaited<ReturnType<typeof MarketsSelector.selectIdAndSymbolByIds>>;
+    try {
+      rows = await MarketsSelector.selectIdAndSymbolByIds(supabase, chunk);
+    } catch {
+      continue;
+    }
+    for (const m of rows) {
+      const sym = String(m.market_symbol ?? "").trim();
+      if (sym) map.set(m.id, sym);
     }
   }
   return map;
@@ -102,17 +117,17 @@ async function fetchLatestCloseByMarketIds(
   const uniq = [...new Set(marketIds)].filter(Boolean);
   for (let i = 0; i < uniq.length; i += 120) {
     const chunk = uniq.slice(i, i + 120);
-    const { data, error } = await supabase
-      .schema("catalog")
-      .from("candles")
-      .select("market_id, close, candle_timestamps ( close_time )")
-      .eq("timeframe", timeframe)
-      .in("market_id", chunk);
-    if (error) {
-      console.error("executor detail: latest closes batch:", error.message);
+    let data: Awaited<ReturnType<typeof CandlesSelector.selectMarketCloseByMarketIdsAndTimeframe>>;
+    try {
+      data = await CandlesSelector.selectMarketCloseByMarketIdsAndTimeframe(supabase, {
+        marketIds: chunk,
+        timeframe,
+      });
+    } catch (e) {
+      console.error("executor detail: latest closes batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const row of (data ?? []) as {
+    for (const row of data as {
       market_id: string;
       close: unknown;
       candle_timestamps?: { close_time?: string | null } | { close_time?: string | null }[] | null;
@@ -144,11 +159,10 @@ type OrderRowDb = {
   notional_eur: string | number | null;
   status: string;
   created_at: string;
-  decisions?: {
-    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-  } | {
-    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-  }[] | null;
+  decisions?:
+    | { candle_id?: string | null }
+    | { candle_id?: string | null }[]
+    | null;
 };
 
 type OrderRow = {
@@ -164,8 +178,7 @@ type OrderRow = {
 
 function normalizeExecutorOrderRow(r: OrderRowDb, candleById: Map<string, CatalogCandleBar>): OrderRow {
   const td = unwrapOne(r.decisions);
-  const sig = unwrapOne(td?.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(td?.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
   return {
@@ -189,39 +202,32 @@ type LedgerRow = {
   created_at: string;
 };
 
-type WalletAssetBalanceRow = {
-  id: string;
-  asset_id: string;
-  amount: string | number | null;
-  updated_at: string;
-};
+type WalletAssetBalanceRow = WalletAssetBalanceSelector.WalletAssetBalanceListRow;
 
 type TradeDecisionRowDb = {
   id: string;
-  signal_id: string | null;
+  candle_id: string;
   approved: boolean;
   created_at: string;
-  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
 };
 
 type TradeDecisionRow = {
   id: string;
   market_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   created_at: string;
   bar_close_iso: string | null;
 };
 
 function normalizeExecutorTradeDecisionRow(r: TradeDecisionRowDb, candleById: Map<string, CatalogCandleBar>): TradeDecisionRow {
-  const sig = unwrapOne(r.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(r.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
   return {
     id: r.id,
     market_id: candle?.market_id ? candle.market_id.trim() : "",
-    signal_id: String(r.signal_id ?? "").trim(),
+    candle_id: r.candle_id,
     approved: r.approved,
     created_at: r.created_at,
     bar_close_iso: barClose,
@@ -335,34 +341,23 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
       : formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, updated_at, max_risk_per_trade, max_open_positions, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
-    )
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (exErr) return <Alert tone="error">{exErr.message}</Alert>;
+  let ex: ExecutorsSelector.ExecutorDetailRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectDetailByIdAndUser(supabase, { id, userId: user.id });
+  } catch (e) {
+    return <Alert tone="error">{e instanceof Error ? e.message : String(e)}</Alert>;
+  }
   if (!ex) notFound();
 
-  const { data: budgetRows, error: budgetErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .select("id, quote_asset_id, max_notional_primary")
-    .eq("executor_id", id)
-    .order("created_at", { ascending: true });
-  if (budgetErr) {
-    console.error("executor detail: budgets:", budgetErr.message);
+  let budgetRowsRaw: ExecutorQuoteAssetBudgetSelector.ExecutorQuoteBudgetDetailRow[] = [];
+  try {
+    budgetRowsRaw = await ExecutorQuoteAssetBudgetSelector.selectDetailByExecutorIdOrdered(
+      supabase,
+      id,
+    );
+  } catch (e) {
+    console.error("executor detail: budgets:", e instanceof Error ? e.message : String(e));
   }
-  type BudgetRowDb = {
-    id: string;
-    quote_asset_id: string;
-    max_notional_primary: string | number;
-  };
-  const budgetRowsRaw = (budgetRows ?? []) as BudgetRowDb[];
   const quoteBudgetsForForm: ExecutorQuoteBudgetInitial[] = budgetRowsRaw.map((row) => ({
     quote_asset_id: row.quote_asset_id,
     max_notional_primary: String(row.max_notional_primary ?? ""),
@@ -394,58 +389,44 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     fetchQuoteAssetOptionsByExchange(supabase),
     fetchExchangeCapabilitiesById(supabase),
     loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
-    supabase.schema("trading").from("wallets").select("id").eq("executor_id", id).maybeSingle(),
-    supabase
-      .schema("trading")
-      .from("orders")
-      .select(
-        "id, side, quantity, notional_eur, status, created_at, decisions ( signals ( candle_id ) )",
-        { count: "exact" },
-      )
-      .eq("executor_id", id)
-      .order("created_at", { ascending: false })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT),
-    supabase
-      .schema("trading")
-      .from("decisions")
-      .select("id, signal_id, approved, created_at, signals ( candle_id )", {
-        count: "exact",
-      })
-      .eq("executor_id", id)
-      .order("created_at", { ascending: false })
-      .limit(EXECUTOR_DETAIL_TRADE_DECISION_POOL),
-    supabase
-      .schema("trading")
-      .from("positions")
-      .select("id, market_id, quantity, avg_price, paper, updated_at", { count: "exact" })
-      .eq("executor_id", id)
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    WalletsSelector.selectIdByExecutorId(supabase, id).then(
+      (walletIdRaw) => ({ walletId: walletIdRaw, error: null as { message: string } | null }),
+      (e: unknown) => ({
+        walletId: null as string | null,
+        error: { message: e instanceof Error ? e.message : String(e) },
+      }),
+    ),
+    OrdersSelector.selectExecutorRecentWithCount(supabase, {
+      executorId: id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    }),
+    DecisionsSelector.selectExecutorRecentWithCount(supabase, {
+      executorId: id,
+      limit: EXECUTOR_DETAIL_TRADE_DECISION_POOL,
+    }),
+    PositionsSelector.selectExecutorListWithCount(supabase, {
+      executorId: id,
+      userId: user.id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    }),
   ]);
 
   const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
-  const walletIdFromTable = String((walletPack.data as { id?: string } | null)?.id ?? "").trim();
+  const walletIdFromTable = String(walletPack.walletId ?? "").trim();
   const walletId = walletIdFromExecutor || walletIdFromTable || null;
   const ledgerPack = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_transactions")
-        .select("id, kind, quantity, asset_id, note, created_at", { count: "exact" })
-        .eq("wallet_id", walletId)
-        .order("created_at", { ascending: false })
-        .limit(ledgerFetchLimit)
+    ? await WalletTransactionsSelector.selectByWalletIdRecentWithCount(supabase, {
+        walletId,
+        limit: ledgerFetchLimit,
+      })
     : { data: [] as LedgerRow[], count: 0, error: null };
 
   const walletAssetBalanceFetchLimit = RECORD_RELATED_LIST_PREVIEW_ROWS;
   const walletAssetBalancePack = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_asset_balance")
-        .select("id, asset_id, amount, updated_at", { count: "exact" })
-        .eq("wallet_id", walletId)
-        .order("updated_at", { ascending: false })
-        .limit(walletAssetBalanceFetchLimit)
+    ? await WalletAssetBalanceSelector.selectListByWalletWithCount(supabase, {
+        walletId,
+        limit: walletAssetBalanceFetchLimit,
+      })
     : { data: [] as WalletAssetBalanceRow[], count: 0, error: null };
 
   const eurFallbackQuoteId = await resolveQuoteAssetId(supabase, "EUR");
@@ -497,13 +478,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const candleIdsForEmbed = [
     ...ordRowsRaw.map((r) => {
       const td = unwrapOne(r.decisions);
-      const sig = unwrapOne(td?.signals);
-      return String(sig?.candle_id ?? "").trim();
+      return String(td?.candle_id ?? "").trim();
     }),
-    ...tdRowsRaw.map((r) => {
-      const sig = unwrapOne(r.signals);
-      return String(sig?.candle_id ?? "").trim();
-    }),
+    ...tdRowsRaw.map((r) => String(r.candle_id ?? "").trim()),
   ].filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIdsForEmbed);
 
@@ -534,12 +511,13 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const dollarIdList = [...dollarIdSet].filter(Boolean);
   const dollarById = new Map<string, number | null>();
   if (dollarIdList.length) {
-    const { data: dvRows } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, dollar_value")
-      .in("id", dollarIdList);
-    for (const row of (dvRows ?? []) as { id: string; dollar_value: unknown }[]) {
+    let dvRows: Awaited<ReturnType<typeof AssetsSelector.selectIdDollarValueByIds>> = [];
+    try {
+      dvRows = await AssetsSelector.selectIdDollarValueByIds(supabase, dollarIdList);
+    } catch {
+      /* preserve original soft-fail behavior — dollarById stays empty */
+    }
+    for (const row of dvRows) {
       dollarById.set(row.id, parseDollarCell(row.dollar_value));
     }
   }
@@ -927,7 +905,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 <RecordRelatedList
                   title="Trade decisions"
                   icon={<ListViewObjectIcon letter="T" />}
-                  description="Id, signal, market, approved, bar close. Sorted by bar close (newest first)."
+                  description="Id, market, approved, bar close. Sorted by bar close (newest first)."
                   items={tradeDecisionsRaw}
                   getKey={(r) => r.id}
                   totalCount={tradeDecisionTotal}
@@ -937,19 +915,11 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     const mLabel = row.market_id
                       ? (symMap.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`)
                       : "—";
-                    const sid = row.signal_id;
                     return (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8125rem]">
                         <Link href={`/trade-decisions/${row.id}`} className="bk-link shrink-0 font-mono" title={row.id}>
                           {shortId(row.id)}
                         </Link>
-                        {sid ? (
-                          <Link href={`/signals/${sid}`} className="bk-link shrink-0 font-mono" title={sid}>
-                            {shortId(sid)}
-                          </Link>
-                        ) : (
-                          <span className="bk-text-muted shrink-0 text-[0.75rem]">—</span>
-                        )}
                         {row.market_id ? (
                           <Link href={`/markets/${row.market_id}`} className="bk-link shrink-0 font-mono">
                             {mLabel}

@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
@@ -9,8 +9,9 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
-import { Alert, Card, CardBody } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody } from "@adrikesteren/adricore/blocks";
 import { redirect } from "next/navigation";
 
 type RiskStatePageProps = {
@@ -28,37 +29,42 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  let countQ = supabase
-    .schema("trading")
-    .from("executors")
-    .select("*", { count: "exact", head: true });
-  if (executorIdFilter) {
-    countQ = countQ.eq("id", executorIdFilter).eq("user_id", user.id);
-  } else {
-    countQ = countQ.eq("user_id", user.id);
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = executorIdFilter
+      ? await ExecutorsSelector.countRiskStateForUserAndId(supabase, {
+          userId: user.id,
+          id: executorIdFilter,
+        })
+      : await ExecutorsSelector.countRiskStateForUser(supabase, user.id);
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { count: totalRaw, error: countError } = await countQ;
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, user_id, name, updated_at, risk_open_position_count, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
-    )
-    .order("updated_at", { ascending: false })
-    .range(from, to);
-  if (executorIdFilter) {
-    q = q.eq("id", executorIdFilter).eq("user_id", user.id);
-  } else {
-    q = q.eq("user_id", user.id);
+  let rows: ExecutorsSelector.ExecutorRiskStateRow[] = [];
+  let error: { message: string } | null = null;
+  try {
+    rows = executorIdFilter
+      ? await ExecutorsSelector.selectRiskStatePaginatedForUserAndId(supabase, {
+          userId: user.id,
+          id: executorIdFilter,
+          from,
+          to,
+        })
+      : await ExecutorsSelector.selectRiskStatePaginatedForUser(supabase, {
+          userId: user.id,
+          from,
+          to,
+        });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { data: rows, error } = await q;
 
-  const list = rows ?? [];
+  const list = rows;
   const extraQuery: Record<string, string | undefined> = {};
   if (executorIdFilter) extraQuery.executorId = executorIdFilter;
 
@@ -70,8 +76,8 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
         rowCount={list.length}
         sortLine={
           executorIdFilter
-            ? `Filtered by executor · sorted by Updated date · Page ${page} of ${pages}`
-            : `Sorted by Updated date · Page ${page} of ${pages}`
+            ? `Filtered by executor Â· sorted by Updated date Â· Page ${page} of ${pages}`
+            : `Sorted by Updated date Â· Page ${page} of ${pages}`
         }
       />
       {error ? <Alert tone="error">{error.message}</Alert> : null}

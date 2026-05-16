@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
+
 /** Same bar lengths as BitvavoAdapter / retention. */
 export function timeframeDurationMs(timeframe: string): number {
   const unit = timeframe.slice(-1);
@@ -31,26 +33,22 @@ export async function prepareEurCandleTimestampWindow(
   admin: SupabaseClient,
   timeframe: string,
 ): Promise<EurCandleTimestampPrepare> {
-  const { count, error: cntErr } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .select("id", { count: "exact", head: true });
-
-  if (cntErr) throw new Error(`candle_timestamps: ${cntErr.message}`);
-  if ((count ?? 0) === 0) {
+  let count: number;
+  try {
+    count = await CandleTimestampsSelector.countAll(admin);
+  } catch (e) {
+    throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (count === 0) {
     return { mode: "full" };
   }
 
-  const { data: lastRow, error: lastErr } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .select("close_time")
-    .order("close_time", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (lastErr) throw new Error(`candle_timestamps: ${lastErr.message}`);
-  const lastCloseIso = lastRow?.close_time as string | undefined;
+  let lastCloseIso: string | null;
+  try {
+    lastCloseIso = await CandleTimestampsSelector.selectLatestCloseTime(admin);
+  } catch (e) {
+    throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!lastCloseIso) {
     return { mode: "full" };
   }
@@ -70,19 +68,15 @@ export async function prepareEurCandleTimestampWindow(
     return { mode: "blocked_future_close", reason: "Close Time Is In The Future" };
   }
 
-  const { data: upserted, error: upErr } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .upsert(
-      { open_time: nextOpenIso, close_time: nextCloseIso },
-      { onConflict: "open_time,close_time" },
-    )
-    .select("id")
-    .single();
-
-  if (upErr) throw new Error(`candle_timestamps: ${upErr.message}`);
-  const id = upserted?.id as string | undefined;
-  if (!id) throw new Error("candle_timestamps: upsert returned no id");
+  let id: string;
+  try {
+    id = await CandleTimestampsSelector.upsertOneReturningId(admin, {
+      open_time: nextOpenIso,
+      close_time: nextCloseIso,
+    });
+  } catch (e) {
+    throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   return {
     mode: "incremental",

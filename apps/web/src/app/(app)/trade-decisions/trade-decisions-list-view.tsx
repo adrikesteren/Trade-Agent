@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -16,6 +16,9 @@ import { formatDatetime } from "@/lib/locale/format";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -28,13 +31,13 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type DecisionRow = {
   id: string;
   executor_id: string;
-  signal_id: string;
+  candle_id: string;
   market_id: string;
   approved: boolean;
   reason_codes: string[] | null;
@@ -45,9 +48,7 @@ type DecisionRow = {
   created_at: string;
 };
 
-type DecisionRowDb = Omit<DecisionRow, "market_id" | "close_time"> & {
-  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-};
+type DecisionRowDb = Omit<DecisionRow, "market_id" | "close_time">;
 
 type CatalogMarketRow = {
   id: string;
@@ -65,7 +66,7 @@ function payloadString(payload: Record<string, unknown> | null, key: string): st
 function resolvedIntentFromRow(row: DecisionRow): string {
   const fromPayload = payloadString(row.decision_payload, "resolvedIntent");
   if (fromPayload) return fromPayload;
-  return "—";
+  return "â€”";
 }
 
 function intentClass(intent: string): string {
@@ -82,39 +83,32 @@ function approvedClass(approved: boolean): string {
 }
 
 function formatReasonCodes(codes: string[] | null | undefined): string {
-  if (!codes?.length) return "—";
+  if (!codes?.length) return "â€”";
   return codes.join(", ");
 }
 
-function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
-  if (raw == null) return null;
-  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
-}
-
 function normalizeTradeDecisionRow(r: DecisionRowDb, candleById: Map<string, CatalogCandleBar>): DecisionRow {
-  const { signals: _sig, ...base } = r;
-  const p = base.decision_payload;
+  const p = r.decision_payload;
   const barFromPayload =
     p && typeof p === "object" && typeof (p as Record<string, unknown>).barCloseTimeIso === "string"
       ? String((p as Record<string, unknown>).barCloseTimeIso).trim()
       : "";
-  const sig = unwrapOne(r.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(r.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const closeFromCandle = candle?.close_time ? candle.close_time.trim() : "";
   const marketId = candle?.market_id ? candle.market_id.trim() : "";
   return {
-    id: base.id,
-    executor_id: base.executor_id,
-    signal_id: base.signal_id,
+    id: r.id,
+    executor_id: r.executor_id,
+    candle_id: r.candle_id,
     market_id: marketId,
-    approved: base.approved,
-    reason_codes: base.reason_codes,
-    timeframe: base.timeframe,
-    position_side: String((base as { position_side?: string | null }).position_side ?? "long"),
-    decision_payload: base.decision_payload,
-    created_at: base.created_at,
-    close_time: barFromPayload || closeFromCandle || base.created_at,
+    approved: r.approved,
+    reason_codes: r.reason_codes,
+    timeframe: r.timeframe,
+    position_side: String((r as { position_side?: string | null }).position_side ?? "long"),
+    decision_payload: r.decision_payload,
+    created_at: r.created_at,
+    close_time: barFromPayload || closeFromCandle || r.created_at,
   };
 }
 
@@ -128,12 +122,13 @@ async function fetchMarketSymbolsById(
   const rows: CatalogMarketRow[] = [];
   for (let i = 0; i < marketIds.length; i += MARKET_ID_CHUNK) {
     const chunk = marketIds.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
-    if (error) {
-      console.error("trade-decisions list: markets batch:", error.message);
+    try {
+      const batch = await MarketsSelector.selectIdAndSymbolByIds(supabase, chunk);
+      rows.push(...(batch as CatalogMarketRow[]));
+    } catch (e) {
+      console.error("trade-decisions list: markets batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    rows.push(...((data ?? []) as CatalogMarketRow[]));
   }
 
   for (const m of rows) {
@@ -152,13 +147,15 @@ async function fetchExecutorNamesById(
   const unique = [...new Set(executorIds)];
   for (let i = 0; i < unique.length; i += MARKET_ID_CHUNK) {
     const chunk = unique.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
-    if (error) {
-      console.error("trade-decisions list: executors batch:", error.message);
+    let rows: Awaited<ReturnType<typeof ExecutorsSelector.selectIdAndNameByIds>>;
+    try {
+      rows = await ExecutorsSelector.selectIdAndNameByIds(supabase, chunk);
+    } catch (e) {
+      console.error("trade-decisions list: executors batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const e of data ?? []) {
-      map.set(e.id as string, String(e.name ?? "").trim() || (e.id as string));
+    for (const e of rows) {
+      map.set(e.id, String(e.name ?? "").trim() || e.id);
     }
   }
   return map;
@@ -167,8 +164,8 @@ async function fetchExecutorNamesById(
 function marketLabel(row: DecisionRow, symbolByMarketId: Map<string, string>): string {
   const fromPayload = payloadString(row.decision_payload, "market_symbol");
   if (fromPayload) return fromPayload;
-  if (!row.market_id) return "—";
-  return symbolByMarketId.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`;
+  if (!row.market_id) return "â€”";
+  return symbolByMarketId.get(row.market_id) ?? `${row.market_id.slice(0, 8)}â€¦`;
 }
 
 export type TradeDecisionsListViewProps = {
@@ -190,25 +187,21 @@ export async function TradeDecisionsListView({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
-  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
 
-  let q = supabase
-    .schema("trading")
-    .from("decisions")
-    .select(
-      "id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, created_at, signals ( candle_id )",
-    )
-    .order("created_at", { ascending: false })
-    .limit(TRADE_DECISIONS_FETCH_POOL);
-  if (executorIdFilter) {
-    q = q.eq("executor_id", executorIdFilter);
+  let rows: DecisionsSelector.DecisionListViewRow[] | null = null;
+  let error: { message: string } | null = null;
+  try {
+    rows = await DecisionsSelector.selectListViewRecent(supabase, {
+      limit: TRADE_DECISIONS_FETCH_POOL,
+      executorIdFilter,
+    });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { data: rows, error } = await q;
 
   const rawDb = (rows ?? []) as DecisionRowDb[];
-  const candleIds = rawDb
-    .map((r) => String(unwrapOne(r.signals)?.candle_id ?? "").trim())
-    .filter(Boolean);
+  const candleIds = rawDb.map((r) => String(r.candle_id ?? "").trim()).filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
   const raw = rawDb.map((r) => normalizeTradeDecisionRow(r, candleById));
   // On the global trade-decisions list we collapse rows to one-per-market
@@ -243,9 +236,9 @@ export async function TradeDecisionsListView({
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
           model={objectRegistry.registrations.get("trade_decisions")!}
-          title={parentExecutor ? `Trading decisions · ${parentExecutor.name}` : undefined}
+          title={parentExecutor ? `Trading decisions Â· ${parentExecutor.name}` : undefined}
           rowCount={list.length}
-          sortLine={executorIdFilter ? `Filtered by executor · ${sortLineCore}` : sortLineCore}
+          sortLine={executorIdFilter ? `Filtered by executor Â· ${sortLineCore}` : sortLineCore}
           actions={
             <>
               {parentExecutor ? (
@@ -264,7 +257,7 @@ export async function TradeDecisionsListView({
           <Alert tone="info">
             <strong>CRON_SECRET</strong> is een gedeeld geheim in je server-<code className="bk-code">.env</code>: workers
             zoals candle sync, signals en mediator accepteren alleen requests met een geldige{" "}
-            <code className="bk-code">Authorization: Bearer …</code> (jouw <code className="bk-code">CRON_SECRET</code>).
+            <code className="bk-code">Authorization: Bearer â€¦</code> (jouw <code className="bk-code">CRON_SECRET</code>).
             Zo kan niet iedereen op het internet achtergrondjobs starten.
           </Alert>
         ) : null}
@@ -300,12 +293,12 @@ export async function TradeDecisionsListView({
                     const label = marketLabel(row, symbolByMarketId);
                     const resolved = resolvedIntentFromRow(row);
                     const reasons = formatReasonCodes(row.reason_codes);
-                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
+                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "â€¦";
                     return (
                       <tr key={row.id}>
                         <Td>
                           <Link href={`/trade-decisions/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
+                            {row.id.slice(0, 8)}â€¦
                           </Link>
                         </Td>
                         <Td>

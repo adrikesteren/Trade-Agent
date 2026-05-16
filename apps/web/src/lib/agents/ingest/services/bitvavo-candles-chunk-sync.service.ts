@@ -4,6 +4,10 @@ import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-li
 import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { fetchAllCandleTimestampRowsForCandleWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type CandleSyncMode = "full" | "incremental" | "window";
 
@@ -116,18 +120,7 @@ export async function syncBitvavoCandlesChunk(
   supabase: SupabaseClient,
   opts: SyncCandlesChunkOptions,
 ): Promise<SyncCandlesChunkResult> {
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange not found. Run migrations and market sync first.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const quoteFilter =
     opts.quote != null && String(opts.quote).trim() !== "" ? String(opts.quote).trim().toUpperCase() : null;
@@ -145,22 +138,10 @@ export async function syncBitvavoCandlesChunk(
     };
   }
 
-  let countQuery = supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id", { count: "exact", head: true })
-    .eq("exchange_id", exchangeId);
-
-  if (quoteAssetId) {
-    countQuery = countQuery.eq("quote_asset_id", quoteAssetId);
-  }
-
-  const { count: totalMarkets, error: countErr } = await countQuery;
-  if (countErr) {
-    throw new Error(countErr.message);
-  }
-
-  const total = totalMarkets ?? 0;
+  const total = await MarketsSelector.countByExchangeAndOptionalQuote(supabase, {
+    exchangeId,
+    quoteAssetId,
+  });
 
   const maxBars = barsForIncrementalFetchWindow(opts.timeframe);
   const windowMode =
@@ -331,16 +312,15 @@ export async function syncBitvavoCandlesChunk(
       const pairList = [...distinctPairs.values()];
       idByKey = new Map<string, string>();
       if (pairList.length) {
-        const { data: tsRows, error: tsErr } = await supabase
-          .schema("catalog")
-          .from("candle_timestamps")
-          .upsert(pairList, { onConflict: "open_time,close_time" })
-          .select("id, open_time, close_time");
-        if (tsErr) {
-          throw new Error(`${marketSymbol}: candle_timestamps: ${tsErr.message}`);
+        let tsRows: { id: string; open_time: string; close_time: string }[];
+        try {
+          tsRows = await CandleTimestampsSelector.upsertManyReturningRows(supabase, pairList);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${marketSymbol}: candle_timestamps: ${msg}`);
         }
-        for (const r of tsRows ?? []) {
-          idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id as string);
+        for (const r of tsRows) {
+          idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id);
         }
       }
 
@@ -366,11 +346,11 @@ export async function syncBitvavoCandlesChunk(
       const chunkSize = 500;
       for (let j = 0; j < rowsToWrite.length; j += chunkSize) {
         const part = rowsToWrite.slice(j, j + chunkSize);
-        const { error: upErr } = await supabase.schema("catalog").from("candles").upsert(part, {
-          onConflict: "market_id,timeframe,candle_timestamp_id",
-        });
-        if (upErr) {
-          throw new Error(`${marketSymbol}: ${upErr.message}`);
+        try {
+          await CandlesSelector.upsertManyByMarketTimeframeCandleTs(supabase, part);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${marketSymbol}: ${msg}`);
         }
         candleRowsUpserted += part.length;
       }

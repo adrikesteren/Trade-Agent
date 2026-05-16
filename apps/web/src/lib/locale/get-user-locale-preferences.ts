@@ -1,16 +1,11 @@
 import { cache } from "react";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as UserPreferencesSelector from "@/lib/selectors/user-preferences-selector";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_USER_LOCALE_PREFERENCES } from "./defaults";
 import type { UserDecimalFormat, UserDateFormat, UserLocalePreferences, UserTimeFormat, UserTimezone } from "./types";
 
-type UserPreferencesRow = {
-  user_id: string;
-  timezone: string;
-  decimal_format: string;
-  date_format: string;
-  time_format: string;
-  primary_asset_id: string;
-};
+type UserPreferencesRow = UserPreferencesSelector.UserPreferencesLocaleRow;
 
 function isUserTimezone(v: string): v is UserTimezone {
   return (
@@ -59,15 +54,13 @@ export const getUserLocalePreferences = cache(async (): Promise<UserLocalePrefer
   } = await supabase.auth.getUser();
   if (!user) return DEFAULT_USER_LOCALE_PREFERENCES;
 
-  const { data, error } = await supabase
-    .from("user_preferences")
-    .select("user_id, timezone, decimal_format, date_format, time_format, primary_asset_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error || !data) return DEFAULT_USER_LOCALE_PREFERENCES;
-
-  const row = data as UserPreferencesRow;
+  let row: UserPreferencesRow | null = null;
+  try {
+    row = await UserPreferencesSelector.selectLocaleByUserId(supabase, user.id);
+  } catch {
+    return DEFAULT_USER_LOCALE_PREFERENCES;
+  }
+  if (!row) return DEFAULT_USER_LOCALE_PREFERENCES;
   const base = rowToPrefs(row);
 
   const pid = String(row.primary_asset_id ?? "").trim();
@@ -75,14 +68,14 @@ export const getUserLocalePreferences = cache(async (): Promise<UserLocalePrefer
     return { ...base, primary_asset: null };
   }
 
-  const { data: pa, error: paErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, dollar_value")
-    .eq("id", pid)
-    .maybeSingle();
+  let pa: Awaited<ReturnType<typeof AssetsSelector.selectLocaleById>> = null;
+  try {
+    pa = await AssetsSelector.selectLocaleById(supabase, pid);
+  } catch {
+    return { ...base, primary_asset: null };
+  }
 
-  if (paErr || !pa || String(pa.kind) !== "fiat") {
+  if (!pa || String(pa.kind) !== "fiat") {
     return { ...base, primary_asset: null };
   }
 

@@ -1,6 +1,6 @@
 # Dashboard UI conventions (Salesforce-inspired)
 
-List and detail screens under `apps/web/src/app/(app)/**` follow **Salesforce Lightning-style** patterns implemented in `@repo/adricore/blocks`. New or refactored pages should stay consistent so the product feels coherent.
+List and detail screens under `apps/web/src/app/(app)/**` follow **Salesforce Lightning-style** patterns implemented in `@adrikesteren/adricore/blocks`. New or refactored pages should stay consistent so the product feels coherent.
 
 ## List views (object list / grid)
 
@@ -38,7 +38,7 @@ Treat each `*/[id]/page.tsx` (or similar dynamic segment) as a **Lightning recor
 
 ### Page shell: `DetailPageLayout`
 
-Wrap the whole screen in **`DetailPageLayout`** from `@repo/adricore/blocks`. It composes `RecordDetailLayout` (page background) and defines three slots:
+Wrap the whole screen in **`DetailPageLayout`** from `@adrikesteren/adricore/blocks`. It composes `RecordDetailLayout` (page background) and defines three slots:
 
 | Slot | Role |
 |------|--------|
@@ -87,6 +87,6 @@ When adding or editing dashboard routes:
 
 1. **List route** → apply the list view checklist above; reuse `ObjectListViewHeader` when the page is a simple data dump.
 2. **Detail route** → wrap with `DetailPageLayout` (`header` / `content` / optional `sidebar`); apply the detail checklist; use `Output` + `record`/`lookup` for every foreign key that has a detail URL in this app.
-3. Prefer extending `@repo/adricore/blocks` over one-off Tailwind in pages when the pattern is reusable.
+3. Prefer extending `@adrikesteren/adricore/blocks` over one-off Tailwind in pages when the pattern is reusable.
 
 Point agents at this file when working under `apps/web/src/app/(app)/**` or `packages/adricore/src/blocks/**`.

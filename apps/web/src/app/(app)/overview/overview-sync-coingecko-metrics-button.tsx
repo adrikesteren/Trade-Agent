@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 import { syncCoingeckoMetricsFromOverview } from "@/app/(app)/overview/actions";
-import { Alert, Button } from "@repo/adricore/blocks";
+import { Alert, Button } from "@adrikesteren/adricore/blocks";
 import { useState, useTransition } from "react";
 
 export function OverviewSyncCoingeckoMetricsButton() {
@@ -34,7 +34,7 @@ export function OverviewSyncCoingeckoMetricsButton() {
               if (r.searchFailureCount > 0) bits.push(`${r.searchFailureCount} resolve errors`);
               setFeedback({
                 tone: "success",
-                text: `CoinGecko metrics: ${bits.join(" · ")}.`,
+                text: `CoinGecko metrics: ${bits.join(" Â· ")}.`,
               });
             } else {
               setFeedback({ tone: "error", text: r.error });
@@ -42,7 +42,7 @@ export function OverviewSyncCoingeckoMetricsButton() {
           });
         }}
       >
-        {pending ? "Syncing…" : "Sync Coingecko With Assets"}
+        {pending ? "Syncingâ€¦" : "Sync Coingecko With Assets"}
       </Button>
     </div>
   );

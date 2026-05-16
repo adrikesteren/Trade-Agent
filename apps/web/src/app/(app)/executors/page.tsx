@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -9,6 +9,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { getDashboardSession } from "@/lib/supabase/dashboard-session";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { ensureUserExecutorExists } from "@/lib/agents/executor/services/executors-lookup.service";
 import {
   Alert,
@@ -19,18 +20,9 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-
-type ExecutorListRow = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  exchange_id: string;
-  execution_mode: string;
-  asset_filter_mode: string;
-};
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -43,46 +35,41 @@ export default async function ExecutorsListPage({ searchParams }: PageProps) {
   const { supabase, user } = await getDashboardSession();
   if (!user) redirect("/login");
 
-  const listQuery = () =>
-    supabase
-      .schema("trading")
-      .from("executors")
-      .select("id, name, enabled, exchange_id, execution_mode, asset_filter_mode")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
-
-  let { count: totalRaw, error: countError } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
-
-  if (!countError && (totalRaw ?? 0) === 0) {
-    await ensureUserExecutorExists(supabase, user.id, { verifiedEmptyExecutorList: true });
-    const again = await supabase
-      .schema("trading")
-      .from("executors")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    totalRaw = again.count;
-    if (again.error) countError = again.error;
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = await ExecutorsSelector.countForUser(supabase, user.id);
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
 
-  const totalCount = totalRaw ?? 0;
+  if (!countError && totalCount === 0) {
+    await ensureUserExecutorExists(supabase, user.id, { verifiedEmptyExecutorList: true });
+    try {
+      totalCount = await ExecutorsSelector.countForUser(supabase, user.id);
+    } catch (e) {
+      countError = { message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: rows, error } = await listQuery().range(from, to);
-
-  const list = (rows ?? []) as ExecutorListRow[];
+  let list: ExecutorsSelector.ExecutorListRow[] = [];
+  let error: { message: string } | null = null;
+  try {
+    list = await ExecutorsSelector.selectListPaginatedForUser(supabase, { userId: user.id, from, to });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
+  }
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
       <ObjectListViewHeader
         model={objectRegistry.registrations.get("executors")!}
         rowCount={list.length}
-        sortLine={`Portfolios: paper, live, historical backtest, and asset filters · Page ${page} of ${pages} · ${totalCount} total${countError ? ` · ${countError.message}` : ""}`}
+        sortLine={`Portfolios: paper, live, historical backtest, and asset filters Â· Page ${page} of ${pages} Â· ${totalCount} total${countError ? ` Â· ${countError.message}` : ""}`}
         actions={
           <Link href="/executors/new" className={listViewOutlineActionClass}>
             New executor

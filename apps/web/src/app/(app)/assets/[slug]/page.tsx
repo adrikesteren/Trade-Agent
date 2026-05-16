@@ -11,6 +11,9 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { isFiatQuoteCurrencyCode } from "@/lib/markets/fiat-quote-currency-codes";
 import { isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
@@ -22,14 +25,11 @@ import {
   RecordPageGrid,
   RecordPageSection,
   RecordRelatedList,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ slug: string }> };
-
-const ASSET_CG_FIELDS =
-  "coingecko_fetched_at, coingecko_coin_id, coingecko_price_usd, coingecko_market_cap_usd, coingecko_fdv_usd, coingecko_total_volume_usd, coingecko_high_24h_usd, coingecko_low_24h_usd, coingecko_price_change_24h_usd, coingecko_price_change_24h_pct, coingecko_price_change_7d_pct, coingecko_market_cap_rank, coingecko_circulating_supply, coingecko_total_supply, coingecko_max_supply, coingecko_ath_usd, coingecko_ath_change_pct";
 
 export default async function AssetDetailPage({ params }: PageProps) {
   const { slug: slugParam } = await params;
@@ -42,43 +42,30 @@ export default async function AssetDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const fields = `id, code, kind, name, metadata, created_at, ${ASSET_CG_FIELDS}`;
-  let assetQuery = supabase.schema("catalog").from("assets").select(fields);
-  if (isCatalogAssetDetailRouteUuid(slug)) {
-    assetQuery = assetQuery.eq("id", slug);
-  } else {
-    const code = slug.toUpperCase();
-    if (isFiatQuoteCurrencyCode(code)) {
-      assetQuery = assetQuery.eq("code", code).eq("kind", "fiat");
+  let asset: Awaited<ReturnType<typeof AssetsSelector.selectDetailById>>;
+  try {
+    if (isCatalogAssetDetailRouteUuid(slug)) {
+      asset = await AssetsSelector.selectDetailById(supabase, slug);
     } else {
-      assetQuery = assetQuery.eq("code", code).in("kind", ["crypto", "stock"]);
+      const code = slug.toUpperCase();
+      asset = isFiatQuoteCurrencyCode(code)
+        ? await AssetsSelector.selectDetailByCodeFiat(supabase, code)
+        : await AssetsSelector.selectDetailByCodeForKinds(supabase, code, ["crypto", "stock"]);
     }
-  }
-
-  const { data: asset, error } = await assetQuery.maybeSingle();
-
-  if (error || !asset) {
+  } catch {
     notFound();
   }
 
-  const assetId = asset.id as string;
+  if (!asset) {
+    notFound();
+  }
 
-  const { data: markets, count: marketCount } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      id,
-      market_symbol,
-      status,
-      quote_asset:assets!markets_quote_asset_id_fkey ( code, kind ),
-      exchanges ( id, code, name )
-    `,
-      { count: "exact" },
-    )
-    .eq("asset_id", assetId)
-    .order("market_symbol", { ascending: true })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  const assetId = asset.id;
+
+  const { rows: markets, count: marketCount } = await MarketsSelector.selectRelatedByAssetId(supabase, {
+    assetId,
+    limit: DASHBOARD_LIST_VIEW_LIMIT,
+  });
 
   const isCrypto = asset.kind === "crypto";
   const meta =
@@ -95,16 +82,17 @@ export default async function AssetDetailPage({ params }: PageProps) {
   let hasOpenSkipAutoCoingeckoCoinIdTask = false;
   if (isCrypto && coingeckoIdEmpty) {
     const admin = createServiceRoleClient();
-    const { data: skipTaskRow } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", assetId)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-    hasOpenSkipAutoCoingeckoCoinIdTask = Boolean(skipTaskRow?.id);
+    try {
+      const skipTaskRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: assetId,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+      hasOpenSkipAutoCoingeckoCoinIdTask = Boolean(skipTaskRow?.id);
+    } catch {
+      /* preserve original soft-fail behavior (flag stays false) */
+    }
   }
 
   return (

@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CandleRowJson } from "@/lib/markets/chart-types";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 
 /**
  * Must stay aligned with PostgREST `[api] max_rows` (`supabase/config.toml`).
@@ -57,20 +58,14 @@ export async function fetchAllMarketStorageCandles(
     const page = Math.min(CATALOG_MARKET_CHART_CANDLE_PAGE_SIZE, room);
     const to = from + page - 1;
 
-    const { data, error } = await supabase
-      .schema("catalog")
-      .from("candles")
-      .select("open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
-      .eq("market_id", marketId)
-      .eq("timeframe", storageTimeframe)
-      .order("close_time", { ascending: true, foreignTable: "candle_timestamps" })
-      .range(from, to);
+    const data = await CandlesSelector.selectOhlcvPaginatedForMarket(supabase, {
+      marketId,
+      timeframe: storageTimeframe,
+      from,
+      to,
+    });
 
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    const chunk = (data ?? []) as CatalogCandleOhlcvRow[];
+    const chunk = data as CatalogCandleOhlcvRow[];
     if (!chunk.length) break;
 
     out.push(...chunk);

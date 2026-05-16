@@ -4,6 +4,8 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -11,7 +13,7 @@ import {
   RecordPageCard,
   RecordPageGrid,
   RecordPageSection,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -100,33 +102,24 @@ export default async function SignalDetailPage({ params }: PageProps) {
   const fmtConfidence = (v: number | string | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const { data: sigRow, error: sigErr } = await supabase
-    .schema("trading")
-    .from("signals")
-    .select(
-      "id, signal_agent_id, candle_id, intent, confidence, reasons, metadata, created_at, signal_agents ( agent_id )",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  let sigRow: SignalsSelector.SignalDetailRow | null = null;
+  try {
+    sigRow = await SignalsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
 
-  if (sigErr || !sigRow) notFound();
+  if (!sigRow) notFound();
 
   const rowDb = sigRow as SignalRowDb;
   const cid = String(rowDb.candle_id ?? "").trim();
   const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
   const sig = flattenSignalDetail(rowDb, cid ? candleById.get(cid) : undefined);
 
-  const { data: mRow } = sig.market_id
-    ? await supabase
-        .schema("catalog")
-        .from("markets")
-        .select("market_symbol")
-        .eq("id", sig.market_id)
-        .maybeSingle()
-    : { data: null };
-  const marketSym = sig.market_id
-    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
-    : "";
+  const mRow = sig.market_id
+    ? await MarketsSelector.selectIdAndSymbolById(supabase, sig.market_id)
+    : null;
+  const marketSym = sig.market_id ? String(mRow?.market_symbol ?? "").trim() : "";
 
   const agentSlug = agentSlugFromRow(sig);
   const metaJson =

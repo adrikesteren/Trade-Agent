@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   DropdownMenu,
@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   menuTriggerPlainClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 export type TabInfo = {

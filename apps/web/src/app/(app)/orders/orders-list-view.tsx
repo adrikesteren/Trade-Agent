@@ -1,4 +1,4 @@
-import { ObjectListViewHeader } from "@/components/object-list-view-header";
+﻿import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { PositionSidePill } from "@/components/position-side-pill";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -11,6 +11,9 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -23,7 +26,7 @@ import {
   Td,
   Th,
   listViewOutlineActionClass,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type OrderRow = {
@@ -98,12 +101,14 @@ async function fetchMarketSymbolsById(
 
   for (let i = 0; i < marketIds.length; i += MARKET_ID_CHUNK) {
     const chunk = marketIds.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
-    if (error) {
-      console.error("orders list: markets batch:", error.message);
+    let rows: Awaited<ReturnType<typeof MarketsSelector.selectIdAndSymbolByIds>>;
+    try {
+      rows = await MarketsSelector.selectIdAndSymbolByIds(supabase, chunk);
+    } catch (e) {
+      console.error("orders list: markets batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const m of (data ?? []) as CatalogMarketRow[]) {
+    for (const m of rows) {
       const sym = String(m.market_symbol ?? "").trim();
       if (sym) map.set(m.id, sym);
     }
@@ -120,13 +125,15 @@ async function fetchExecutorNamesById(
   const unique = [...new Set(executorIds)];
   for (let i = 0; i < unique.length; i += MARKET_ID_CHUNK) {
     const chunk = unique.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("trading").from("executors").select("id, name").in("id", chunk);
-    if (error) {
-      console.error("orders list: executors batch:", error.message);
+    let rows: Awaited<ReturnType<typeof ExecutorsSelector.selectIdAndNameByIds>>;
+    try {
+      rows = await ExecutorsSelector.selectIdAndNameByIds(supabase, chunk);
+    } catch (e) {
+      console.error("orders list: executors batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const e of data ?? []) {
-      map.set(e.id as string, String(e.name ?? "").trim() || (e.id as string));
+    for (const e of rows) {
+      map.set(e.id, String(e.name ?? "").trim() || e.id);
     }
   }
   return map;
@@ -149,37 +156,25 @@ export async function OrdersListView({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
-  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "—");
+  const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
   const fmtQty = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  let countQ = supabase
-    .schema("trading")
-    .from("orders")
-    .select("*", { count: "exact", head: true });
-  if (executorIdFilter) {
-    countQ = countQ.eq("executor_id", executorIdFilter);
-  }
-  const { count: totalRaw, error: countError } = await countQ;
+  const { count: totalRaw, error: countError } = await OrdersSelector.countListView(supabase, {
+    executorIdFilter,
+  });
   const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("orders")
-    .select(
-      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
-    )
-    .order("created_at", { ascending: false })
-    .range(from, to);
-  if (executorIdFilter) {
-    q = q.eq("executor_id", executorIdFilter);
-  }
-  const { data: rows, error } = await q;
+  const { data: rows, error } = await OrdersSelector.selectListViewPaginated(supabase, {
+    from,
+    to,
+    executorIdFilter,
+  });
 
   const raw = (rows ?? []) as OrderRowRaw[];
   const candleIds = raw
@@ -204,12 +199,12 @@ export async function OrdersListView({
       <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
         <ObjectListViewHeader
           model={objectRegistry.registrations.get("orders")!}
-          title={parentExecutor ? `Orders · ${parentExecutor.name}` : undefined}
+          title={parentExecutor ? `Orders Â· ${parentExecutor.name}` : undefined}
           rowCount={list.length}
           sortLine={
             executorIdFilter
-              ? `Filtered by executor · sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
-              : `Sorted by created (newest first) · Page ${page} of ${pages} · ${totalCount} total`
+              ? `Filtered by executor Â· sorted by created (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
+              : `Sorted by created (newest first) Â· Page ${page} of ${pages} Â· ${totalCount} total`
           }
           actions={
             <>
@@ -264,15 +259,15 @@ export async function OrdersListView({
                       row.market_id && symbolByMarketId.has(row.market_id)
                         ? symbolByMarketId.get(row.market_id)!
                         : row.market_id
-                          ? `${row.market_id.slice(0, 8)}…`
-                          : "—";
-                    const ext = row.external_id?.trim() || "—";
-                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "…";
+                          ? `${row.market_id.slice(0, 8)}â€¦`
+                          : "â€”";
+                    const ext = row.external_id?.trim() || "â€”";
+                    const exName = executorNameById.get(row.executor_id) ?? row.executor_id?.slice(0, 8) + "â€¦";
                     return (
                       <tr key={row.id}>
                         <Td>
                           <Link href={`/orders/${row.id}`} className="bk-link font-mono" title={row.id}>
-                            {row.id.slice(0, 8)}…
+                            {row.id.slice(0, 8)}â€¦
                           </Link>
                         </Td>
                         <Td>
@@ -304,9 +299,9 @@ export async function OrdersListView({
                         </Td>
                         <Td className="font-mono">
                           {row.decision_id ? (
-                            <span title={row.decision_id}>{row.decision_id.slice(0, 8)}…</span>
+                            <span title={row.decision_id}>{row.decision_id.slice(0, 8)}â€¦</span>
                           ) : (
-                            "—"
+                            "â€”"
                           )}
                         </Td>
                         <Td className="whitespace-nowrap font-mono">{fmtDt(row.created_at)}</Td>

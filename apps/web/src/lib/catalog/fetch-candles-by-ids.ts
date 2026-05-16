@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+
 const CHUNK = 120;
 
 function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
@@ -28,16 +30,15 @@ export async function fetchCatalogCandlesByIds(
   const uniq = [...new Set(candleIds)].map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < uniq.length; i += CHUNK) {
     const chunk = uniq.slice(i, i + CHUNK);
-    const { data, error } = await supabase
-      .schema("catalog")
-      .from("candles")
-      .select("id, market_id, timeframe, close, candle_timestamps ( close_time )")
-      .in("id", chunk);
-    if (error) {
-      console.error("fetchCatalogCandlesByIds:", error.message);
+    let data: Awaited<ReturnType<typeof CandlesSelector.selectBarsWithCloseTimeByIds>>;
+    try {
+      data = await CandlesSelector.selectBarsWithCloseTimeByIds(supabase, chunk);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("fetchCatalogCandlesByIds:", msg);
       continue;
     }
-    for (const row of data ?? []) {
+    for (const row of data) {
       const id = String((row as { id: string }).id);
       const ct = unwrapOne((row as { candle_timestamps?: unknown }).candle_timestamps);
       const iso =

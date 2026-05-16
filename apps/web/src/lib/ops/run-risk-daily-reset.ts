@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 export type RunRiskDailyResetResult = {
@@ -10,19 +11,7 @@ export type RunRiskDailyResetResult = {
 /** Reset `risk_daily_pnl_eur` on all executors (intended once per UTC day via scheduled worker). */
 export async function runRiskDailyReset(): Promise<RunRiskDailyResetResult> {
   const admin = createServiceRoleClient();
-  const { count, error: cErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select("*", { count: "exact", head: true });
-  if (cErr) throw new Error(cErr.message);
-
-  const now = new Date().toISOString();
-  const { error } = await admin
-    .schema("trading")
-    .from("executors")
-    .update({ risk_daily_pnl_eur: 0, updated_at: now })
-    .not("user_id", "is", null);
-  if (error) throw new Error(error.message);
-
-  return { ok: true, rowsUpdated: count ?? 0 };
+  const count = await ExecutorsSelector.countAll(admin);
+  await ExecutorsSelector.updateRiskDailyPnlResetForAll(admin);
+  return { ok: true, rowsUpdated: count };
 }

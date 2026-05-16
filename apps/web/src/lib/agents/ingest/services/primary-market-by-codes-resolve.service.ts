@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 /** Escape `%`, `_`, and `\` for use as a literal in PostgREST `ilike` without wildcards. */
 export function escapeIlikeExactPattern(raw: string): string {
@@ -60,14 +63,7 @@ export async function resolvePrimaryMarketByCodes(
   const quoteCode = (args.quote ?? "EUR").trim().toUpperCase() || "EUR";
   const exPattern = escapeIlikeExactPattern(exchangeIn);
 
-  const { data: exRows, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code")
-    .ilike("code", exPattern);
-
-  if (exErr) throw new Error(exErr.message);
-  const exchanges = (exRows ?? []) as { id: string; code: string }[];
+  const exchanges = await ExchangesSelector.selectByCodeIlike(supabase, exPattern);
   if (exchanges.length === 0) {
     throw new ResolvePrimaryMarketError("unknown_exchange_code", `No exchange matches code: ${exchangeIn}`);
   }
@@ -82,15 +78,7 @@ export async function resolvePrimaryMarketByCodes(
   const exchangeCode = String(exchange.code);
 
   const assetPattern = escapeIlikeExactPattern(assetIn);
-  const { data: assetRows, error: assetErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("kind", "crypto")
-    .ilike("code", assetPattern);
-
-  if (assetErr) throw new Error(assetErr.message);
-  const assets = (assetRows ?? []) as { id: string; code: string }[];
+  const assets = await AssetsSelector.selectCryptoIdCodeByCodeIlike(supabase, assetPattern);
   if (assets.length === 0) {
     throw new ResolvePrimaryMarketError("unknown_asset_code", `No crypto asset matches code: ${assetIn}`);
   }
@@ -109,16 +97,11 @@ export async function resolvePrimaryMarketByCodes(
     );
   }
 
-  const { data: mRows, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol")
-    .eq("exchange_id", exchangeId)
-    .eq("asset_id", assetId)
-    .eq("quote_asset_id", quoteAssetId);
-
-  if (mErr) throw new Error(mErr.message);
-  const markets = (mRows ?? []) as { id: string; market_symbol: string }[];
+  const markets = await MarketsSelector.selectByExchangeAssetQuote(supabase, {
+    exchangeId,
+    assetId,
+    quoteAssetId,
+  });
   if (markets.length === 0) {
     throw new ResolvePrimaryMarketError(
       "market_not_found_for_asset_exchange_quote",

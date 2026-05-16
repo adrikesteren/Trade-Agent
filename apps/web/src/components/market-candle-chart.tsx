@@ -33,7 +33,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { Button, Card, CardBody } from "@repo/adricore/blocks";
+import { Button, Card, CardBody } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button } from "@repo/adricore/blocks";
+import { Button } from "@adrikesteren/adricore/blocks";
 
 /** Header action: POST historical replay (paper). Feedback stays inline under the button. */
 export function ExecutorHistoricalRunHeaderAction(props: { executorId: string }) {
@@ -23,28 +23,28 @@ export function ExecutorHistoricalRunHeaderAction(props: { executorId: string })
           setError(null);
           setMessage(null);
           try {
-            const res = await fetch(`/api/executors/${encodeURIComponent(props.executorId)}/historical-run`, {
-              method: "POST",
-            });
+            const res = await fetch(
+              `/api/v1/executor/historical-run-async/${encodeURIComponent(props.executorId)}`,
+              { method: "POST" },
+            );
             const body = (await res.json()) as {
               ok?: boolean;
               queued?: boolean;
-              relayMessageId?: string;
+              groupId?: string;
+              chunkCount?: number;
+              messageIds?: string[];
               error?: string;
-              barsReplayed?: number;
-              candleRowsUpserted?: number;
             };
-            if (!res.ok) {
+            if (!res.ok || body.ok === false) {
               setError(body?.error ?? res.statusText);
               return;
             }
-            if (body.queued && body.relayMessageId) {
-              setMessage(`Queued on Relay (message ${body.relayMessageId}). Replay runs in the background.`);
+            if (body.queued && body.groupId) {
+              const gid = body.groupId.slice(0, 8) + "…";
+              setMessage(`Queued ${body.chunkCount ?? 0} day-chunk(s) via Relay group ${gid}.`);
               return;
             }
-            setMessage(
-              `Done: ${body.barsReplayed ?? 0} bars, ${body.candleRowsUpserted ?? 0} candle rows upserted.`,
-            );
+            setMessage("Relay not configured — inline replay not supported via this entry point.");
           } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
           } finally {

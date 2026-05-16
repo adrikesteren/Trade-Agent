@@ -1,5 +1,6 @@
+﻿import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createClient } from "@/lib/supabase/server";
-import { ListViewObjectIcon, RecordRelatedList } from "@repo/adricore/blocks";
+import { ListViewObjectIcon, RecordRelatedList } from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 export type RecordTasksRelatedCardProps = {
@@ -8,14 +9,6 @@ export type RecordTasksRelatedCardProps = {
   relatedId: string;
   title?: string;
   limit?: number;
-};
-
-type TaskRow = {
-  id: string;
-  title: string;
-  status: string;
-  task_type: string;
-  created_at: string;
 };
 
 /**
@@ -29,18 +22,18 @@ export async function RecordTasksRelatedCard({
   limit = 25,
 }: RecordTasksRelatedCardProps) {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("tasks")
-    .select("id, title, status, task_type, created_at")
-    .eq("related_schema", relatedSchema)
-    .eq("related_table", relatedTable)
-    .eq("related_id", relatedId)
-    .is("parent_task_id", null)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  const rows = (data ?? []) as TaskRow[];
-  const errMsg = error?.message;
+  let rows: Awaited<ReturnType<typeof TasksSelector.selectRootsForRelatedRecord>> = [];
+  let errMsg: string | undefined;
+  try {
+    rows = await TasksSelector.selectRootsForRelatedRecord(supabase, {
+      relatedSchema,
+      relatedTable,
+      relatedId,
+      limit,
+    });
+  } catch (e) {
+    errMsg = e instanceof Error ? e.message : String(e);
+  }
 
   return (
     <div className="bk-stack bk-stack_gap-sm">
@@ -58,7 +51,7 @@ export async function RecordTasksRelatedCard({
             </Link>
             <span className="bk-text-muted shrink-0" style={{ fontSize: "0.75rem" }}>
               <span className="font-mono">{t.status}</span>
-              <span> · </span>
+              <span> Â· </span>
               <span className="font-mono">{t.task_type}</span>
             </span>
           </div>

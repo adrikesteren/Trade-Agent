@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { formatDatetime } from "@/lib/locale/format";
 import type { UserLocalePreferences } from "@/lib/locale/types";
-import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@repo/adricore/blocks";
+import { Alert, Card, CardBody, Table, TableWrap, Td, Th } from "@adrikesteren/adricore/blocks";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { SYNC_RUN_DASHBOARD_JOB_KEYS } from "@/lib/dashboard/sync-run-dashboard-jobs";
 import { createClient } from "@/lib/supabase/client";
@@ -68,7 +68,7 @@ function useClientTick(): { ready: boolean; nowMs: number } {
 }
 
 function formatElapsedMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (!Number.isFinite(ms) || ms < 0) return "â€”";
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -83,11 +83,11 @@ function metadataIsEmpty(m: Record<string, unknown> | null): boolean {
 
 function MetadataCell({ metadata }: { metadata: Record<string, unknown> | null }) {
   if (metadataIsEmpty(metadata)) {
-    return <span className="bk-text-muted">—</span>;
+    return <span className="bk-text-muted">â€”</span>;
   }
   const compact = JSON.stringify(metadata);
   const title = JSON.stringify(metadata, null, 2);
-  const shown = compact.length > 100 ? `${compact.slice(0, 97)}…` : compact;
+  const shown = compact.length > 100 ? `${compact.slice(0, 97)}â€¦` : compact;
   return (
     <span className="bk-text-muted font-mono text-[10px]" title={title}>
       {shown}
@@ -97,10 +97,10 @@ function MetadataCell({ metadata }: { metadata: Record<string, unknown> | null }
 
 function ElapsedCell({ r, nowMs, ready }: { r: SyncRunRow; nowMs: number; ready: boolean }) {
   const startMs = r.created_at ? Date.parse(r.created_at) : NaN;
-  if (!Number.isFinite(startMs)) return <span className="bk-text-muted">—</span>;
+  if (!Number.isFinite(startMs)) return <span className="bk-text-muted">â€”</span>;
   const endedMs = r.ended_at ? Date.parse(r.ended_at) : NaN;
   const endMs = Number.isFinite(endedMs) ? endedMs : ready ? nowMs : NaN;
-  if (!Number.isFinite(endMs)) return <span className="bk-text-muted">…</span>;
+  if (!Number.isFinite(endMs)) return <span className="bk-text-muted">â€¦</span>;
   const live = r.status === "running" && !r.ended_at;
   return (
     <span
@@ -141,7 +141,7 @@ export function SyncRunsLiveClient({
   const { ready, nowMs } = useClientTick();
 
   const formatRunDatetime = useCallback(
-    (iso: string | null | undefined) => (iso ? formatDatetime(iso, localePrefs) : "—"),
+    (iso: string | null | undefined) => (iso ? formatDatetime(iso, localePrefs) : "â€”"),
     [localePrefs],
   );
 
@@ -194,7 +194,7 @@ export function SyncRunsLiveClient({
             Recent sync runs
           </h2>
           <p className="bk-text-muted" style={{ fontSize: "0.75rem" }}>
-            Latest attempts across Bitvavo and CoinGecko jobs (running → completed or failed).
+            Latest attempts across Bitvavo and CoinGecko jobs (running â†’ completed or failed).
             {page === 1 ? " Updates live via Realtime on this page." : " Open page 1 for live updates."} Open a run via
             the <strong>Job</strong> link.
           </p>
@@ -231,12 +231,12 @@ export function SyncRunsLiveClient({
                     </Td>
                     <Td className="py-1.5 pr-2">{r.status}</Td>
                     <Td className="max-w-[200px] truncate py-1.5 pr-2 bk-text-muted" title={r.reason ?? ""}>
-                      {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "—") : "—"}
+                      {r.status === "failed" || r.status === "skipped" ? (r.reason ?? "â€”") : "â€”"}
                     </Td>
                     <Td className="max-w-[min(320px,40vw)] truncate py-1.5 pr-2 align-top">
                       <MetadataCell metadata={r.metadata} />
                     </Td>
-                    <Td className="py-1.5 pr-2">{r.trigger_source ?? "—"}</Td>
+                    <Td className="py-1.5 pr-2">{r.trigger_source ?? "â€”"}</Td>
                     <Td className="bk-text-muted py-1.5 pr-2 font-mono">{formatRunDatetime(r.created_at)}</Td>
                     <Td className="bk-text-muted py-1.5 pr-2 font-mono">{formatRunDatetime(r.ended_at)}</Td>
                     <Td className="bk-text-muted py-1.5 pr-2 font-mono">

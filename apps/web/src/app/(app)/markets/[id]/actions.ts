@@ -5,106 +5,33 @@ import { revalidatePath } from "next/cache";
 import { executeMarketEvaluateAllSignalsWithSyncRun } from "@/lib/agents/signal/services/market-evaluate-all-signals-with-sync-run.service";
 import { deleteAllSignalsForMarket } from "@/lib/agents/signal/services/market-signals-delete.service";
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
-import { runMarketBackfillCandles, todayUtcYmd } from "@/lib/orchestrators/market-backfill-candles.service";
-import { publishMarketBackfillCandlesChunkedRelay } from "@/lib/relay/publish-market-backfill-candles-chunked.service";
+import {
+  runMarketBackfillCandles,
+  todayUtcYmd,
+} from "@/lib/orchestrators/market-backfill-candles.service";
+import {
+  fetchEarliestStoredCandleDate,
+  runMarketBackfillSignals,
+} from "@/lib/orchestrators/market-backfill-signals.service";
+import {
+  RELAY_BACKFILL_WINDOW_CHUNK_DAYS,
+  splitDateRangeInChunks,
+} from "@/lib/relay/date-window-chunks";
 import { publishMarketEvaluateAllSignalsChunkedRelay } from "@/lib/relay/publish-market-evaluate-all-signals-chunked.service";
 import {
-  buildSymbolClosePipelineUrl,
+  buildMarketBackfillCandlesWorkerUrl,
+  buildMarketBackfillSignalsWorkerUrl,
   downstreamWorkerHeaders,
   isRelayWorkerEnqueueConfigured,
-  normalizeRelayBaseUrl,
-  postRelaySingleMessage,
+  makeRelayClient,
+  RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S,
+  RELAY_MARKET_BACKFILL_SIGNALS_TIMEOUT_S,
   relayMaxRetries,
+  toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-
-export type EnqueueMarketSymbolCloseRelayResult =
-  | { ok: true; relayMessageId: string }
-  | { ok: false; error: string };
-
-/**
- * Enqueues one `POST /api/v1/messages` on Relay targeting this app’s `symbol-close-pipeline` worker for the market’s base asset + exchange + quote.
- */
-export async function enqueueMarketSymbolCloseRelay(marketId: string): Promise<EnqueueMarketSymbolCloseRelayResult> {
-  const trimmedId = marketId.trim();
-  if (!trimmedId) {
-    return { ok: false, error: "Market id is required." };
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, error: "You must be signed in." };
-  }
-
-  const { data: market, error } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      quote_asset_id,
-      assets!markets_asset_id_fkey ( code ),
-      exchanges ( code )
-    `,
-    )
-    .eq("id", trimmedId)
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  if (!market) {
-    return { ok: false, error: "Market not found." };
-  }
-
-  const rawA = market.assets as unknown;
-  const rawE = market.exchanges as unknown;
-  const asset = (Array.isArray(rawA) ? rawA[0] : rawA) as { code?: string } | null;
-  const ex = (Array.isArray(rawE) ? rawE[0] : rawE) as { code?: string } | null;
-
-  const assetCode = String(asset?.code ?? "").trim();
-  const exchangeCode = String(ex?.code ?? "").trim();
-  if (!assetCode || !exchangeCode) {
-    return { ok: false, error: "Market is missing base asset or exchange code." };
-  }
-
-  const qid = String(market.quote_asset_id ?? "").trim();
-  if (!qid) {
-    return { ok: false, error: "Market is missing quote_asset_id." };
-  }
-
-  const { data: quoteRow, error: qErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", qid)
-    .maybeSingle();
-  if (qErr) {
-    return { ok: false, error: qErr.message };
-  }
-  const quote = String(quoteRow?.code ?? "").trim().toUpperCase();
-  if (!quote) {
-    return { ok: false, error: "Quote asset not found for this market." };
-  }
-
-  try {
-    const relayBase = normalizeRelayBaseUrl();
-    const appBase = getAppBaseUrl();
-    const url = buildSymbolClosePipelineUrl(appBase, assetCode, exchangeCode, quote);
-    const relayMessageId = await postRelaySingleMessage(
-      relayBase,
-      url,
-      await downstreamWorkerHeaders(),
-      relayMaxRetries(),
-    );
-    return { ok: true, relayMessageId };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -113,37 +40,22 @@ export type EnqueueMarketBackfillCandlesResult =
       ok: true;
       /** True when handed off to Relay; false when the worker ran inline (no Relay env). */
       queued: boolean;
-      /**
-       * Number of Relay messages published. Only set when `queued === true`. ≥ 2 means a
-       * sequential Relay message group; 1 means a single Relay message (covered by
-       * `relayMessageId` for backwards compatibility).
-       */
+      /** Relay `message_group.id` when queued. */
+      groupId?: string;
+      /** Number of chunked Relay messages enqueued. */
       chunkCount?: number;
-      /** Set when ≥ 2 chunks were published. */
-      relayMessageGroupId?: string | null;
-      /** Set when exactly 1 chunk was published (backwards compatible). */
-      relayMessageId?: string;
-      /** Inline result fields (only when `queued === false`). */
+      /** Inline result (only when `queued === false`). */
       candleRowsUpserted?: number;
-      barsReplayed?: number;
-      signalsUpsertedTotal?: number;
     }
   | { ok: false; error: string };
 
 /**
- * Backfill candles for one market over a UTC window:
- * - Ingest Agent: pulls Bitvavo OHLCV in 1440-bar batches into `catalog.candles`.
- * - Signal Agent: upserts `trading.signals` for every closed bar in the window.
+ * Backfill candles for one market over a UTC window. Splits the window into
+ * {@link RELAY_BACKFILL_WINDOW_CHUNK_DAYS}-day chunks and enqueues one Relay message per chunk as a
+ * single `message-group`; falls back to a single inline run when Relay is not configured.
  *
- * When Relay is configured ({@link isRelayWorkerEnqueueConfigured}) the work is split
- * into UTC day chunks (default 30 days each) and published as a Relay message group
- * via {@link publishMarketBackfillCandlesChunkedRelay} so each chunk gets its own
- * timeout / retry budget and partial progress survives a single failure. With one
- * chunk the publisher falls back to a single message. The historical executor `Run`
- * path intentionally still uses single Relay messages — see
+ * The historical executor `Run` path intentionally still uses single Relay messages — see
  * `apps/web/src/app/api/executors/[id]/historical-run/route.ts`.
- *
- * Without Relay configured the orchestrator runs inline once.
  */
 export async function enqueueMarketBackfillCandlesViaRelay(args: {
   marketId: string;
@@ -155,61 +67,126 @@ export async function enqueueMarketBackfillCandlesViaRelay(args: {
   const rawEnd = (args.endDate ?? "").trim();
   const endDate = rawEnd || todayUtcYmd();
 
-  if (!marketId) {
-    return { ok: false, error: "Market id is required." };
-  }
-  if (!ISO_DATE_RE.test(startDate)) {
-    return { ok: false, error: "Start date must be a YYYY-MM-DD UTC date." };
-  }
-  if (!ISO_DATE_RE.test(endDate)) {
-    return { ok: false, error: "End date must be a YYYY-MM-DD UTC date." };
-  }
-  if (startDate > endDate) {
-    return { ok: false, error: "Start date must be on or before end date." };
-  }
+  if (!marketId) return { ok: false, error: "Market id is required." };
+  if (!ISO_DATE_RE.test(startDate)) return { ok: false, error: "Start date must be a YYYY-MM-DD UTC date." };
+  if (!ISO_DATE_RE.test(endDate)) return { ok: false, error: "End date must be a YYYY-MM-DD UTC date." };
+  if (startDate > endDate) return { ok: false, error: "Start date must be on or before end date." };
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, error: "You must be signed in." };
-  }
+  if (!user) return { ok: false, error: "You must be signed in." };
 
   try {
     if (await isRelayWorkerEnqueueConfigured()) {
-      const relayBase = normalizeRelayBaseUrl();
+      const relay = makeRelayClient();
       const appBase = getAppBaseUrl();
-      const published = await publishMarketBackfillCandlesChunkedRelay({
-        relayBase,
-        appBase,
-        marketId,
-        startDate,
-        endDate,
+      const chunks = splitDateRangeInChunks(startDate, endDate, RELAY_BACKFILL_WINDOW_CHUNK_DAYS);
+      const urls = chunks.map((c) =>
+        buildMarketBackfillCandlesWorkerUrl(appBase, { marketId, startDate: c.startDate, endDate: c.endDate }),
+      );
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: await downstreamWorkerHeaders(),
+        maxRetries: relayMaxRetries(),
+        timeout: RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S,
       });
-      if (!published.ok) {
-        return { ok: false, error: published.error };
-      }
-      const chunkCount = published.messageIds.length;
-      return {
-        ok: true,
-        queued: true,
-        chunkCount,
-        ...(chunkCount === 1
-          ? { relayMessageId: published.messageIds[0] }
-          : { relayMessageGroupId: published.groupId }),
-      };
+      return { ok: true, queued: true, groupId: message_group.id, chunkCount: urls.length };
     }
 
     const admin = createServiceRoleClient();
     const result = await runMarketBackfillCandles(admin, { marketId, startDate, endDate });
     revalidatePath(`/markets/${marketId}`);
+    return { ok: true, queued: false, candleRowsUpserted: result.candleRowsUpserted };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type EnqueueMarketBackfillSignalsResult =
+  | {
+      ok: true;
+      /** True when handed off to Relay; false when the worker ran inline (no Relay env). */
+      queued: boolean;
+      /** Resolved start date used for chunking (earliest stored close time when not user-provided). */
+      startDate: string;
+      /** Resolved end date used for chunking (today UTC by default). */
+      endDate: string;
+      /** Relay `message_group.id` when queued. */
+      groupId?: string;
+      /** Number of chunked Relay messages enqueued. */
+      chunkCount?: number;
+      /** Inline result (only when `queued === false`). */
+      barsInspected?: number;
+      barsSkippedComplete?: number;
+      barsFilled?: number;
+      signalsUpsertedTotal?: number;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Backfill signals for one market: walks every stored candle and only generates `trading.signals` for
+ * agents that have not yet produced a signal for that bar. Splits the resolved window into
+ * {@link RELAY_BACKFILL_WINDOW_CHUNK_DAYS}-day chunks and enqueues one Relay message per chunk as a
+ * single `message-group`; falls back to a single inline run when Relay is not configured.
+ */
+export async function enqueueMarketBackfillSignalsViaRelay(
+  marketId: string,
+): Promise<EnqueueMarketBackfillSignalsResult> {
+  const id = marketId.trim();
+  if (!id) return { ok: false, error: "Market id is required." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  try {
+    const admin = createServiceRoleClient();
+    const earliest = await fetchEarliestStoredCandleDate(admin, id);
+    if (!earliest) {
+      return { ok: false, error: 'No candles found for this market — run "Backfill candles" first.' };
+    }
+    const endDate = todayUtcYmd();
+    if (earliest > endDate) {
+      return { ok: false, error: "Earliest stored candle is in the future — nothing to backfill." };
+    }
+
+    if (await isRelayWorkerEnqueueConfigured()) {
+      const relay = makeRelayClient();
+      const appBase = getAppBaseUrl();
+      const chunks = splitDateRangeInChunks(earliest, endDate, RELAY_BACKFILL_WINDOW_CHUNK_DAYS);
+      const urls = chunks.map((c) =>
+        buildMarketBackfillSignalsWorkerUrl(appBase, { marketId: id, startDate: c.startDate, endDate: c.endDate }),
+      );
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: await downstreamWorkerHeaders(),
+        maxRetries: relayMaxRetries(),
+        timeout: RELAY_MARKET_BACKFILL_SIGNALS_TIMEOUT_S,
+      });
+      return { ok: true, queued: true, startDate: earliest, endDate, groupId: message_group.id, chunkCount: urls.length };
+    }
+
+    const result = await runMarketBackfillSignals(admin, { marketId: id, startDate: earliest, endDate });
+    revalidatePath(`/markets/${id}`);
     revalidatePath("/signals");
     return {
       ok: true,
       queued: false,
-      candleRowsUpserted: result.candleRowsUpserted,
-      barsReplayed: result.barsReplayed,
+      startDate: earliest,
+      endDate,
+      barsInspected: result.barsInspected,
+      barsSkippedComplete: result.barsSkippedComplete,
+      barsFilled: result.barsFilled,
       signalsUpsertedTotal: result.signalsUpsertedTotal,
     };
   } catch (e) {
@@ -274,14 +251,11 @@ export async function enqueueMarketEvaluateAllSignalsViaRelay(
     return { ok: false, error: "You must be signed in." };
   }
 
-  const { data: market, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id")
-    .eq("id", trimmedId)
-    .maybeSingle();
-  if (mErr) {
-    return { ok: false, error: mErr.message };
+  let market: MarketsSelector.MarketRow | null = null;
+  try {
+    market = await MarketsSelector.selectById(supabase, trimmedId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!market) {
     return { ok: false, error: "Market not found." };
@@ -291,12 +265,10 @@ export async function enqueueMarketEvaluateAllSignalsViaRelay(
 
   try {
     if (await isRelayWorkerEnqueueConfigured()) {
-      const relayBase = normalizeRelayBaseUrl();
       const appBase = getAppBaseUrl();
       const admin = createServiceRoleClient();
       const published = await publishMarketEvaluateAllSignalsChunkedRelay({
         admin,
-        relayBase,
         appBase,
         marketId: trimmedId,
         ...(forceAgentSlugs.length > 0 ? { forceAgentSlugs } : {}),
@@ -374,14 +346,11 @@ export async function deleteAllSignalsForMarketAction(
     return { ok: false, error: "You must be signed in." };
   }
 
-  const { data: market, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id")
-    .eq("id", trimmedId)
-    .maybeSingle();
-  if (mErr) {
-    return { ok: false, error: mErr.message };
+  let market: MarketsSelector.MarketRow | null = null;
+  try {
+    market = await MarketsSelector.selectById(supabase, trimmedId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!market) {
     return { ok: false, error: "Market not found." };

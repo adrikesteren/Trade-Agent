@@ -7,10 +7,11 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import {
   buildMarketEvaluateAllSignalsWorkerUrl,
   downstreamWorkerHeaders,
-  postRelayMessageGroup,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
   RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
+  toRelayOriginAndPath,
+  toRelayOriginAndPaths,
 } from "./relay-symbol-close-pipeline-client";
 import {
   chunkUtcDateRange,
@@ -122,7 +123,6 @@ async function fetchMarketCandleDateBounds(
  */
 export async function publishMarketEvaluateAllSignalsChunkedRelay(args: {
   admin: SupabaseClient;
-  relayBase: string;
   appBase: string;
   marketId: string;
   forceAgentSlugs?: readonly string[];
@@ -139,6 +139,10 @@ export async function publishMarketEvaluateAllSignalsChunkedRelay(args: {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
+  const relay = makeRelayClient();
+  const headers = await downstreamWorkerHeaders();
+  const maxRetries = relayMaxRetries();
+
   // No candles → still publish one Relay message so the worker can record an empty
   // sync run. Don't bother computing chunk windows.
   if (!bounds.firstDateUtc || !bounds.lastDateUtc) {
@@ -148,11 +152,16 @@ export async function publishMarketEvaluateAllSignalsChunkedRelay(args: {
         : {}),
     });
     try {
-      const headers = await downstreamWorkerHeaders();
-      const id = await postRelaySingleMessage(args.relayBase, url, headers, relayMaxRetries(), {
-        timeoutSec: RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
+      const { origin, path } = toRelayOriginAndPath(url);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers,
+        maxRetries,
+        timeout: RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
       });
-      return { ok: true, chunks: [], groupId: null, messageIds: [id], candleTotal: 0 };
+      return { ok: true, chunks: [], groupId: null, messageIds: [message.id], candleTotal: 0 };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -171,8 +180,6 @@ export async function publishMarketEvaluateAllSignalsChunkedRelay(args: {
     return { ok: false, error: "No chunks produced for the market candle range." };
   }
 
-  const headers = await downstreamWorkerHeaders();
-  const maxRetries = relayMaxRetries();
   const forceSlugs =
     args.forceAgentSlugs && args.forceAgentSlugs.length > 0 ? args.forceAgentSlugs : undefined;
 
@@ -186,18 +193,33 @@ export async function publishMarketEvaluateAllSignalsChunkedRelay(args: {
 
   try {
     if (urls.length === 1) {
-      const id = await postRelaySingleMessage(args.relayBase, urls[0]!, headers, maxRetries, {
-        timeoutSec: RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
+      const { origin, path } = toRelayOriginAndPath(urls[0]!);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers,
+        maxRetries,
+        timeout: RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
       });
-      return { ok: true, chunks, groupId: null, messageIds: [id], candleTotal: bounds.candleTotal };
+      return { ok: true, chunks, groupId: null, messageIds: [message.id], candleTotal: bounds.candleTotal };
     }
-    const { groupId, messageIds } = await postRelayMessageGroup(
-      args.relayBase,
-      urls,
+    const { origin, paths } = toRelayOriginAndPaths(urls);
+    const { message_group, messages } = await relay.messageGroups.create({
+      origin,
+      paths,
+      method: "POST",
       headers,
       maxRetries,
-    );
-    return { ok: true, chunks, groupId, messageIds, candleTotal: bounds.candleTotal };
+      timeout: RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S,
+    });
+    return {
+      ok: true,
+      chunks,
+      groupId: message_group.id,
+      messageIds: messages.map((m) => m.id),
+      candleTotal: bounds.candleTotal,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

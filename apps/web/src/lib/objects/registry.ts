@@ -1,4 +1,4 @@
-import { ObjectMetadataRegistry } from "@repo/adricore/metadata";
+﻿import { ObjectMetadataRegistry } from "@adrikesteren/adricore/metadata";
 
 import { AssetsModel } from "./assets/assets.object";
 import { AutomationActorModel } from "./automation-actor/automation-actor.object";

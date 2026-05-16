@@ -2,6 +2,10 @@ import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as WalletAssetBalanceSelector from "@/lib/selectors/wallet-asset-balance-selector";
+import * as WalletsSelector from "@/lib/selectors/wallets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -12,18 +16,13 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
 
-type BalanceRow = {
-  id: string;
-  asset_id: string;
-  amount: string | number | null;
-  updated_at: string;
-};
+type BalanceRow = WalletAssetBalanceSelector.WalletAssetBalanceListRow;
 
 /**
  * Read-only view-all of all `trading.wallet_asset_balance` rows for the executor's wallet.
@@ -46,52 +45,51 @@ export default async function ExecutorWalletAssetBalanceRelatedPage({ params }: 
   const fmtDt = (v: string | number | Date | null) =>
     v == null || v === "" ? "—" : formatDatetime(v, prefs);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id, wallet_id, name")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (exErr || !ex) notFound();
+  let ex: ExecutorsSelector.ExecutorIdWalletNameRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectIdWalletNameByIdAndUser(supabase, { id, userId: user.id });
+  } catch {
+    notFound();
+  }
+  if (!ex) notFound();
 
-  const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
+  const walletIdFromExecutor = String(ex.wallet_id ?? "").trim();
   let walletId = walletIdFromExecutor;
   if (!walletId) {
-    const { data: walletRow } = await supabase
-      .schema("trading")
-      .from("wallets")
-      .select("id")
-      .eq("executor_id", id)
-      .maybeSingle();
-    walletId = String((walletRow as { id?: string } | null)?.id ?? "").trim();
+    try {
+      walletId = String((await WalletsSelector.selectIdByExecutorId(supabase, id)) ?? "").trim();
+    } catch {
+      walletId = "";
+    }
   }
 
-  const { data: rows, error } = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_asset_balance")
-        .select("id, asset_id, amount, updated_at")
-        .eq("wallet_id", walletId)
-        .order("updated_at", { ascending: false })
-    : { data: [] as BalanceRow[], error: null };
+  let rows: BalanceRow[] = [];
+  let error: { message: string } | null = null;
+  if (walletId) {
+    try {
+      rows = await WalletAssetBalanceSelector.selectListByWallet(supabase, walletId);
+    } catch (e) {
+      error = { message: e instanceof Error ? e.message : String(e) };
+    }
+  }
 
-  const list = (rows ?? []) as BalanceRow[];
+  const list = rows;
 
   const assetIds = [...new Set(list.map((r) => r.asset_id))].filter(Boolean);
   const codeById = new Map<string, string>();
   if (assetIds.length) {
-    const { data: assets } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .in("id", assetIds);
-    for (const a of (assets ?? []) as { id: string; code: string }[]) {
+    let assets: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>> = [];
+    try {
+      assets = await AssetsSelector.selectIdCodeByIds(supabase, assetIds);
+    } catch {
+      /* preserve original soft-fail behavior — codeById stays empty */
+    }
+    for (const a of assets) {
       codeById.set(a.id, a.code);
     }
   }
 
-  const executorName = String(ex.name ?? "").trim() || (ex.id as string);
+  const executorName = String(ex.name ?? "").trim() || ex.id;
 
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">

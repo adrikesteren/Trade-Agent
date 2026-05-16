@@ -1,4 +1,4 @@
-import { Stack } from "@repo/adricore/blocks";
+import { Stack } from "@adrikesteren/adricore/blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";

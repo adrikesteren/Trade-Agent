@@ -6,6 +6,9 @@ import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -16,7 +19,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -53,38 +56,39 @@ export default async function ExecutorQuoteAssetBudgetsRelatedPage({ params }: P
   const fmtDt = (v: string | number | Date | null) =>
     v == null || v === "" ? "—" : formatDatetime(v, prefs);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("id, name, exchange_id")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (exErr || !ex) notFound();
-  const executorName = String(ex.name ?? "").trim() || (ex.id as string);
-  const executorExchangeId = String((ex as { exchange_id?: string | null }).exchange_id ?? "").trim();
+  let ex: ExecutorsSelector.ExecutorIdNameExchangeRow | null = null;
+  try {
+    ex = await ExecutorsSelector.selectIdNameExchangeByIdAndUser(supabase, { id, userId: user.id });
+  } catch {
+    notFound();
+  }
+  if (!ex) notFound();
+  const executorName = String(ex.name ?? "").trim() || ex.id;
+  const executorExchangeId = String(ex.exchange_id ?? "").trim();
 
-  const [{ data: rows, error: budgetsErr }, quoteAssetOptionsByExchange] = await Promise.all([
-    supabase
-      .schema("trading")
-      .from("executor_quote_asset_budget")
-      .select("id, quote_asset_id, max_notional_primary, created_at, updated_at")
-      .eq("executor_id", id)
-      .order("created_at", { ascending: true }),
+  const [budgetsResult, quoteAssetOptionsByExchange] = await Promise.all([
+    ExecutorQuoteAssetBudgetSelector.selectListByExecutorIdOrdered(supabase, id).then(
+      (rows) => ({ rows, err: null as string | null }),
+      (e: unknown) => ({
+        rows: [] as ExecutorQuoteAssetBudgetSelector.ExecutorQuoteBudgetListRow[],
+        err: e instanceof Error ? e.message : String(e),
+      }),
+    ),
     fetchQuoteAssetOptionsByExchange(supabase),
   ]);
-
-  const list = (rows ?? []) as BudgetRow[];
+  const budgetsErr = budgetsResult.err;
+  const list = budgetsResult.rows as BudgetRow[];
 
   const assetIds = [...new Set(list.map((r) => r.quote_asset_id))].filter(Boolean);
   const codeById = new Map<string, string>();
   if (assetIds.length) {
-    const { data: assets } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .in("id", assetIds);
-    for (const a of (assets ?? []) as { id: string; code: string }[]) {
+    let assets: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>> = [];
+    try {
+      assets = await AssetsSelector.selectIdCodeByIds(supabase, assetIds);
+    } catch {
+      /* preserve original soft-fail behavior — codeById stays empty */
+    }
+    for (const a of assets) {
       codeById.set(a.id, a.code);
     }
   }
@@ -124,7 +128,7 @@ export default async function ExecutorQuoteAssetBudgetsRelatedPage({ params }: P
         }
       />
 
-      {budgetsErr ? <Alert tone="error">{budgetsErr.message}</Alert> : null}
+      {budgetsErr ? <Alert tone="error">{budgetsErr}</Alert> : null}
 
       <Card>
         <CardBody className="!pt-0">

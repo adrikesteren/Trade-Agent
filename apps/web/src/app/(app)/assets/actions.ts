@@ -7,10 +7,13 @@ import {
   buildFindCoingeckoIdWorkerUrl,
   downstreamWorkerHeaders,
   isRelayWorkerEnqueueConfigured,
-  normalizeRelayBaseUrl,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -36,16 +39,8 @@ export async function setAssetCoingeckoCoinId(assetId: string, coinIdRaw: string
   const coingecko_coin_id = trimmed === "" ? null : trimmed;
 
   const admin = createServiceRoleClient();
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, metadata")
-    .eq("id", assetId)
-    .maybeSingle();
+  const row = await AssetsSelector.selectEditById(admin, assetId);
 
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
   if (!row) {
     throw new Error("Asset not found.");
   }
@@ -60,15 +55,10 @@ export async function setAssetCoingeckoCoinId(assetId: string, coinIdRaw: string
     delete meta.coingecko_id;
   }
 
-  const { error: upErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .update({ coingecko_coin_id, metadata: meta })
-    .eq("id", assetId);
-
-  if (upErr) {
-    throw new Error(upErr.message);
-  }
+  await AssetsSelector.updateCoingeckoCoinIdAndMetadataById(admin, assetId, {
+    coingecko_coin_id,
+    metadata: meta,
+  });
 
   const codeSeg = encodeURIComponent(String(row.code ?? "").trim());
   revalidatePath(`/assets/${assetId}`);
@@ -107,15 +97,11 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
   }
 
   const admin = createServiceRoleClient();
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, coingecko_coin_id")
-    .eq("id", assetId)
-    .maybeSingle();
-
-  if (selErr) {
-    return { ok: false, error: selErr.message };
+  let row: Awaited<ReturnType<typeof AssetsSelector.selectFindCoinIdRowById>>;
+  try {
+    row = await AssetsSelector.selectFindCoinIdRowById(admin, assetId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!row) {
     return { ok: false, error: "Asset not found." };
@@ -129,15 +115,17 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
     return { ok: false, error: "This asset already has a CoinGecko coin id." };
   }
 
-  const { data: skipRow } = await admin
-    .from("tasks")
-    .select("id")
-    .eq("related_schema", "catalog")
-    .eq("related_table", "assets")
-    .eq("related_id", assetId)
-    .eq("status", "open")
-    .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-    .maybeSingle();
+  let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+  try {
+    skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+      relatedSchema: "catalog",
+      relatedTable: "assets",
+      relatedId: assetId,
+      jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+    });
+  } catch {
+    /* preserve original soft-fail behavior (skipRow remains null) */
+  }
 
   if (skipRow?.id) {
     return {
@@ -148,16 +136,17 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
   }
 
   try {
-    const relayBase = normalizeRelayBaseUrl();
+    const relay = makeRelayClient();
     const appBase = getAppBaseUrl();
-    const url = buildFindCoingeckoIdWorkerUrl(appBase, String(row.code), "manual");
-    const relayMessageId = await postRelaySingleMessage(
-      relayBase,
-      url,
-      await downstreamWorkerHeaders(),
-      relayMaxRetries(),
-    );
-    return { ok: true, relayMessageId };
+    const { origin, path } = toRelayOriginAndPath(buildFindCoingeckoIdWorkerUrl(appBase, String(row.code), "manual"));
+    const { message } = await relay.messages.enqueue({
+      origin,
+      path,
+      method: "POST",
+      headers: await downstreamWorkerHeaders(),
+      maxRetries: relayMaxRetries(),
+    });
+    return { ok: true, relayMessageId: message.id };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
     return { ok: false, error: msg };
@@ -185,28 +174,19 @@ export async function deleteCatalogAsset(assetId: string): Promise<DeleteCatalog
 
   const admin = createServiceRoleClient();
 
-  const { count: baseCount, error: baseErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", id);
-
-  if (baseErr) {
-    return { ok: false, error: baseErr.message };
+  let asBase: number;
+  let asQuote: number;
+  try {
+    asBase = await MarketsSelector.countByAssetId(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    asQuote = await MarketsSelector.countByQuoteAssetId(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
-  const { count: quoteCount, error: quoteErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("*", { count: "exact", head: true })
-    .eq("quote_asset_id", id);
-
-  if (quoteErr) {
-    return { ok: false, error: quoteErr.message };
-  }
-
-  const asBase = baseCount ?? 0;
-  const asQuote = quoteCount ?? 0;
   if (asBase > 0 || asQuote > 0) {
     return {
       ok: false,
@@ -214,26 +194,23 @@ export async function deleteCatalogAsset(assetId: string): Promise<DeleteCatalog
     };
   }
 
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (selErr) {
-    return { ok: false, error: selErr.message };
+  let row: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeById>>;
+  try {
+    row = await AssetsSelector.selectIdCodeById(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!row) {
     return { ok: false, error: "Asset not found." };
   }
 
-  const { data: deleted, error: delErr } = await admin.schema("catalog").from("assets").delete().eq("id", id).select("id");
-
-  if (delErr) {
-    return { ok: false, error: delErr.message };
+  let deleted: { id: string }[];
+  try {
+    deleted = await AssetsSelector.deleteByIdReturningIds(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  if (!deleted?.length) {
+  if (!deleted.length) {
     return { ok: false, error: "Delete had no effect." };
   }
 

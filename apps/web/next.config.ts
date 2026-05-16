@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+﻿import type { NextConfig } from "next";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -12,23 +12,24 @@ loadMonorepoDotenvOnce();
 
 /** Directory containing this `next.config` file (= `apps/web`). */
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
-/** Repo root: one level above `apps/web`. */
-const monorepoRoot = path.resolve(webRoot, "..");
-
-void monorepoRoot; // reserved for future config that needs explicit repo root
+/** Monorepo root: two levels above `apps/web` (sits next to `pnpm-workspace.yaml`). */
+const monorepoRoot = path.resolve(webRoot, "..", "..");
 
 /** Read after `loadMonorepoDotenvOnce()` so repo-root `.env` is applied before `env` inlining. */
 const nextPublicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
 const nextPublicSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: monorepoRoot,
+  },
   async redirects() {
     return [
       { source: "/dashboard", destination: "/overview", permanent: true },
       { source: "/dashboard/:path*", destination: "/:path*", permanent: true },
     ];
   },
-  transpilePackages: ["@repo/adricore", "@repo/exchange", "@repo/risk", "@repo/trading"],
+  transpilePackages: ["@adrikesteren/adricore", "@repo/exchange", "@repo/risk", "@repo/trading"],
   /**
    * Inlines into Edge middleware and the browser bundle. `loadMonorepoDotenvOnce()` must run above
    * so these are non-empty when values only exist in the monorepo root `.env`.

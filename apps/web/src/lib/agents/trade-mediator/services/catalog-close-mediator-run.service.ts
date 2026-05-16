@@ -25,6 +25,14 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as SignalDecisionsSelector from "@/lib/selectors/signal-decisions-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 export type MediatorCatalogCloseBody = {
   closeTimeIso: string;
@@ -144,15 +152,12 @@ async function findBarCandle(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; closeTimeIso: string },
 ): Promise<{ price: number; candleId: string } | null> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, close, candle_timestamps ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .limit(500);
-  if (error) throw new Error(error.message);
-  const rows = mapBarCandles((data ?? []) as CandleRow[]);
+  const data = await CandlesSelector.selectBarsWithOpenCloseForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: 500,
+  });
+  const rows = mapBarCandles(data as CandleRow[]);
   const hit = rows.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
   if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
   return { price: hit.close, candleId: hit.id };
@@ -170,6 +175,7 @@ export function buildQuoteAssetNotAllowedSkipDecision(args: {
   ownerId: string;
   executor: { id: string; name: string; exchange_id: string };
   timeframe: string;
+  candleId: string;
   primarySignalId: string;
   matched: { id: string; intent: string; agent_slug: string }[];
   marketSymbol: string;
@@ -184,7 +190,7 @@ export function buildQuoteAssetNotAllowedSkipDecision(args: {
     user_id: args.ownerId,
     executor_id: args.executor.id,
     timeframe: args.timeframe,
-    signal_id: args.primarySignalId,
+    candle_id: args.candleId,
     approved: false,
     reason_codes: ["quote_asset_not_allowed"],
     risk_snapshot: args.riskSnap,
@@ -331,9 +337,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
@@ -352,13 +356,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   let rows: { id: string; market_symbol: string }[];
 
   if (onlyMarketId) {
-    const { data: mrow, error: oneErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, exchange_id")
-      .eq("id", onlyMarketId)
-      .maybeSingle();
-    if (oneErr) throw new Error(oneErr.message);
+    const mrow = await MarketsSelector.selectIdSymbolExchangeById(admin, onlyMarketId);
     if (!mrow) {
       return {
         ok: true,
@@ -385,17 +383,10 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       };
     }
   } else {
-    let countQuery = admin
-      .schema("catalog")
-      .from("markets")
-      .select("id", { count: "exact", head: true })
-      .eq("exchange_id", exchangeId);
-    if (quoteAssetIdFilter) {
-      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
-    }
-    const { count: totalMarkets, error: countErr } = await countQuery;
-    if (countErr) throw new Error(countErr.message);
-    const total = totalMarkets ?? 0;
+    const total = await MarketsSelector.countByExchangeAndOptionalQuote(admin, {
+      exchangeId,
+      quoteAssetId: quoteAssetIdFilter,
+    });
     const maxTotal = maxTotalMarkets();
     effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
@@ -490,29 +481,24 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
-    const { data: mktQuote, error: mktQuoteErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("quote_asset_id")
-      .eq("id", marketId)
-      .maybeSingle();
-    if (mktQuoteErr) throw new Error(`${marketSymbol}: markets quote_asset_id: ${mktQuoteErr.message}`);
-    const quoteAssetIdForMarket = String((mktQuote as { quote_asset_id?: string } | null)?.quote_asset_id ?? "").trim() || null;
+    const quoteAssetIdForMarket =
+      String((await MarketsSelector.selectQuoteAssetIdById(admin, marketId)) ?? "").trim() || null;
 
     const bar = await findBarCandle(admin, { marketId, timeframe, closeTimeIso });
     if (!bar) continue;
 
     for (const signalUid of signalQueryUserIds) {
-      const { data: sigData, error: sigErr } = await admin
-        .schema("trading")
-        .from("signals")
-        .select("id, intent, created_at, metadata, signal_agents ( agent_id )")
-        .eq("user_id", signalUid)
-        .eq("candle_id", bar.candleId);
+      let sigData: SignalsSelector.SignalForMediatorRow[];
+      try {
+        sigData = await SignalsSelector.selectForMediatorByUserAndCandle(admin, {
+          userId: signalUid,
+          candleId: bar.candleId,
+        });
+      } catch (e) {
+        throw new Error(`${marketSymbol}: signals select: ${e instanceof Error ? e.message : String(e)}`);
+      }
 
-      if (sigErr) throw new Error(`${marketSymbol}: signals select: ${sigErr.message}`);
-
-      const matched = (sigData ?? []) as SignalRow[];
+      const matched = sigData as SignalRow[];
       matched.sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
 
       const executors = onlyExecutorId
@@ -605,6 +591,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               ownerId,
               executor: { id: ex.id, name: ex.name, exchange_id: ex.exchange_id },
               timeframe,
+              candleId: bar.candleId,
               primarySignalId: matched[0].id,
               matched: matched.map((r) => ({ id: r.id, intent: r.intent, agent_slug: agentSlugFromRow(r) })),
               marketSymbol,
@@ -615,26 +602,39 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               signalsSyncRunId: body.signalsSyncRunId,
               mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
             });
-            const { error: skipErr } = await admin
-              .schema("trading")
-              .from("decisions")
-              .upsert(skipRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
-            if (skipErr) throw new Error(`${marketSymbol}: decisions skip upsert: ${skipErr.message}`);
+            let skipDecisionId: string;
+            try {
+              skipDecisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(admin, skipRow);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              throw new Error(`${marketSymbol}: decisions skip upsert: ${msg}`);
+            }
+            try {
+              await SignalDecisionsSelector.insertMany(
+                admin,
+                matched.map((r) => ({
+                  decision_id: skipDecisionId,
+                  signal_id: r.id,
+                  score: 1.0,
+                  reasons: { reasonCode: "quote_asset_not_allowed", intent: r.intent, agent_id: agentSlugFromRow(r) },
+                })),
+              );
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (!/duplicate|unique/i.test(msg)) {
+                console.error(`[mediator/catalog-close] ${marketSymbol}: junction insert: ${msg}`);
+              }
+            }
             decisionsUpserted += 1;
           }
           continue;
         }
 
-        const { data: posRow, error: posErr } = await admin
-          .schema("trading")
-          .from("positions")
-          .select("quantity, avg_price")
-          .eq("user_id", ownerId)
-          .eq("executor_id", ex.id)
-          .eq("market_id", marketId)
-          .maybeSingle();
-
-        if (posErr) throw new Error(posErr.message);
+        const posRow = await PositionsSelector.selectQtyAvgByTrio(admin, {
+          userId: ownerId,
+          executorId: ex.id,
+          marketId,
+        });
         const positionQty = Number(posRow?.quantity ?? 0);
         const avgPrice = Number(posRow?.avg_price ?? 0);
         const inPosition = positionQty > 0;
@@ -643,15 +643,11 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         let forceExit = false;
         let movingFloorSnapshot: Record<string, unknown> | null = null;
         if (inPosition) {
-          const { data: floorRow, error: floorErr } = await admin
-            .schema("trading")
-            .from("executor_moving_floors")
-            .select("peak_price_since_entry, floor_price, activated_at")
-            .eq("user_id", ownerId)
-            .eq("executor_id", ex.id)
-            .eq("market_id", marketId)
-            .maybeSingle();
-          if (floorErr) throw new Error(floorErr.message);
+          const floorRow = await ExecutorMovingFloorsSelector.selectByTrio(admin, {
+            userId: ownerId,
+            executorId: ex.id,
+            marketId,
+          });
           if (Number.isFinite(avgPrice) && avgPrice > 0 && rails.profitTakingEnabled) {
             const trailPct = Number(rails.movingFloorTrailPct ?? 0.15);
             const activationProfitPct = Number(rails.movingFloorActivationProfitPct ?? 0.05);
@@ -667,19 +663,15 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               trailPct,
               activationProfitPct,
             });
-            const { error: upFloorErr } = await admin.schema("trading").from("executor_moving_floors").upsert(
-              {
-                user_id: ownerId,
-                executor_id: ex.id,
-                market_id: marketId,
-                peak_price_since_entry: next.peak,
-                floor_price: next.floor,
-                activated_at: next.activated ? (floorRow?.activated_at ?? new Date().toISOString()) : null,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "user_id,executor_id,market_id" },
-            );
-            if (upFloorErr) throw new Error(upFloorErr.message);
+            await ExecutorMovingFloorsSelector.upsertOneByTrio(admin, {
+              user_id: ownerId,
+              executor_id: ex.id,
+              market_id: marketId,
+              peak_price_since_entry: next.peak,
+              floor_price: next.floor,
+              activated_at: next.activated ? (floorRow?.activated_at ?? new Date().toISOString()) : null,
+              updated_at: new Date().toISOString(),
+            });
             forceExit = next.triggerExit;
             movingFloorSnapshot = {
               avgPrice,
@@ -693,14 +685,11 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             };
           }
         } else {
-          const { error: delFloorErr } = await admin
-            .schema("trading")
-            .from("executor_moving_floors")
-            .delete()
-            .eq("user_id", ownerId)
-            .eq("executor_id", ex.id)
-            .eq("market_id", marketId);
-          if (delFloorErr) throw new Error(delFloorErr.message);
+          await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+            userId: ownerId,
+            executorId: ex.id,
+            marketId,
+          });
         }
 
         // P3: regime gating. The mediator applies it before evaluating to
@@ -755,7 +744,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           user_id: ownerId,
           executor_id: ex.id,
           timeframe,
-          signal_id: primarySignalId,
+          candle_id: bar.candleId,
           approved: decision.approved,
           reason_codes: reasonCodesWithRegime,
           risk_snapshot: decision.riskSnapshot,
@@ -783,10 +772,29 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           },
         };
 
-        const { error: upErr } = await admin.schema("trading").from("decisions").upsert(decisionRow, {
-          onConflict: "user_id,executor_id,signal_id,position_side",
-        });
-        if (upErr) throw new Error(`${marketSymbol}: decisions upsert: ${upErr.message}`);
+        let decisionId: string;
+        try {
+          decisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(admin, decisionRow);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${marketSymbol}: decisions upsert: ${msg}`);
+        }
+        try {
+          await SignalDecisionsSelector.insertMany(
+            admin,
+            matched.map((r) => ({
+              decision_id: decisionId,
+              signal_id: r.id,
+              score: 1.0,
+              reasons: { intent: r.intent, agent_id: agentSlugFromRow(r) },
+            })),
+          );
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!/duplicate|unique/i.test(msg)) {
+            console.error(`[mediator/catalog-close] ${marketSymbol}: junction insert: ${msg}`);
+          }
+        }
         decisionsUpserted += 1;
 
         // P3: SAR (Stop-and-Reverse). Independent of the primary decision —
@@ -805,6 +813,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               marketSymbol,
               timeframe,
               closeTimeIso,
+              candleId: bar.candleId,
               regimeSignalId: regimeSignal.id,
               regimeSignalMetadata: regimeSignal.metadata ?? null,
               allowedSides,

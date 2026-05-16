@@ -2,6 +2,12 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalDecisionsSelector from "@/lib/selectors/signal-decisions-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
+
 import { detectRegimeFlip, type RegimePoint, type RegimeLabel } from "./regime-flip-detect.service";
 import { emitSarDecisions, type PositionSide, type SarOpenPosition } from "./sar-decision-emit.service";
 
@@ -28,35 +34,27 @@ async function fetchPreviousRegimeSignals(
   args: { userId: string; marketId: string; beforeCloseTimeIso: string; limit: number },
 ): Promise<RegimePoint[]> {
   // Lookup signal_agents.id for the regime classifier agent.
-  const { data: agentRow, error: agentErr } = await admin
-    .schema("trading")
-    .from("signal_agents")
-    .select("id")
-    .eq("agent_id", REGIME_AGENT_SLUG)
-    .maybeSingle();
-  if (agentErr || !agentRow) return [];
-  const signalAgentId = (agentRow as { id?: string }).id;
+  let signalAgentId: string | null = null;
+  try {
+    signalAgentId = await SignalAgentsSelector.selectIdByAgentSlug(admin, REGIME_AGENT_SLUG);
+  } catch {
+    return [];
+  }
   if (!signalAgentId) return [];
 
-  const { data, error } = await admin
-    .schema("trading")
-    .from("signals")
-    .select("metadata, candles!inner ( market_id, candle_timestamps!inner ( close_time ) )")
-    .eq("user_id", args.userId)
-    .eq("signal_agent_id", signalAgentId)
-    .lt("candles.candle_timestamps.close_time", args.beforeCloseTimeIso)
-    .eq("candles.market_id", args.marketId)
-    .order("close_time", { ascending: false, foreignTable: "candles.candle_timestamps" })
-    .limit(args.limit);
-  if (error) return [];
+  let rows: Awaited<ReturnType<typeof SignalsSelector.selectRegimeSignalsBeforeCloseTime>>;
+  try {
+    rows = await SignalsSelector.selectRegimeSignalsBeforeCloseTime(admin, {
+      userId: args.userId,
+      signalAgentId,
+      marketId: args.marketId,
+      beforeCloseTimeIso: args.beforeCloseTimeIso,
+      limit: args.limit,
+    });
+  } catch {
+    return [];
+  }
 
-  const rows = (data ?? []) as Array<{
-    metadata: Record<string, unknown> | null;
-    candles?:
-      | { candle_timestamps?: { close_time?: string } | { close_time?: string }[] | null }
-      | { candle_timestamps?: { close_time?: string } | { close_time?: string }[] | null }[]
-      | null;
-  }>;
   const points: RegimePoint[] = [];
   for (const r of rows) {
     const candle = Array.isArray(r.candles) ? r.candles[0] : r.candles;
@@ -76,16 +74,13 @@ async function fetchOpenPositionsBySide(
   admin: SupabaseClient,
   args: { userId: string; executorId: string; marketId: string },
 ): Promise<SarOpenPosition[]> {
-  const { data, error } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("position_side, quantity")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId);
-  if (error) return [];
+  const rows = await PositionsSelector.selectSideAndQuantityByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
   const out: SarOpenPosition[] = [];
-  for (const r of (data ?? []) as Array<{ position_side: string | null; quantity: number | string | null }>) {
+  for (const r of rows) {
     const qty = Number(r.quantity ?? 0);
     if (!Number.isFinite(qty) || qty <= 0) continue;
     const side = r.position_side === "short" ? "short" : "long";
@@ -104,6 +99,8 @@ export type EvaluateAndEmitSarArgs = {
   marketSymbol: string;
   timeframe: string;
   closeTimeIso: string;
+  /** The catalog candle this bar resolves to (Plan 2: decisions are keyed by candle). */
+  candleId: string;
   /** The regime classifier signal row matched for this bar (id + metadata.regime). */
   regimeSignalId: string;
   regimeSignalMetadata: Record<string, unknown> | null;
@@ -129,8 +126,9 @@ export type EvaluateAndEmitSarResult = {
 /**
  * Mediator entry point for SAR (Stop-and-Reverse). Side-effecting: when a
  * regime flip is confirmed, this writes 0-2 paired decisions in
- * `trading.decisions` keyed on the regime classifier `signal_id` with
- * different `position_side` values (allowed by P3/M10 widened uniqueness).
+ * `trading.decisions` keyed on the bar's `candle_id` with different
+ * `position_side` values (allowed by Plan 2 widened uniqueness), plus the
+ * matching junction rows in `trading.signal_decisions`.
  *
  * Always returns; never throws on no-op (no flip → returns 0 decisions).
  */
@@ -192,7 +190,7 @@ export async function evaluateAndEmitSar(args: EvaluateAndEmitSarArgs): Promise<
       user_id: args.userId,
       executor_id: args.executorId,
       timeframe: args.timeframe,
-      signal_id: args.regimeSignalId,
+      candle_id: args.candleId,
       approved: true,
       reason_codes: [proposal.reason],
       risk_snapshot: args.riskSnapshot,
@@ -221,15 +219,34 @@ export async function evaluateAndEmitSar(args: EvaluateAndEmitSarArgs): Promise<
       },
     };
 
-    const { error: upErr } = await args.admin
-      .schema("trading")
-      .from("decisions")
-      .upsert(sarRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
-    if (upErr) {
+    let decisionId: string;
+    try {
+      decisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(args.admin, sarRow);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error(
-        `[mediator/sar] ${args.marketSymbol} ${args.executorName} ${proposal.intent} ${proposal.positionSide}: ${upErr.message}`,
+        `[mediator/sar] ${args.marketSymbol} ${args.executorName} ${proposal.intent} ${proposal.positionSide}: ${msg}`,
       );
       continue;
+    }
+
+    // Plan 2: signal linkage moves to the junction table. SAR matches one
+    // regime classifier signal per emitted decision, with score=1.0 (matches
+    // the legacy 1:N semantics under the new M:N shape).
+    try {
+      await SignalDecisionsSelector.insertMany(args.admin, [
+        { decision_id: decisionId, signal_id: args.regimeSignalId, score: 1.0, reasons: { reasonCode: proposal.reason } },
+      ]);
+    } catch (e) {
+      // Junction insert failing after the parent decision succeeded is logged
+      // but not surfaced — the duplicate-key path is expected on rerun and
+      // the decision row alone already carries the audit trail in its payload.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/duplicate|unique/i.test(msg)) {
+        console.error(
+          `[mediator/sar] ${args.marketSymbol} ${args.executorName} junction insert: ${msg}`,
+        );
+      }
     }
     written += 1;
   }

@@ -1,4 +1,4 @@
-import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
+﻿import { MarketListRowActions } from "@/app/(app)/markets/market-list-row-actions";
 import { OverviewRetrieveBitvavoMarketsButton } from "@/app/(app)/overview/overview-retrieve-bitvavo-markets-button";
 import { ListViewPagination } from "@/components/list-view-pagination";
 import { ObjectListViewHeader } from "@/components/object-list-view-header";
@@ -12,6 +12,7 @@ import {
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -21,7 +22,7 @@ import {
   TableWrap,
   Td,
   Th,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 
 type AssetEmbed = {
@@ -56,12 +57,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
 
-  const { data: exchange } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code, name")
-    .eq("code", "bitvavo")
-    .maybeSingle();
+  const exchange = await ExchangesSelector.selectByCode(supabase, "bitvavo");
 
   const { data: listings, error } = exchange
     ? await supabase
@@ -104,7 +100,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
     `Page ${page} of ${pages}`,
     `${exchange?.name ?? "Bitvavo"}`,
     `${pageSize} per page`,
-  ].join(" · ");
+  ].join(" Â· ");
 
   return (
     <div className="bk-container bk-container_lg bk-stack bk-stack_gap-md">
@@ -129,7 +125,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
         <span className="bk-form-label" style={{ display: "inline", marginRight: "0.25rem" }}>
           Jobs & history
         </span>
-        — Bitvavo sync (listings + candles), CoinGecko snapshots, and{" "}
+        â€” Bitvavo sync (listings + candles), CoinGecko snapshots, and{" "}
         <code className="bk-code">sync_runs</code> on{" "}
         <Link href="/sync-runs" className="bk-link">
           Sync runs
@@ -159,8 +155,8 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
                 {displayListings.map((row) => {
                   const asset = unwrapAssetEmbed(row.assets);
                   const quote = unwrapAssetEmbed(row.quote_asset);
-                  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "—");
-                  const quoteName = quote?.name?.trim() ? quote.name : (quote?.code ?? "—");
+                  const assetName = asset?.name?.trim() ? asset.name : (asset?.code ?? "â€”");
+                  const quoteName = quote?.name?.trim() ? quote.name : (quote?.code ?? "â€”");
                   const baseMini =
                     asset?.id && asset.code
                       ? { id: String(asset.id), code: String(asset.code), name: asset.name ?? null }

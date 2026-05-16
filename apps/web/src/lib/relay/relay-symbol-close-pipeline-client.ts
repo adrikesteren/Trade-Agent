@@ -1,5 +1,7 @@
 import "server-only";
 
+import { RelayClient } from "@adrikesteren/relay-client";
+
 import { loadMonorepoDotenvOnce } from "@/lib/env/load-monorepo-dotenv-once";
 import { resolveWorkerCronSecret } from "@/lib/workers/resolve-worker-cron-secret";
 
@@ -10,36 +12,31 @@ export const RELAY_CHUNK_WAIT_MAX_MS = 3_600_000;
 /** Per-message `timeout` (seconds) for Relay `historical-executor-replay` jobs — 30 minutes. */
 export const RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S = 30 * 60;
 
-/** Per-message `timeout` (seconds) for Relay `market-backfill-candles` jobs — 30 minutes. */
-export const RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S = 30 * 60;
+/** Per-message `timeout` (seconds) for Relay `market-backfill-candles` jobs — 15 minutes. */
+export const RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S = 60 * 15;
 
 /** Per-message `timeout` (seconds) for Relay `market-evaluate-all-signals` jobs — 10 minutes. */
 export const RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S = 10 * 60;
 
-export function normalizeRelayBaseUrl(): string {
+/** Per-message `timeout` (seconds) for Relay `market-backfill-signals` jobs — 15 minutes. */
+export const RELAY_MARKET_BACKFILL_SIGNALS_TIMEOUT_S = 60 * 15;
+
+/**
+ * Create a `@adrikesteren/relay-client` instance from `RELAY_APP_URL` + `RELAY_APP_SECRET`.
+ * Throws when either env var is missing — callers should branch on
+ * {@link isRelayWorkerEnqueueConfigured} when the inline fallback is acceptable.
+ */
+export function makeRelayClient(): RelayClient {
   loadMonorepoDotenvOnce();
-  const raw = process.env.RELAY_APP_URL?.trim();
-  if (!raw) {
+  const baseUrl = process.env.RELAY_APP_URL?.trim();
+  const apiKey = process.env.RELAY_APP_SECRET?.trim();
+  if (!baseUrl) {
     throw new Error("RELAY_APP_URL is not set (required for Relay enqueue)");
   }
-  return raw.replace(/\/$/, "");
-}
-
-export function relayIngressAuthHeaders(): Headers {
-  loadMonorepoDotenvOnce();
-  const secret = process.env.RELAY_APP_SECRET?.trim();
-  if (!secret) {
+  if (!apiKey) {
     throw new Error("RELAY_APP_SECRET is not set (Relay ingress Bearer)");
   }
-  const h = new Headers();
-  h.set("Authorization", `Bearer ${secret}`);
-  return h;
-}
-
-export function relayIngressPostHeaders(): Headers {
-  const h = relayIngressAuthHeaders();
-  h.set("Content-Type", "application/json");
-  return h;
+  return new RelayClient({ baseUrl, apiKey });
 }
 
 export async function downstreamWorkerHeaders(): Promise<Record<string, string>> {
@@ -108,7 +105,7 @@ export function buildHistoricalExecutorReplayWorkerUrl(appBase: string, executor
 }
 
 /**
- * Worker URL for one "Backfill candles" market run (Ingest Agent + Signal Agent over a UTC window).
+ * Worker URL for one "Backfill candles" market chunk (Ingest Agent over a UTC window).
  * `endDate` is optional — leave empty to backfill up to today.
  */
 export function buildMarketBackfillCandlesWorkerUrl(
@@ -152,6 +149,22 @@ export function buildMarketEvaluateAllSignalsWorkerUrl(
   return u.toString();
 }
 
+/**
+ * Worker URL for one "Backfill signals" market chunk (Signal Agent smart-fill over a UTC window).
+ * `endDate` is optional — leave empty to fill up to today.
+ */
+export function buildMarketBackfillSignalsWorkerUrl(
+  appBase: string,
+  args: { marketId: string; startDate: string; endDate?: string | null },
+): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/market-backfill-signals`);
+  u.searchParams.set("marketId", args.marketId.trim());
+  u.searchParams.set("startDate", args.startDate.trim());
+  const end = (args.endDate ?? "").trim();
+  if (end) u.searchParams.set("endDate", end);
+  return u.toString();
+}
+
 export function buildSymbolClosePipelineUrl(
   appBase: string,
   assetCode: string,
@@ -167,13 +180,14 @@ export function buildSymbolClosePipelineUrl(
   return u.toString();
 }
 
-function toRelayOriginAndPath(targetUrl: string): { origin: string; path: string } {
+/** Split a downstream URL into the `{ origin, path }` shape the SDK expects. */
+export function toRelayOriginAndPath(targetUrl: string): { origin: string; path: string } {
   const u = new URL(targetUrl);
-  const path = `${u.pathname}${u.search}`;
-  return { origin: u.origin, path };
+  return { origin: u.origin, path: `${u.pathname}${u.search}` };
 }
 
-function toRelayOriginAndPaths(targetUrls: string[]): { origin: string; paths: string[] } {
+/** Same as {@link toRelayOriginAndPath} for an array — enforces a single shared origin (SDK shared shape). */
+export function toRelayOriginAndPaths(targetUrls: string[]): { origin: string; paths: string[] } {
   if (targetUrls.length === 0) {
     throw new Error("Relay message-group requires at least one target URL");
   }
@@ -189,104 +203,23 @@ function toRelayOriginAndPaths(targetUrls: string[]): { origin: string; paths: s
   return { origin: first.origin, paths };
 }
 
-type RelayMessageRow = { id: string; status: string };
-
-function isRelayMessageTerminal(status: string): boolean {
-  return status === "delivered" || status === "dead";
-}
-
-export async function fetchRelayMessage(relayBase: string, messageId: string): Promise<RelayMessageRow | null> {
-  const res = await fetch(`${relayBase}/api/v1/messages/${encodeURIComponent(messageId)}`, {
-    method: "GET",
-    headers: relayIngressAuthHeaders(),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Relay GET message failed (${res.status}): ${text.slice(0, 500)}`);
-  }
-  const json = (await res.json()) as { message?: RelayMessageRow };
-  return json.message ?? null;
-}
-
-export async function waitForRelayMessageTerminal(relayBase: string, messageId: string): Promise<RelayMessageRow> {
+/**
+ * Polls `relay.messages.get` every {@link RELAY_POLL_MS} until the message reaches a terminal state
+ * (`delivered` / `dead` / `cancelled`) or {@link RELAY_CHUNK_WAIT_MAX_MS} elapses.
+ */
+export async function waitForRelayMessageTerminal(
+  relay: RelayClient,
+  messageId: string,
+): Promise<{ id: string; status: "delivered" | "dead" | "cancelled" }> {
   const deadline = Date.now() + RELAY_CHUNK_WAIT_MAX_MS;
   while (Date.now() < deadline) {
-    const row = await fetchRelayMessage(relayBase, messageId);
-    if (!row?.id) {
-      throw new Error("Relay message response missing id");
-    }
-    if (isRelayMessageTerminal(row.status)) {
-      return row;
+    const { message } = await relay.messages.get(messageId);
+    if (message.status === "delivered" || message.status === "dead" || message.status === "cancelled") {
+      return { id: message.id, status: message.status };
     }
     await new Promise((r) => setTimeout(r, RELAY_POLL_MS));
   }
   throw new Error(
     `Timed out after ${RELAY_CHUNK_WAIT_MAX_MS}ms waiting for Relay message ${messageId} to finish (is Relay dispatch running?)`,
   );
-}
-
-export type PostRelaySingleMessageOptions = {
-  /** Max time for the downstream HTTP request, in whole seconds. Sent to Relay as JSON key `timeout`. */
-  timeoutSec?: number;
-};
-
-export async function postRelaySingleMessage(
-  relayBase: string,
-  url: string,
-  headers: Record<string, string>,
-  maxRetries: number,
-  options?: PostRelaySingleMessageOptions,
-): Promise<string> {
-  const { origin, path } = toRelayOriginAndPath(url);
-  const body: Record<string, unknown> = { origin, path, method: "POST", headers, maxRetries };
-  const timeoutSec = options?.timeoutSec;
-  if (timeoutSec != null) {
-    const t = Math.floor(timeoutSec);
-    if (Number.isFinite(t) && t > 0) {
-      body.timeout = t;
-    }
-  }
-  const res = await fetch(`${relayBase}/api/v1/messages`, {
-    method: "POST",
-    headers: relayIngressPostHeaders(),
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Relay POST /messages failed (${res.status}): ${text.slice(0, 800)}`);
-  }
-  const json = JSON.parse(text) as { message?: { id?: string } };
-  const id = json.message?.id;
-  if (!id) {
-    throw new Error("Relay /messages response missing message.id");
-  }
-  return id;
-}
-
-export async function postRelayMessageGroup(
-  relayBase: string,
-  urls: string[],
-  headers: Record<string, string>,
-  maxRetries: number,
-): Promise<{ groupId: string; messageIds: string[] }> {
-  const { origin, paths } = toRelayOriginAndPaths(urls);
-  const res = await fetch(`${relayBase}/api/v1/message-group`, {
-    method: "POST",
-    headers: relayIngressPostHeaders(),
-    body: JSON.stringify({ origin, paths, method: "POST", headers, maxRetries }),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Relay POST /message-group failed (${res.status}): ${text.slice(0, 800)}`);
-  }
-  const json = JSON.parse(text) as {
-    message_group?: { id?: string };
-    messages?: { id?: string }[];
-  };
-  const groupId = json.message_group?.id;
-  const messageIds = (json.messages ?? []).map((m) => m.id).filter((x): x is string => Boolean(x));
-  if (!groupId || messageIds.length !== paths.length) {
-    throw new Error("Relay /message-group response missing message_group.id or message ids");
-  }
-  return { groupId, messageIds };
 }

@@ -6,14 +6,17 @@ import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import {
   buildFindCoingeckoIdWorkerUrl,
   downstreamWorkerHeaders,
-  normalizeRelayBaseUrl,
-  postRelayMessageGroup,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
+  toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+
+import type { RelayClient } from "@adrikesteren/relay-client";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 
 import { listCryptoAssetsNeedingCoinIdSearch } from "@/lib/agents/ingest/services/coingecko-coin-id-sync.service";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 
 export type PublishCoingeckoFindIdRelayFailure = { assetCode: string; message: string };
 
@@ -47,23 +50,22 @@ export async function publishCoingeckoFindIdRelayJobs(
 
   const distinctAssetCodes: string[] = [];
   for (const r of rows) {
-    const { data: skipRow, error: skipErr } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", r.id)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-
-    if (skipErr) {
+    let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>>;
+    try {
+      skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: r.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       return {
         ok: false,
         published: 0,
         distinctAssetCodes: [],
-        failures: [{ assetCode: String(r.code), message: skipErr.message }],
-        error: skipErr.message,
+        failures: [{ assetCode: String(r.code), message: msg }],
+        error: msg,
       };
     }
     if (skipRow?.id) continue;
@@ -74,12 +76,12 @@ export async function publishCoingeckoFindIdRelayJobs(
     return { ok: true, published: 0, distinctAssetCodes: [], failures: [] };
   }
 
-  let relayBase: string;
+  let relay: RelayClient;
   let appBase: string;
   let workerHeaders: Record<string, string>;
   let maxRetries: number;
   try {
-    relayBase = normalizeRelayBaseUrl();
+    relay = makeRelayClient();
     appBase = getAppBaseUrl();
     workerHeaders = await downstreamWorkerHeaders();
     maxRetries = relayMaxRetries();
@@ -100,12 +102,26 @@ export async function publishCoingeckoFindIdRelayJobs(
 
   try {
     if (urls.length === 1) {
-      const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
-      relayMessageIds.push(id);
+      const { origin, path } = toRelayOriginAndPath(urls[0]!);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageIds.push(message.id);
     } else {
-      const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
-      relayMessageGroupIds.push(groupId);
-      relayMessageIds.push(...messageIds);
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group, messages } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageGroupIds.push(message_group.id);
+      relayMessageIds.push(...messages.map((m) => m.id));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

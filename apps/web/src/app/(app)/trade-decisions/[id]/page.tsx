@@ -6,6 +6,11 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as SignalDecisionsSelector from "@/lib/selectors/signal-decisions-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -15,7 +20,7 @@ import {
   RecordPageGrid,
   RecordPageSection,
   RecordRelatedList,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -25,7 +30,7 @@ type TradeDecisionDetail = {
   id: string;
   user_id: string;
   executor_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
@@ -33,7 +38,7 @@ type TradeDecisionDetail = {
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
-  /** From `signals → candles` */
+  /** Resolved from `decisions.candle_id → catalog.candles.market_id` */
   market_id: string;
   bar_close_iso: string | null;
 };
@@ -80,16 +85,11 @@ function formatReasonCodes(codes: string[] | null | undefined): string {
   return codes.join(", ");
 }
 
-function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
-  if (raw == null) return null;
-  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
-}
-
 type TradeDecisionRowDb = {
   id: string;
   user_id: string;
   executor_id: string;
-  signal_id: string | null;
+  candle_id: string;
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
@@ -97,19 +97,17 @@ type TradeDecisionRowDb = {
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
-  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
 };
 
 function flattenTradeDecisionDetail(row: TradeDecisionRowDb, candleById: Map<string, CatalogCandleBar>): TradeDecisionDetail {
-  const sig = unwrapOne(row.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(row.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
   return {
     id: row.id,
     user_id: row.user_id,
     executor_id: row.executor_id,
-    signal_id: String(row.signal_id ?? "").trim(),
+    candle_id: row.candle_id,
     approved: row.approved,
     reason_codes: row.reason_codes,
     timeframe: row.timeframe,
@@ -141,50 +139,48 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const { data: decRow, error: decErr } = await supabase
-    .schema("trading")
-    .from("decisions")
-    .select(
-      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (decErr || !decRow) notFound();
+  let decRow: DecisionsSelector.DecisionDetailRow | null = null;
+  try {
+    decRow = await DecisionsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!decRow) notFound();
 
   const rowDb = decRow as TradeDecisionRowDb;
-  const cid = String(unwrapOne(rowDb.signals)?.candle_id ?? "").trim();
+  const cid = String(rowDb.candle_id ?? "").trim();
   const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
   const dec = flattenTradeDecisionDetail(rowDb, candleById);
 
-  const { data: mRow } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("market_symbol")
-    .eq("id", dec.market_id)
-    .maybeSingle();
-  const marketSym = dec.market_id
-    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
-    : "";
+  const mRow = dec.market_id
+    ? await MarketsSelector.selectIdAndSymbolById(supabase, dec.market_id)
+    : null;
+  const marketSym = dec.market_id ? String(mRow?.market_symbol ?? "").trim() : "";
 
-  const { data: exRow } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("name")
-    .eq("id", dec.executor_id)
-    .maybeSingle();
-  const execName = String((exRow as { name?: string | null } | null)?.name ?? "").trim();
+  let exName: string | null = null;
+  try {
+    exName = await ExecutorsSelector.selectNameById(supabase, dec.executor_id);
+  } catch {
+    /* preserve original soft-fail behavior — execName falls through to "" */
+  }
+  const execName = String(exName ?? "").trim();
 
-  const { data: ordRows, count: ordCount, error: ordErr } = await supabase
-    .schema("trading")
-    .from("orders")
-    .select("id, side, notional_eur, status, created_at", { count: "exact" })
-    .eq("decision_id", id)
-    .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  const { data: ordRows, count: ordCount, error: ordErr } =
+    await OrdersSelector.selectForDecisionWithCount(supabase, {
+      decisionId: id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    });
 
   const orders = (ordRows ?? []) as OrderRow[];
   const orderTotal = typeof ordCount === "number" ? ordCount : orders.length;
+
+  // Plan 2: signals attached to this decision come from the junction table.
+  let signalJunctionRows: SignalDecisionsSelector.SignalDecisionRow[] = [];
+  try {
+    signalJunctionRows = await SignalDecisionsSelector.selectByDecisionId(supabase, id);
+  } catch {
+    /* soft-fail: the page still renders without the signal list */
+  }
 
   const resolved = resolvedIntentFromPayload(dec.decision_payload);
   const reasons = formatReasonCodes(dec.reason_codes);
@@ -269,14 +265,28 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
                       formatDatetime={formatDt}
                     />
                     <Output label="Timeframe" type="text" value={dec.timeframe} />
-                    {dec.signal_id ? (
+                    {signalJunctionRows.length > 0 ? (
                       <Output
-                        label="Signal"
-                        record={{ pathPrefix: "/signals", id: dec.signal_id, name: shortId(dec.signal_id) }}
+                        label="Signals"
+                        type="text"
+                        value={
+                          <span className="bk-stack bk-stack_inline bk-stack_gap-xs flex-wrap">
+                            {signalJunctionRows.map((sd) => (
+                              <Link
+                                key={sd.id}
+                                href={`/signals/${sd.signal_id}`}
+                                className="bk-link font-mono"
+                                title={`${sd.signal_id} · score ${sd.score}`}
+                              >
+                                {shortId(sd.signal_id)}
+                              </Link>
+                            ))}
+                          </span>
+                        }
                         span="full"
                       />
                     ) : (
-                      <Output label="Signal" type="text" value="—" span="full" />
+                      <Output label="Signals" type="text" value="—" span="full" />
                     )}
                     <Output label="Reason codes" type="text" value={reasons} span="full" />
                     <Output label="Created" type="datetime" value={dec.created_at} formatDatetime={formatDt} />

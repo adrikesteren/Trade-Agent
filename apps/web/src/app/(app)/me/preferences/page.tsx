@@ -1,25 +1,24 @@
-import {
+﻿import {
   USER_DATE_FORMAT_CHOICES,
   USER_DECIMAL_FORMAT_CHOICES,
   USER_TIME_FORMAT_CHOICES,
   USER_TIMEZONE_CHOICES,
 } from "@/lib/locale/choices";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createClient } from "@/lib/supabase/server";
-import { Button, Card, CardBody, Stack } from "@repo/adricore/blocks";
+import { Button, Card, CardBody, Stack } from "@adrikesteren/adricore/blocks";
 import { updateUserLocalePreferences } from "./actions";
 
 export default async function MePreferencesPage() {
   const prefs = await getUserLocalePreferences();
   const supabase = await createClient();
-  const { data: fiatRows } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("kind", "fiat")
-    .order("code", { ascending: true })
-    .limit(400);
-  const fiatOptions = (fiatRows ?? []) as { id: string; code: string }[];
+  let fiatOptions: { id: string; code: string }[] = [];
+  try {
+    fiatOptions = await AssetsSelector.selectFiatsOrdered(supabase, 400);
+  } catch {
+    /* preserve original soft-fail behavior — fiatOptions stays empty */
+  }
 
   return (
     <div className="bk-container bk-container_md bk-stack bk-stack_gap-md">

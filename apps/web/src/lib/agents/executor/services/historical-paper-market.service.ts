@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+
 import { fetchExchangeIdByCode } from "./executors-lookup.service";
 
 /** Replay + candle ingest use this quote (Bitvavo EUR pairs). */
@@ -28,29 +31,19 @@ export async function fetchHistoricalExecutorPaperMarket(
   const bitvavoId = await fetchExchangeIdByCode(admin, "bitvavo");
   if (String(args.executorExchangeId) !== bitvavoId) return null;
 
-  const { data: mkts, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id")
-    .eq("exchange_id", bitvavoId)
-    .eq("asset_id", args.filterBaseAssetId);
-  if (mErr) throw new Error(mErr.message);
-
-  const list = (mkts ?? []) as MarketRow[];
+  const list = (await MarketsSelector.selectByExchangeAndAsset(admin, {
+    exchangeId: bitvavoId,
+    assetId: args.filterBaseAssetId,
+  })) as MarketRow[];
   if (list.length === 0) return null;
 
   const quoteIds = [...new Set(list.map((m) => m.quote_asset_id).filter(Boolean))];
   if (quoteIds.length === 0) return null;
 
-  const { data: assets, error: aErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind")
-    .in("id", quoteIds);
-  if (aErr) throw new Error(aErr.message);
+  const assets = await AssetsSelector.selectIdCodeKindByIds(admin, quoteIds);
 
   const byQuoteId = new Map(
-    (assets ?? []).map((r) => [String((r as { id: string }).id), r as { id: string; code: string; kind: string }]),
+    assets.map((r) => [String(r.id), r as { id: string; code: string; kind: string }]),
   );
 
   const eurMkts = list.filter((m) => String(byQuoteId.get(m.quote_asset_id)?.code ?? "").toUpperCase() === "EUR");

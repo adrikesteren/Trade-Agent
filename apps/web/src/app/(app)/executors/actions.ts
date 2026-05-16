@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { ensureRiskStateForExecutor } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 function revalidateExecutorSurface(executorId: string) {
   revalidatePath("/executors");
@@ -42,9 +45,8 @@ async function assertExchangeIsBitvavo(
   supabase: Awaited<ReturnType<typeof createClient>>,
   exchangeId: string,
 ): Promise<void> {
-  const { data, error } = await supabase.schema("catalog").from("exchanges").select("code").eq("id", exchangeId).maybeSingle();
-  if (error) throw new Error(error.message);
-  const code = String(data?.code ?? "").toLowerCase();
+  const codeRaw = await ExchangesSelector.selectCodeById(supabase, exchangeId);
+  const code = String(codeRaw ?? "").toLowerCase();
   if (code !== "bitvavo") {
     throw new Error("Historical execution mode requires the Bitvavo exchange.");
   }
@@ -86,13 +88,7 @@ async function assertSidesAllowedByExchange(
   // Reads the rollup view `catalog.v_exchange_capabilities` which `bool_or`s
   // the per-market capability flags. Per-market gating still happens at
   // decision/execution time (see fetchMarketCapabilitiesByMarketIds).
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("v_exchange_capabilities")
-    .select("supports_spot_buy, supports_spot_sell, supports_margin_long, supports_margin_short")
-    .eq("exchange_id", exchangeId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+  const data = await ExchangesSelector.selectCapabilitiesById(supabase, exchangeId);
   if (!data) throw new Error("Exchange not found.");
   const longSupported = Boolean(data.supports_spot_buy) || Boolean(data.supports_margin_long);
   const shortSupported = Boolean(data.supports_margin_short);
@@ -231,25 +227,25 @@ async function replaceQuoteAssetBudgets(
   rows: QuoteBudgetRow[],
 ): Promise<void> {
   // Delete-and-reinsert under the executor-owner RLS policies.
-  const { error: delErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .delete()
-    .eq("executor_id", executorId);
-  if (delErr) throw new Error(`Quote-asset budgets: ${delErr.message}`);
+  try {
+    await ExecutorQuoteAssetBudgetSelector.deleteByExecutorId(supabase, executorId);
+  } catch (e) {
+    throw new Error(`Quote-asset budgets: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   if (!rows.length) return;
-  const { error: insErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .insert(
+  try {
+    await ExecutorQuoteAssetBudgetSelector.insertMany(
+      supabase,
       rows.map((r) => ({
         executor_id: executorId,
         quote_asset_id: r.quote_asset_id,
         max_notional_primary: r.max_notional_primary,
       })),
     );
-  if (insErr) throw new Error(`Quote-asset budgets: ${insErr.message}`);
+  } catch (e) {
+    throw new Error(`Quote-asset budgets: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export async function createExecutor(formData: FormData): Promise<void> {
@@ -309,31 +305,23 @@ export async function createExecutor(formData: FormData): Promise<void> {
     }
   }
 
-  const { data: inserted, error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .insert({
-      user_id: user.id,
-      exchange_id,
-      name,
-      enabled,
-      execution_mode,
-      asset_filter_mode,
-      filter_asset_ids: filterIdsFinal,
-      allowed_sides,
-      updated_at: new Date().toISOString(),
-      slack_trade_notifications_enabled,
-      exchange_api_key,
-      exchange_api_secret,
-      historical_start_date,
-      historical_end_date,
-      ...rails,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw new Error(error.message);
-  const newId = inserted?.id as string;
+  const newId = await ExecutorsSelector.insertReturningId(supabase, {
+    user_id: user.id,
+    exchange_id,
+    name,
+    enabled,
+    execution_mode,
+    asset_filter_mode,
+    filter_asset_ids: filterIdsFinal,
+    allowed_sides,
+    updated_at: new Date().toISOString(),
+    slack_trade_notifications_enabled,
+    exchange_api_key,
+    exchange_api_secret,
+    historical_start_date,
+    historical_end_date,
+    ...rails,
+  });
   await ensureRiskStateForExecutor(supabase, { userId: user.id, executorId: newId });
   await replaceQuoteAssetBudgets(supabase, newId, quoteBudgets);
   revalidatePath("/executors");
@@ -442,21 +430,16 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
   const slack_trade_notifications_enabled =
     execution_mode === "historical" ? false : formData.has("slack_trade_notifications_enabled");
 
-  const { data: curRow, error: curErr } = await supabase
-    .schema("trading")
-    .from("executors")
-    .select("exchange_api_key, exchange_api_secret")
-    .eq("id", executorId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (curErr) throw new Error(curErr.message);
+  const curRow = await ExecutorsSelector.selectApiCredentialsByIdAndUser(supabase, {
+    id: executorId,
+    userId: user.id,
+  });
   if (!curRow) throw new Error("Executor not found.");
 
   const formKey = String(formData.get("exchange_api_key") ?? "").trim();
   const formSecret = String(formData.get("exchange_api_secret") ?? "").trim();
-  const exchange_api_key = formKey || String((curRow as { exchange_api_key?: string }).exchange_api_key ?? "");
-  const exchange_api_secret =
-    formSecret || String((curRow as { exchange_api_secret?: string }).exchange_api_secret ?? "");
+  const exchange_api_key = formKey || String(curRow.exchange_api_key ?? "");
+  const exchange_api_secret = formSecret || String(curRow.exchange_api_secret ?? "");
 
   if (execution_mode === "live") {
     if (!String(exchange_api_key).trim() || !String(exchange_api_secret).trim()) {
@@ -466,10 +449,10 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
     }
   }
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executors")
-    .update({
+  await ExecutorsSelector.updateByIdAndUser(supabase, {
+    id: executorId,
+    userId: user.id,
+    patch: {
       name,
       exchange_id,
       enabled,
@@ -484,11 +467,8 @@ export async function updateExecutor(executorId: string, formData: FormData): Pr
       historical_start_date,
       historical_end_date,
       ...rails,
-    })
-    .eq("id", executorId)
-    .eq("user_id", user.id);
-
-  if (error) throw new Error(error.message);
+    },
+  });
   await replaceQuoteAssetBudgets(supabase, executorId, quoteBudgets);
   revalidateExecutorSurface(executorId);
 }
@@ -527,14 +507,11 @@ export async function createExecutorQuoteBudget(
     formData.get("max_notional_primary"),
   );
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .insert({
-      executor_id: executorId,
-      quote_asset_id,
-      max_notional_primary,
-    });
+  const error = await ExecutorQuoteAssetBudgetSelector.insertOne(supabase, {
+    executor_id: executorId,
+    quote_asset_id,
+    max_notional_primary,
+  });
 
   if (error) {
     if (error.code === "23505") {
@@ -564,12 +541,11 @@ export async function updateExecutorQuoteBudget(
     formData.get("max_notional_primary"),
   );
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .update({ quote_asset_id, max_notional_primary })
-    .eq("id", budgetId)
-    .eq("executor_id", executorId);
+  const error = await ExecutorQuoteAssetBudgetSelector.updateByIdAndExecutor(supabase, {
+    id: budgetId,
+    executorId,
+    patch: { quote_asset_id, max_notional_primary },
+  });
 
   if (error) {
     if (error.code === "23505") {
@@ -592,14 +568,10 @@ export async function deleteExecutorQuoteBudget(
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .delete()
-    .eq("id", budgetId)
-    .eq("executor_id", executorId);
-
-  if (error) throw new Error(error.message);
+  await ExecutorQuoteAssetBudgetSelector.deleteByIdAndExecutor(supabase, {
+    id: budgetId,
+    executorId,
+  });
 
   revalidateQuoteBudgetSurface(executorId);
 }

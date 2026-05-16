@@ -9,6 +9,8 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { runExecutorCatalogCloseDrain } from "@/lib/agents/executor/services/catalog-close-executor-run.service";
 import { runMediatorCatalogCloseDrain } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-run.service";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExecutorHistoricalRunsSelector from "@/lib/selectors/executor-historical-runs-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 import { fetchEnabledSignalAgents } from "@/lib/agents/signal/services/enabled-signal-agents-fetch.service";
 import { replaySignalsForBars } from "@/lib/agents/signal/services/replay-signals-for-bars.service";
@@ -37,29 +39,11 @@ export async function runHistoricalExecutorReplay(
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
   const quote = "EUR";
 
-  const { data: exRow, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, historical_start_date, historical_end_date",
-    )
-    .eq("id", args.executorId)
-    .eq("user_id", args.userId)
-    .maybeSingle();
-  if (exErr) throw new Error(exErr.message);
-  if (!exRow) throw new Error("Executor not found.");
-  const ex = exRow as {
-    id: string;
-    user_id: string;
-    exchange_id: string;
-    name: string;
-    enabled: boolean;
-    execution_mode: string;
-    asset_filter_mode: string;
-    filter_asset_ids: string[] | null;
-    historical_start_date?: string | null;
-    historical_end_date?: string | null;
-  };
+  const ex = await ExecutorsSelector.selectHistoricalReplayByIdAndUser(admin, {
+    id: args.executorId,
+    userId: args.userId,
+  });
+  if (!ex) throw new Error("Executor not found.");
   if (ex.execution_mode !== "historical") {
     throw new Error("Executor is not in historical mode.");
   }
@@ -124,21 +108,14 @@ export async function runHistoricalExecutorReplay(
   const enabledAgentSlugs = enabledAgents.map((a) => a.slug);
   const warmupBars = computeWarmupBars(timeframe, enabledAgents);
 
-  const { data: runIns, error: runInsErr } = await admin
-    .schema("trading")
-    .from("executor_historical_runs")
-    .insert({
-      executor_id: args.executorId,
-      user_id: args.userId,
-      status: "running",
-      bars_total: win.barCount,
-      bars_done: 0,
-      metadata: { marketId, marketSymbol, timeframe, warmupBars, enabledAgentSlugs },
-    })
-    .select("id")
-    .single();
-  if (runInsErr) throw new Error(runInsErr.message);
-  const runId = runIns?.id as string;
+  const runId = await ExecutorHistoricalRunsSelector.insertRunningReturningId(admin, {
+    executor_id: args.executorId,
+    user_id: args.userId,
+    status: "running",
+    bars_total: win.barCount,
+    bars_done: 0,
+    metadata: { marketId, marketSymbol, timeframe, warmupBars, enabledAgentSlugs },
+  });
 
   try {
     const ingest = await ingestHistoricalCandles(admin, {
@@ -204,49 +181,43 @@ export async function runHistoricalExecutorReplay(
         ordersInsertedTotal += exo.ordersInserted;
 
         if (barsDone % 25 === 0 || barsDone === barsTotal) {
-          await admin
-            .schema("trading")
-            .from("executor_historical_runs")
-            .update({ bars_done: barsDone })
-            .eq("id", runId);
+          await ExecutorHistoricalRunsSelector.updateBarsDoneById(admin, {
+            id: runId,
+            barsDone,
+          });
         }
       },
     });
 
-    await admin
-      .schema("trading")
-      .from("executor_historical_runs")
-      .update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-        bars_done: barsReplayed,
-        metadata: {
-          marketId,
-          marketSymbol,
-          timeframe,
-          candleRowsUpserted: ingest.candleRowsUpserted,
-          barsReplayed,
-          warmupBars,
-          enabledAgentSlugs,
-          // Ingest cache: when `true`, the Bitvavo HTTP fetch was skipped because
-          // every bar in the warmup+replay window was already in `catalog.candles`.
-          ingestCached: ingest.cached,
-          ingestCandlesAlreadyInDb: ingest.candlesAlreadyInDb,
-          ingestBarCount: ingest.ingestBarCount,
-          // Signal reuse: bars whose `(agent, candle)` coverage was already fully /
-          // partially populated for the automation user, so the Signal Agent eval
-          // was skipped or restricted to the missing agents only.
-          barsReusedFromExistingSignals,
-          barsPartiallyReused,
-          // Ingest coverage + soft warnings so the user can see "we forward-
-          // filled 4321 synthetic bars because Bitvavo had no trades there"
-          // without re-running anything. Surfaces sparse-market issues
-          // (e.g. GIGA-EUR) without aborting the run.
-          ingestCoverage: loaded.coverage,
-          ingestWarnings: loaded.warnings,
-        },
-      })
-      .eq("id", runId);
+    await ExecutorHistoricalRunsSelector.updateCompletedById(admin, {
+      id: runId,
+      barsDone: barsReplayed,
+      metadata: {
+        marketId,
+        marketSymbol,
+        timeframe,
+        candleRowsUpserted: ingest.candleRowsUpserted,
+        barsReplayed,
+        warmupBars,
+        enabledAgentSlugs,
+        // Ingest cache: when `true`, the Bitvavo HTTP fetch was skipped because
+        // every bar in the warmup+replay window was already in `catalog.candles`.
+        ingestCached: ingest.cached,
+        ingestCandlesAlreadyInDb: ingest.candlesAlreadyInDb,
+        ingestBarCount: ingest.ingestBarCount,
+        // Signal reuse: bars whose `(agent, candle)` coverage was already fully /
+        // partially populated for the automation user, so the Signal Agent eval
+        // was skipped or restricted to the missing agents only.
+        barsReusedFromExistingSignals,
+        barsPartiallyReused,
+        // Ingest coverage + soft warnings so the user can see "we forward-
+        // filled 4321 synthetic bars because Bitvavo had no trades there"
+        // without re-running anything. Surfaces sparse-market issues
+        // (e.g. GIGA-EUR) without aborting the run.
+        ingestCoverage: loaded.coverage,
+        ingestWarnings: loaded.warnings,
+      },
+    });
 
     return {
       ok: true,
@@ -259,15 +230,10 @@ export async function runHistoricalExecutorReplay(
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await admin
-      .schema("trading")
-      .from("executor_historical_runs")
-      .update({
-        status: "failed",
-        completed_at: new Date().toISOString(),
-        error: msg,
-      })
-      .eq("id", runId);
+    await ExecutorHistoricalRunsSelector.updateFailedById(admin, {
+      id: runId,
+      error: msg,
+    });
     throw e;
   }
 }

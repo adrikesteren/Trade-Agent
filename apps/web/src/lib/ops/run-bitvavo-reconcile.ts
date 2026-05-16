@@ -18,6 +18,12 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { fetchMarketAssetIds } from "@/lib/agents/executor/services/executors-lookup.service";
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/agents/executor/services/executor-wallet.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 
 function batchSize(): number {
   const n = Number(process.env.BITVAVO_RECONCILE_BATCH ?? 40);
@@ -95,15 +101,11 @@ async function upsertPositionAfterBuy(
     price: number;
   },
 ): Promise<void> {
-  const { data: pos, error: selErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("id, quantity, avg_price")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
+  const pos = await PositionsSelector.selectIdQtyAvgByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   const existingQty = Number(pos?.quantity ?? 0);
   const existingAvg = pos?.avg_price != null ? Number(pos.avg_price) : null;
@@ -124,10 +126,12 @@ async function upsertPositionAfterBuy(
     updated_at: new Date().toISOString(),
   };
 
-  const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
-    onConflict: "user_id,executor_id,market_id",
-  });
-  if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
+  try {
+    await PositionsSelector.upsertOneByTrio(admin, row);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`positions upsert: ${msg}`);
+  }
 }
 
 export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> {
@@ -139,21 +143,9 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   const admin = createServiceRoleClient();
   const lim = batchSize();
 
-  const { data: ordRows, error: ordErr } = await admin
-    .schema("trading")
-    .from("orders")
-    .select(
-      "id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( signals ( candle_id ) )",
-    )
-    .eq("paper", false)
-    .in("status", ["pending", "open"])
-    .not("external_id", "is", null)
-    .order("created_at", { ascending: true })
-    .limit(lim);
+  const ordRows = await OrdersSelector.selectLiveOpenForReconcile(admin, { limit: lim });
 
-  if (ordErr) throw new Error(ordErr.message);
-
-  const ordersRaw = (ordRows ?? []) as OrderRowDb[];
+  const ordersRaw = ordRows as OrderRowDb[];
   const candleIds = ordersRaw
     .map((r) => {
       const td = unwrapOne(r.decisions);
@@ -168,82 +160,59 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   }
 
   const execIds = [...new Set(orders.map((o) => o.executor_id))];
-  const { data: execRows, error: exErr } = await admin
-    .schema("trading")
-    .from("executors")
-    .select(
-      "id, name, exchange_id, execution_mode, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret",
-    )
-    .in("id", execIds);
-  if (exErr) throw new Error(exErr.message);
+  const execRows = await ExecutorsSelector.selectReconcileByIds(admin, execIds);
 
   const bitvavoCredsByExecutor = new Map<string, BitvavoExchangeCredentials>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const creds = bitvavoCredentialsFromExchangeApiFields(
-      (e as { exchange_api_key?: string }).exchange_api_key,
-      (e as { exchange_api_secret?: string }).exchange_api_secret,
-    );
+  for (const e of execRows) {
+    const id = e.id;
+    const creds = bitvavoCredentialsFromExchangeApiFields(e.exchange_api_key, e.exchange_api_secret);
     if (creds) bitvavoCredsByExecutor.set(id, creds);
   }
 
   const slackTradeNotifyByExecutor = new Map<string, boolean>();
   const executorNameById = new Map<string, string>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const raw = (e as { slack_trade_notifications_enabled?: boolean | null }).slack_trade_notifications_enabled;
-    slackTradeNotifyByExecutor.set(id, raw !== false);
-    const nm = String((e as { name?: string | null }).name ?? "").trim();
+  for (const e of execRows) {
+    const id = e.id;
+    slackTradeNotifyByExecutor.set(id, e.slack_trade_notifications_enabled !== false);
+    const nm = String(e.name ?? "").trim();
     executorNameById.set(id, nm || "—");
   }
 
   const catalogExchangeIds = [
     ...new Set(
-      (execRows ?? [])
-        .map((e) => String((e as { exchange_id?: string | null }).exchange_id ?? "").trim())
+      execRows
+        .map((e) => String(e.exchange_id ?? "").trim())
         .filter(Boolean),
     ),
   ];
   const exchangeNameByCatalogId = new Map<string, string>();
   if (catalogExchangeIds.length) {
-    const { data: cexRows, error: cexErr } = await admin
-      .schema("catalog")
-      .from("exchanges")
-      .select("id, name, code")
-      .in("id", catalogExchangeIds);
-    if (cexErr) throw new Error(cexErr.message);
-    for (const row of cexRows ?? []) {
-      const rid = row.id as string;
-      const nm = String((row as { name?: string | null }).name ?? "").trim();
-      const code = String((row as { code?: string | null }).code ?? "").trim();
+    const cexRows = await ExchangesSelector.selectByIds(admin, catalogExchangeIds);
+    for (const row of cexRows) {
+      const rid = row.id;
+      const nm = String(row.name ?? "").trim();
+      const code = String(row.code ?? "").trim();
       exchangeNameByCatalogId.set(rid, nm || code || rid);
     }
   }
   const slackExchangeNameByExecutorId = new Map<string, string>();
-  for (const e of execRows ?? []) {
-    const id = e.id as string;
-    const xid = String((e as { exchange_id?: string | null }).exchange_id ?? "").trim();
+  for (const e of execRows) {
+    const id = e.id;
+    const xid = String(e.exchange_id ?? "").trim();
     slackExchangeNameByExecutorId.set(id, xid ? (exchangeNameByCatalogId.get(xid) ?? xid) : "—");
   }
 
   const liveExecutor = new Set(
-    (execRows ?? [])
-      .filter((e) => String(e.execution_mode) === "live")
-      .map((e) => e.id as string),
+    execRows.filter((e) => String(e.execution_mode) === "live").map((e) => e.id),
   );
 
   const liveOrders = orders.filter((o) => liveExecutor.has(o.executor_id));
   const marketIds = [...new Set(liveOrders.map((o) => o.market_id))];
   const symByMarket = new Map<string, string>();
   if (marketIds.length) {
-    const { data: mkts, error: mErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol")
-      .in("id", marketIds);
-    if (mErr) throw new Error(mErr.message);
-    for (const m of mkts ?? []) {
-      symByMarket.set(m.id as string, String(m.market_symbol ?? "").trim());
+    const mkts = await MarketsSelector.selectIdAndSymbolByIds(admin, marketIds);
+    for (const m of mkts) {
+      symByMarket.set(m.id, String(m.market_symbol ?? "").trim());
     }
   }
 
@@ -305,23 +274,21 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
         qtyUpdate = snap.filledAmount;
       }
 
-      const { data: existingFill } = await admin
-        .schema("trading")
-        .from("fills")
-        .select("id")
-        .eq("order_id", o.id)
-        .maybeSingle();
+      const existingFill = await FillsSelector.selectIdByOrderId(admin, o.id);
 
       if (dbStatus === "filled" && !existingFill) {
         if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
-          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: o.user_id,
-            order_id: o.id,
-            price: fillPrice,
-            quantity: fillQty,
-            fee: Number.isFinite(fillFee) ? fillFee : 0,
-          });
-          if (fillErr) throw new Error(fillErr.message);
+          try {
+            await FillsSelector.insertOne(admin, {
+              user_id: o.user_id,
+              order_id: o.id,
+              price: fillPrice,
+              quantity: fillQty,
+              fee: Number.isFinite(fillFee) ? fillFee : 0,
+            });
+          } catch (e) {
+            throw new Error(e instanceof Error ? e.message : String(e));
+          }
           fillsInserted += 1;
           await upsertPositionAfterBuy(admin, {
             userId: o.user_id,
@@ -365,16 +332,14 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
       const statusChanged = String(o.status) !== dbStatus;
       const qtyChanged = qtyUpdate !== prevQty;
       if (statusChanged || qtyChanged) {
-        const { error: upOrd } = await admin
-          .schema("trading")
-          .from("orders")
-          .update({
+        await OrdersSelector.updateById(admin, {
+          id: o.id,
+          patch: {
             status: dbStatus,
             quantity: qtyUpdate,
             updated_at: new Date().toISOString(),
-          })
-          .eq("id", o.id);
-        if (upOrd) throw new Error(upOrd.message);
+          },
+        });
         updated += 1;
       }
     } catch (e) {

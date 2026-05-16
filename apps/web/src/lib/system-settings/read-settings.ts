@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as SystemSettingsSelector from "@/lib/selectors/system-settings-selector";
 import {
   getNumericSystemSettingDef,
   type SystemSettingNumericKey,
@@ -48,15 +49,15 @@ export async function getNumericSystemSetting(
     throw new Error(`Unknown system setting key: ${key}`);
   }
 
-  const { data, error } = await admin.from("system_settings").select("value").eq("key", key).maybeSingle();
-
-  if (error) {
-    console.warn("[public.system_settings] read failed", key, error.message);
-  } else {
-    const parsed = parseStoredNumeric(data?.value);
+  try {
+    const row = await SystemSettingsSelector.selectValueByKey(admin, key);
+    const parsed = parseStoredNumeric(row?.value);
     if (parsed != null) {
       return clampToDef(parsed, def);
     }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[public.system_settings] read failed", key, msg);
   }
 
   const envN = fromEnv(def);

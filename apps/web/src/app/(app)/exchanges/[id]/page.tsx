@@ -1,9 +1,11 @@
+import { ExchangeClosePipelineButton } from "@/app/(app)/exchanges/[id]/exchange-close-pipeline-button";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -13,7 +15,7 @@ import {
   RecordPageGrid,
   RecordPageSection,
   RecordRelatedList,
-} from "@repo/adricore/blocks";
+} from "@adrikesteren/adricore/blocks";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -25,14 +27,9 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const { data: ex, error } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code, name, created_at")
-    .eq("id", id)
-    .maybeSingle();
+  const ex = await ExchangesSelector.selectFullById(supabase, id);
 
-  if (error || !ex) {
+  if (!ex) {
     notFound();
   }
 
@@ -58,6 +55,11 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
             <Output label="Code" type="text" value={ex.code} />
             <Output label="Markets" type="text" value={countLabel} />
           </>
+        ),
+        actions: (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ExchangeClosePipelineButton exchangeId={id} />
+          </div>
         ),
       })}
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="exchanges" relatedId={id} />}

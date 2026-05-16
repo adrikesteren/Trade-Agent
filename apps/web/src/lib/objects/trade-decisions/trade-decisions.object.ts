@@ -1,4 +1,4 @@
-import { iconRegistry } from "../icons";
+﻿import { iconRegistry } from "../icons";
 import {
   ObjectMetadata,
   ObjectLabelMetadata,
@@ -6,7 +6,7 @@ import {
   ObjectRelationshipReferenceTypes,
   ObjectFieldDataTypes,
   ObjectFieldMetadata,
-} from "@repo/adricore/metadata";
+} from "@adrikesteren/adricore/metadata";
 import { objectRegistry } from "../registry";
 
 /**
