@@ -166,6 +166,32 @@ export async function selectByExchangeAssetQuote(
   return (data ?? []) as MarketIdAndSymbolRow[];
 }
 
+/** Row returned by {@link selectIdSymbolStatusByExchangeAndQuote} (exchange-wide close pipeline). */
+export type MarketIdSymbolStatusRow = {
+  id: string;
+  market_symbol: string | null;
+  status: MarketStatus;
+};
+
+/**
+ * `select("id, market_symbol, status") .eq("exchange_id", x) .eq("quote_asset_id", y)` —
+ * exchange-wide market-id resolver for the new `ExchangeCloseCandlePipelineService`.
+ * Returns every market on the exchange/quote pair so the caller can filter by status.
+ */
+export async function selectIdSymbolStatusByExchangeAndQuote(
+  client: SupabaseClient,
+  args: { exchangeId: string; quoteAssetId: string },
+): Promise<MarketIdSymbolStatusRow[]> {
+  const { data, error } = await client
+    .schema("catalog")
+    .from("markets")
+    .select("id, market_symbol, status")
+    .eq("exchange_id", args.exchangeId)
+    .eq("quote_asset_id", args.quoteAssetId);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as MarketIdSymbolStatusRow[];
+}
+
 /** `select(asset_id, market_symbol, assets!fkey (coingecko_market_cap_usd)) .eq("exchange_id", x) .eq("quote_asset_id", y)` — exchange-close pipeline asset ranking. */
 export async function selectAssetIdSymbolWithMcapByExchangeAndQuote(
   client: SupabaseClient,
