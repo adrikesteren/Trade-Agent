@@ -31,6 +31,9 @@ function parseGateNumber(raw: unknown): number | null {
 
 /**
  * Upserts `trading.signals` for one catalog close using preloaded ascending bars (same agents as catalog-close).
+ *
+ * When `agentIdFilter` is given, only agents whose row id is in that set are evaluated — used by the
+ * "Backfill Signals" wrapper to skip agents that already produced a signal for the bar.
  */
 export async function upsertSignalsForMarketCloseFromBars(
   admin: SupabaseClient,
@@ -43,6 +46,8 @@ export async function upsertSignalsForMarketCloseFromBars(
     signalUserIds: string[];
     candleSyncRunId?: string | null;
     signalsSyncRunId?: string | null;
+    /** Restrict evaluation to these `signal_agents.id` rows (default: all active agents that match the timeframe). */
+    agentIdFilter?: string[];
   },
 ): Promise<number> {
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, body.signalUserIds);
@@ -63,7 +68,9 @@ export async function upsertSignalsForMarketCloseFromBars(
     allowed_timeframes: string[] | null;
   }[];
 
+  const filterSet = body.agentIdFilter && body.agentIdFilter.length > 0 ? new Set(body.agentIdFilter) : null;
   const activeAgents = agents.filter((a) => {
+    if (filterSet && !filterSet.has(a.id)) return false;
     const tf = a.allowed_timeframes;
     if (!tf || tf.length === 0) return true;
     return tf.includes(body.timeframe);

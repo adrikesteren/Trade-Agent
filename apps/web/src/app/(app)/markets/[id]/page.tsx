@@ -1,5 +1,5 @@
 import { MarketBackfillCandlesDialog } from "@/app/(app)/markets/[id]/market-backfill-candles-dialog";
-import { MarketHeaderSyncButton } from "@/app/(app)/markets/[id]/market-header-sync-button";
+import { MarketBackfillSignalsButton } from "@/app/(app)/markets/[id]/market-backfill-signals-button";
 import { MarketCandleChart } from "@/components/market-candle-chart";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
@@ -284,7 +284,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
         actions: (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <MarketBackfillCandlesDialog marketId={id} marketSymbol={market.market_symbol} />
-            <MarketHeaderSyncButton marketId={id} />
+            <MarketBackfillSignalsButton marketId={id} />
           </div>
         ),
       })}

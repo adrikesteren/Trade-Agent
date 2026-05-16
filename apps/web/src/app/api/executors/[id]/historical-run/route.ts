@@ -8,10 +8,10 @@ import {
   buildHistoricalExecutorReplayWorkerUrl,
   downstreamWorkerHeaders,
   isRelayWorkerEnqueueConfigured,
-  normalizeRelayBaseUrl,
-  postRelaySingleMessage,
+  makeRelayClient,
   RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S,
   relayMaxRetries,
+  toRelayOriginAndPath,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -34,17 +34,18 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
       if (!row || row.user_id !== user.id) {
         return NextResponse.json({ ok: false, error: "Executor not found." }, { status: 404 });
       }
-      const relayBase = normalizeRelayBaseUrl();
+      const relay = makeRelayClient();
       const appBase = getAppBaseUrl();
-      const url = buildHistoricalExecutorReplayWorkerUrl(appBase, executorId);
-      const relayMessageId = await postRelaySingleMessage(
-        relayBase,
-        url,
-        await downstreamWorkerHeaders(),
-        relayMaxRetries(),
-        { timeoutSec: RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S },
-      );
-      return NextResponse.json({ ok: true, queued: true, relayMessageId });
+      const { origin, path } = toRelayOriginAndPath(buildHistoricalExecutorReplayWorkerUrl(appBase, executorId));
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers: await downstreamWorkerHeaders(),
+        maxRetries: relayMaxRetries(),
+        timeout: RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S,
+      });
+      return NextResponse.json({ ok: true, queued: true, relayMessageId: message.id });
     }
 
     const admin = createServiceRoleClient();

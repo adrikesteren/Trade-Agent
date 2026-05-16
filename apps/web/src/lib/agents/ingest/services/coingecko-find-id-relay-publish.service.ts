@@ -6,11 +6,13 @@ import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import {
   buildFindCoingeckoIdWorkerUrl,
   downstreamWorkerHeaders,
-  normalizeRelayBaseUrl,
-  postRelayMessageGroup,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
+  toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+
+import type { RelayClient } from "@adrikesteren/relay-client";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 
 import { listCryptoAssetsNeedingCoinIdSearch } from "@/lib/agents/ingest/services/coingecko-coin-id-sync.service";
@@ -74,12 +76,12 @@ export async function publishCoingeckoFindIdRelayJobs(
     return { ok: true, published: 0, distinctAssetCodes: [], failures: [] };
   }
 
-  let relayBase: string;
+  let relay: RelayClient;
   let appBase: string;
   let workerHeaders: Record<string, string>;
   let maxRetries: number;
   try {
-    relayBase = normalizeRelayBaseUrl();
+    relay = makeRelayClient();
     appBase = getAppBaseUrl();
     workerHeaders = await downstreamWorkerHeaders();
     maxRetries = relayMaxRetries();
@@ -100,12 +102,26 @@ export async function publishCoingeckoFindIdRelayJobs(
 
   try {
     if (urls.length === 1) {
-      const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
-      relayMessageIds.push(id);
+      const { origin, path } = toRelayOriginAndPath(urls[0]!);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageIds.push(message.id);
     } else {
-      const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
-      relayMessageGroupIds.push(groupId);
-      relayMessageIds.push(...messageIds);
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group, messages } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageGroupIds.push(message_group.id);
+      relayMessageIds.push(...messages.map((m) => m.id));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

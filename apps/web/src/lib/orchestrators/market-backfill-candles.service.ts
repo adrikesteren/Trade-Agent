@@ -3,12 +3,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
-import { getCatalogPipelineUserIds } from "@/lib/agents/signal/services/signal-user-ids.service";
-import { replaySignalsForBars } from "@/lib/agents/signal/services/replay-signals-for-bars.service";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
 
 import { ingestHistoricalCandles } from "@/lib/agents/ingest/services/historical-candles-ingest.service";
-import { loadHistoricalCandlesForReplay } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -38,19 +35,13 @@ export type RunMarketBackfillCandlesResult = {
   endDate: string;
   /** Candle rows upserted into `catalog.candles` by the Ingest Agent. */
   candleRowsUpserted: number;
-  /** Total bars the Signal Agent visited inside the replay window. */
-  barsReplayed: number;
-  /** Total `trading.signals` rows upserted by the Signal Agent across all bars. */
-  signalsUpsertedTotal: number;
 };
 
 /**
- * "Backfill candles" runner — Ingest Agent then Signal Agent for one market over a [start, end] UTC window.
+ * "Backfill candles" runner — Ingest Agent only for one market over a [start, end] UTC window.
  *
  * 1. Validates the market is a Bitvavo market with a non-empty quote asset code.
  * 2. {@link ingestHistoricalCandles} pulls the OHLCV history from Bitvavo into `catalog.candles` (1440-bar batches).
- * 3. {@link loadHistoricalCandlesForReplay} loads warmup + window bars and asserts coverage.
- * 4. {@link replaySignalsForBars} upserts `trading.signals` for every closed bar (no mediator/executor side-effects).
  */
 export async function runMarketBackfillCandles(
   admin: SupabaseClient,
@@ -118,29 +109,6 @@ export async function runMarketBackfillCandles(
     historicalEndDate: endDate,
   });
 
-  const signalUserIds = await getCatalogPipelineUserIds(admin);
-  if (signalUserIds.length === 0) {
-    throw new Error(
-      "Backfill candles requires the automated_process user (automation_actor or user_profiles.username = automated_process).",
-    );
-  }
-
-  const loaded = await loadHistoricalCandlesForReplay(admin, {
-    marketId,
-    timeframe,
-    historicalStartDate: startDate,
-    historicalEndDate: endDate,
-  });
-
-  const { barsReplayed, signalsUpsertedTotal } = await replaySignalsForBars(admin, {
-    marketId,
-    marketSymbol,
-    timeframe,
-    sortedAll: loaded.sortedAll,
-    replayCloses: loaded.replayCloses,
-    signalUserIds,
-  });
-
   return {
     ok: true,
     marketId,
@@ -149,7 +117,5 @@ export async function runMarketBackfillCandles(
     startDate,
     endDate,
     candleRowsUpserted: ingest.candleRowsUpserted,
-    barsReplayed,
-    signalsUpsertedTotal,
   };
 }

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@adrikesteren/adricore": "^0.1.0",
+    "@adrikesteren/relay-client": "^0.1.0",
     "@repo/exchange": "workspace:*",
     "@repo/risk": "workspace:*",
     "@repo/trading": "workspace:*",

@@ -32,7 +32,7 @@ type Props = {
 /**
  * Header action: opens a popup with a `startDate` (required) + `endDate` (optional, defaults to today UTC)
  * form. On Run we enqueue the {@link enqueueMarketBackfillCandlesViaRelay} job on the Relay App with a
- * 30-minute timeout, then close the dialog.
+ * 15-minute timeout, then close the dialog.
  */
 export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
   const uid = useId();
@@ -76,8 +76,8 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
             Backfill candles{marketSymbol ? ` — ${marketSymbol}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Ingest Bitvavo OHLCV history into the catalog and run the Signal Agent for every closed bar in the
-            range. Dates are inclusive UTC. Leave the end date empty to use today.
+            Ingest Bitvavo OHLCV history into the catalog. Dates are inclusive UTC. Leave the end date empty to
+            use today.
           </DialogDescription>
 
           {error ? <Alert tone="error">{error}</Alert> : null}

@@ -9,11 +9,13 @@ import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-re
 import {
   buildSymbolClosePipelineUrl,
   downstreamWorkerHeaders,
-  normalizeRelayBaseUrl,
-  postRelayMessageGroup,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
+  toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+
+import type { RelayClient } from "@adrikesteren/relay-client";
 
 export type RunExchangeClosePipelineOptions = {
   exchangeCode: string;
@@ -249,12 +251,12 @@ export async function runExchangeClosePipeline(
     };
   }
 
-  let relayBase: string;
+  let relay: RelayClient;
   let appBase: string;
   let workerHeaders: Record<string, string>;
   let maxRetries: number;
   try {
-    relayBase = normalizeRelayBaseUrl();
+    relay = makeRelayClient();
     appBase = getAppBaseUrl();
     workerHeaders = await downstreamWorkerHeaders();
     maxRetries = relayMaxRetries();
@@ -281,12 +283,26 @@ export async function runExchangeClosePipeline(
 
   try {
     if (urls.length === 1) {
-      const id = await postRelaySingleMessage(relayBase, urls[0]!, workerHeaders, maxRetries);
-      relayMessageIds.push(id);
+      const { origin, path } = toRelayOriginAndPath(urls[0]!);
+      const { message } = await relay.messages.enqueue({
+        origin,
+        path,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageIds.push(message.id);
     } else {
-      const { groupId, messageIds } = await postRelayMessageGroup(relayBase, urls, workerHeaders, maxRetries);
-      relayMessageGroupIds.push(groupId);
-      relayMessageIds.push(...messageIds);
+      const { origin, paths } = toRelayOriginAndPaths(urls);
+      const { message_group, messages } = await relay.messageGroups.create({
+        origin,
+        paths,
+        method: "POST",
+        headers: workerHeaders,
+        maxRetries,
+      });
+      relayMessageGroupIds.push(message_group.id);
+      relayMessageIds.push(...messages.map((m) => m.id));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

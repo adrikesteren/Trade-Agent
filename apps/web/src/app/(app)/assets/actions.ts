@@ -7,9 +7,9 @@ import {
   buildFindCoingeckoIdWorkerUrl,
   downstreamWorkerHeaders,
   isRelayWorkerEnqueueConfigured,
-  normalizeRelayBaseUrl,
-  postRelaySingleMessage,
+  makeRelayClient,
   relayMaxRetries,
+  toRelayOriginAndPath,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -148,16 +148,17 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
   }
 
   try {
-    const relayBase = normalizeRelayBaseUrl();
+    const relay = makeRelayClient();
     const appBase = getAppBaseUrl();
-    const url = buildFindCoingeckoIdWorkerUrl(appBase, String(row.code), "manual");
-    const relayMessageId = await postRelaySingleMessage(
-      relayBase,
-      url,
-      await downstreamWorkerHeaders(),
-      relayMaxRetries(),
-    );
-    return { ok: true, relayMessageId };
+    const { origin, path } = toRelayOriginAndPath(buildFindCoingeckoIdWorkerUrl(appBase, String(row.code), "manual"));
+    const { message } = await relay.messages.enqueue({
+      origin,
+      path,
+      method: "POST",
+      headers: await downstreamWorkerHeaders(),
+      maxRetries: relayMaxRetries(),
+    });
+    return { ok: true, relayMessageId: message.id };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
     return { ok: false, error: msg };

@@ -17,6 +17,9 @@ importers:
       '@adrikesteren/adricore':
         specifier: ^0.1.0
         version: 0.1.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@adrikesteren/relay-client':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@repo/exchange':
         specifier: workspace:*
         version: link:../../packages/exchange
@@ -111,6 +114,10 @@ packages:
     peerDependencies:
       react: '>=19'
       react-dom: '>=19'
+
+  '@adrikesteren/relay-client@0.1.0':
+    resolution: {integrity: sha512-XUIzuP/kXkxHgK3ZdOySdi+ccepKK2b1nPEVcDyyn6YHGmkZN0EPtfdHXWZKwZirNIlMExkgnj4zFDfN3UgsJA==, tarball: https://npm.pkg.github.com/download/@adrikesteren/relay-client/0.1.0/f26ca4e190442d68080da2d49000d0f4c1bac66d}
+    engines: {node: '>=18'}
 
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
@@ -3029,6 +3036,8 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
       - '@types/react-dom'
+
+  '@adrikesteren/relay-client@0.1.0': {}
 
   '@alloc/quick-lru@5.2.0': {}
 

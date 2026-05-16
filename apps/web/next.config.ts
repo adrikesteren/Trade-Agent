@@ -12,8 +12,8 @@ loadMonorepoDotenvOnce();
 
 /** Directory containing this `next.config` file (= `apps/web`). */
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
-/** Repo root: one level above `apps/web`. */
-const monorepoRoot = path.resolve(webRoot, "..");
+/** Monorepo root: two levels above `apps/web` (sits next to `pnpm-workspace.yaml`). */
+const monorepoRoot = path.resolve(webRoot, "..", "..");
 
 /** Read after `loadMonorepoDotenvOnce()` so repo-root `.env` is applied before `env` inlining. */
 const nextPublicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
