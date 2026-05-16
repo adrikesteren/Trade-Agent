@@ -1,3 +1,4 @@
+import { ExchangeClosePipelineButton } from "@/app/(app)/exchanges/[id]/exchange-close-pipeline-button";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
@@ -54,6 +55,11 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
             <Output label="Code" type="text" value={ex.code} />
             <Output label="Markets" type="text" value={countLabel} />
           </>
+        ),
+        actions: (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ExchangeClosePipelineButton exchangeId={id} />
+          </div>
         ),
       })}
       sidebar={<RecordTasksRelatedCard relatedSchema="catalog" relatedTable="exchanges" relatedId={id} />}

@@ -14,6 +14,10 @@ import { useId, useState, useTransition } from "react";
 
 import { enqueueMarketBackfillCandlesViaRelay } from "@/app/(app)/markets/[id]/actions";
 
+// TODO(v1-migration): this dialog already enqueues a chunked Relay group via the
+// `enqueueMarketBackfillCandlesViaRelay` server action. In a follow-up session this
+// can be swapped to POST `/api/v1/agents/ingest/retrieve-candles` (or its async
+// chunked equivalent) once that route is wired up end-to-end.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function todayUtcYmd(): string {
