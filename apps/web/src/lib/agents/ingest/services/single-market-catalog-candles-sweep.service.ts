@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /**
  * One full catalog-timeframe candle fetch for a single Bitvavo market (by `markets.id`).
@@ -23,15 +24,8 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
   if (mErr) throw new Error(mErr.message);
   if (!mrow) throw new Error("market not found");
 
-  const { data: exRow, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("code")
-    .eq("id", mrow.exchange_id as string)
-    .maybeSingle();
-
-  if (exErr) throw new Error(exErr.message);
-  const exCode = String(exRow?.code ?? "").toLowerCase();
+  const exCodeRaw = await ExchangesSelector.selectCodeById(supabase, mrow.exchange_id as string);
+  const exCode = String(exCodeRaw ?? "").toLowerCase();
   if (exCode !== "bitvavo") {
     return { candleRowsUpserted: 0, marketSymbol: String(mrow.market_symbol) };
   }

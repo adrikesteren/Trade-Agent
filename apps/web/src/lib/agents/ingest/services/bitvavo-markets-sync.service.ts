@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchBitvavoMarkets } from "@/lib/bitvavo/public/markets";
 import { fetchQuoteAssetIdsByCodes } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 
@@ -16,18 +17,7 @@ export async function syncBitvavoMarkets(
 ): Promise<{ upsertedAssets: number; upsertedListings: number; skippedMissingQuote: number }> {
   const markets = await fetchBitvavoMarkets();
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange row missing; apply migrations.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const filtered = markets.filter((m) => {
     if (m.status !== "trading") return false;
@@ -163,18 +153,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
 
   const markets = await fetchBitvavoMarkets();
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange row missing; apply migrations.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const filtered = markets.filter((m) => {
     if (m.status !== "trading") return false;

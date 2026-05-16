@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /** Bitvavo pairs use `BASE-QUOTE` (e.g. ETH-BTC, FUN-EUR). */
 export function parseMarketSymbol(marketSymbol: string): { base: string; quote: string } {
@@ -27,18 +28,7 @@ export async function ensureMarket(supabase: SupabaseClient, params: { exchangeC
   const market = params.marketSymbol.toUpperCase();
   const { base, quote } = parseMarketSymbol(market);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", params.exchangeCode)
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error(`Exchange not found: ${params.exchangeCode}. Run DB migration (seed).`);
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, params.exchangeCode);
 
   const { data: existing } = await supabase
     .schema("catalog")

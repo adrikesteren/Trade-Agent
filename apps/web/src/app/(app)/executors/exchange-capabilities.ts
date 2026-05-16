@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+
 import type { ExchangeCapabilities } from "./executor-form";
 
 /**
@@ -15,22 +17,15 @@ import type { ExchangeCapabilities } from "./executor-form";
 export async function fetchExchangeCapabilitiesById(
   supabase: SupabaseClient,
 ): Promise<Record<string, ExchangeCapabilities>> {
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, supports_spot_buy, supports_spot_sell, supports_margin_long, supports_margin_short");
-  if (error) {
-    console.error("exchange capabilities:", error.message);
+  let rows: Awaited<ReturnType<typeof ExchangesSelector.selectAllCapabilities>>;
+  try {
+    rows = await ExchangesSelector.selectAllCapabilities(supabase);
+  } catch (e) {
+    console.error("exchange capabilities:", e instanceof Error ? e.message : String(e));
     return {};
   }
   const out: Record<string, ExchangeCapabilities> = {};
-  for (const row of (data ?? []) as {
-    id: string;
-    supports_spot_buy: boolean | null;
-    supports_spot_sell: boolean | null;
-    supports_margin_long: boolean | null;
-    supports_margin_short: boolean | null;
-  }[]) {
+  for (const row of rows) {
     out[row.id] = {
       supports_spot_buy: Boolean(row.supports_spot_buy),
       supports_spot_sell: Boolean(row.supports_spot_sell),

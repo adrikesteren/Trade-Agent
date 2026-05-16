@@ -26,6 +26,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "./executors-lookup.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import {
   applyExecutorTradeSellCredit,
   applyExecutorTradeBuyDebit,
@@ -322,9 +323,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
@@ -466,16 +465,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   const catalogExchangeIds = [...new Set(executorRows.map((e) => e.exchange_id).filter(Boolean))];
   const exchangeNameByCatalogId = new Map<string, string>();
   if (catalogExchangeIds.length) {
-    const { data: cexRows, error: cexErr } = await admin
-      .schema("catalog")
-      .from("exchanges")
-      .select("id, name, code")
-      .in("id", catalogExchangeIds);
-    if (cexErr) throw new Error(cexErr.message);
-    for (const row of cexRows ?? []) {
-      const rid = row.id as string;
-      const nm = String((row as { name?: string | null }).name ?? "").trim();
-      const code = String((row as { code?: string | null }).code ?? "").trim();
+    const cexRows = await ExchangesSelector.selectByIds(admin, catalogExchangeIds);
+    for (const row of cexRows) {
+      const rid = row.id;
+      const nm = String(row.name ?? "").trim();
+      const code = String(row.code ?? "").trim();
       exchangeNameByCatalogId.set(rid, nm || code || rid);
     }
   }

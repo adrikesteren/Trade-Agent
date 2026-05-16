@@ -9,6 +9,7 @@ import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-
 import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
 import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Stack } from "@adrikesteren/adricore/blocks";
@@ -31,15 +32,17 @@ async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[
 }
 
 async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeOption[]> {
-  const { data, error } = await supabase.schema("catalog").from("exchanges").select("id, code, name").order("code");
-  if (error) {
-    console.error("exchange list:", error.message);
+  let data: Awaited<ReturnType<typeof ExchangesSelector.selectAllOrderedByCode>>;
+  try {
+    data = await ExchangesSelector.selectAllOrderedByCode(supabase);
+  } catch (e) {
+    console.error("exchange list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string; name: string }[]).map((e) => ({
+  return data.map((e) => ({
     id: e.id,
     code: e.code,
-    name: e.name,
+    name: e.name ?? "",
   }));
 }
 

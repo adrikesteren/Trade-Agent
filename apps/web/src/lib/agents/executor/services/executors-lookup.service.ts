@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { executorAllowsMarketAsset, type ExecutionMode, type ExecutorAssetFilterMode } from "./executor-rules.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type PositionSide = "long" | "short";
 
@@ -97,14 +98,7 @@ export async function fetchExecutorsForUsers(
 }
 
 export async function fetchExchangeIdByCode(admin: SupabaseClient, code: string): Promise<string> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", code)
-    .single();
-  if (error || !data?.id) throw new Error(`${code} exchange not found`);
-  return data.id as string;
+  return ExchangesSelector.selectIdByCode(admin, code);
 }
 
 /** No-op: wallets are created by DB trigger `executors_create_wallet` after executor insert. */

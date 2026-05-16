@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /** Escape `%`, `_`, and `\` for use as a literal in PostgREST `ilike` without wildcards. */
 export function escapeIlikeExactPattern(raw: string): string {
@@ -60,14 +61,7 @@ export async function resolvePrimaryMarketByCodes(
   const quoteCode = (args.quote ?? "EUR").trim().toUpperCase() || "EUR";
   const exPattern = escapeIlikeExactPattern(exchangeIn);
 
-  const { data: exRows, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code")
-    .ilike("code", exPattern);
-
-  if (exErr) throw new Error(exErr.message);
-  const exchanges = (exRows ?? []) as { id: string; code: string }[];
+  const exchanges = await ExchangesSelector.selectByCodeIlike(supabase, exPattern);
   if (exchanges.length === 0) {
     throw new ResolvePrimaryMarketError("unknown_exchange_code", `No exchange matches code: ${exchangeIn}`);
   }

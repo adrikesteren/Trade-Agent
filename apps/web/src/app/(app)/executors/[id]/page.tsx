@@ -9,6 +9,7 @@ import type { AssetOption, ExchangeOption, ExecutorQuoteBudgetInitial } from "@/
 import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-form-initial";
 import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
 import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { RecordPageTabs } from "@/components/record-page-tabs";
 import { RecordTasksRelatedCard } from "@/components/record-tasks-related-card";
 import {
@@ -61,15 +62,17 @@ async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[
 }
 
 async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeOption[]> {
-  const { data, error } = await supabase.schema("catalog").from("exchanges").select("id, code, name").order("code");
-  if (error) {
-    console.error("exchanges list:", error.message);
+  let data: Awaited<ReturnType<typeof ExchangesSelector.selectAllOrderedByCode>>;
+  try {
+    data = await ExchangesSelector.selectAllOrderedByCode(supabase);
+  } catch (e) {
+    console.error("exchanges list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string; name: string }[]).map((e) => ({
+  return data.map((e) => ({
     id: e.id,
     code: e.code,
-    name: e.name,
+    name: e.name ?? "",
   }));
 }
 

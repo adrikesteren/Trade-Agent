@@ -4,6 +4,7 @@ import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -25,14 +26,9 @@ export default async function ExchangeDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const { data: ex, error } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code, name, created_at")
-    .eq("id", id)
-    .maybeSingle();
+  const ex = await ExchangesSelector.selectFullById(supabase, id);
 
-  if (error || !ex) {
+  if (!ex) {
     notFound();
   }
 

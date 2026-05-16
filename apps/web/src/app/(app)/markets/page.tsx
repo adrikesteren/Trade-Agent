@@ -12,6 +12,7 @@ import {
 import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -56,12 +57,7 @@ export default async function MarketsIndexPage({ searchParams }: PageProps) {
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
 
-  const { data: exchange } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code, name")
-    .eq("code", "bitvavo")
-    .maybeSingle();
+  const exchange = await ExchangesSelector.selectByCode(supabase, "bitvavo");
 
   const { data: listings, error } = exchange
     ? await supabase

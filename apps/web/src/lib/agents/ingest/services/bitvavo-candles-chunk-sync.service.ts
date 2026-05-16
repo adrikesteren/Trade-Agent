@@ -4,6 +4,7 @@ import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-li
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/ingest/services/candle-retention.service";
 import { fetchAllCandleTimestampRowsForCandleWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type CandleSyncMode = "full" | "incremental" | "window";
 
@@ -116,18 +117,7 @@ export async function syncBitvavoCandlesChunk(
   supabase: SupabaseClient,
   opts: SyncCandlesChunkOptions,
 ): Promise<SyncCandlesChunkResult> {
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange not found. Run migrations and market sync first.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const quoteFilter =
     opts.quote != null && String(opts.quote).trim() !== "" ? String(opts.quote).trim().toUpperCase() : null;

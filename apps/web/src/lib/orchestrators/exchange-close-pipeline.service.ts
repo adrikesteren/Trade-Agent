@@ -14,6 +14,7 @@ import {
   toRelayOriginAndPath,
   toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 import type { RelayClient } from "@adrikesteren/relay-client";
 
@@ -120,13 +121,10 @@ export async function runExchangeClosePipeline(
 
   const exPattern = escapeIlikeExactPattern(exchangeIn);
 
-  const { data: exRows, error: exErr } = await admin
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code")
-    .ilike("code", exPattern);
-
-  if (exErr) {
+  let exchanges: { id: string; code: string }[];
+  try {
+    exchanges = await ExchangesSelector.selectByCodeIlike(admin, exPattern);
+  } catch (e) {
     return {
       ok: false,
       exchangeCode: exchangeIn,
@@ -134,11 +132,10 @@ export async function runExchangeClosePipeline(
       distinctAssetCodes: [],
       published: 0,
       failures: [],
-      error: exErr.message,
+      error: e instanceof Error ? e.message : String(e),
     };
   }
 
-  const exchanges = (exRows ?? []) as { id: string; code: string }[];
   if (exchanges.length === 0) {
     return {
       ok: false,

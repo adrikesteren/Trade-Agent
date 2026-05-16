@@ -8,6 +8,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -30,23 +31,24 @@ export default async function ExchangesIndexPage({ searchParams }: PageProps) {
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  const { count: totalRaw, error: countError } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("*", { count: "exact", head: true });
-  const totalCount = totalRaw ?? 0;
+  let totalCount = 0;
+  let countError: Error | null = null;
+  try {
+    totalCount = await ExchangesSelector.countAll(supabase);
+  } catch (e) {
+    countError = e instanceof Error ? e : new Error(String(e));
+  }
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: rows, error } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id, code, name")
-    .order("code", { ascending: true })
-    .range(from, to);
-
-  const list = rows ?? [];
+  let list: { id: string; code: string; name: string | null }[] = [];
+  let error: Error | null = null;
+  try {
+    list = await ExchangesSelector.selectAllPaginatedOrderedByCode(supabase, { from, to });
+  } catch (e) {
+    error = e instanceof Error ? e : new Error(String(e));
+  }
   const sortLineParts = [
     `${totalCount} total`,
     `Page ${page} of ${pages}`,

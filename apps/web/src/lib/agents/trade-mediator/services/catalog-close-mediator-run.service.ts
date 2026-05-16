@@ -24,6 +24,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type MediatorCatalogCloseBody = {
   closeTimeIso: string;
@@ -284,9 +285,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;

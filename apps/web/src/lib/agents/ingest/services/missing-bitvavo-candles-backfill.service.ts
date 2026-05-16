@@ -3,6 +3,7 @@ import { BitvavoAdapter } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-list-candles-end-ms.service";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type BackfillMissingCandlesResult = {
   seededMarkets: number;
@@ -32,18 +33,7 @@ export async function backfillMissingBitvavoCandles(
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
   const barsPerMarket = barsForRetention(timeframe);
 
-  const { data: ex, error: exErr } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("id")
-    .eq("code", "bitvavo")
-    .single();
-
-  if (exErr || !ex) {
-    throw new Error("Bitvavo exchange not found. Run migrations and market sync first.");
-  }
-
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(supabase, "bitvavo");
 
   const { data: missingRows, error: missErr } = await supabase.rpc("markets_missing_catalog_candles", {
     p_exchange_id: exchangeId,

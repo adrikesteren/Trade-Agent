@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { ensureRiskStateForExecutor } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 function revalidateExecutorSurface(executorId: string) {
   revalidatePath("/executors");
@@ -42,9 +43,8 @@ async function assertExchangeIsBitvavo(
   supabase: Awaited<ReturnType<typeof createClient>>,
   exchangeId: string,
 ): Promise<void> {
-  const { data, error } = await supabase.schema("catalog").from("exchanges").select("code").eq("id", exchangeId).maybeSingle();
-  if (error) throw new Error(error.message);
-  const code = String(data?.code ?? "").toLowerCase();
+  const codeRaw = await ExchangesSelector.selectCodeById(supabase, exchangeId);
+  const code = String(codeRaw ?? "").toLowerCase();
   if (code !== "bitvavo") {
     throw new Error("Historical execution mode requires the Bitvavo exchange.");
   }
@@ -83,13 +83,7 @@ async function assertSidesAllowedByExchange(
   exchangeId: string,
   sides: PositionSideValue[],
 ): Promise<void> {
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("exchanges")
-    .select("supports_spot_buy, supports_spot_sell, supports_margin_long, supports_margin_short")
-    .eq("id", exchangeId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+  const data = await ExchangesSelector.selectCapabilitiesById(supabase, exchangeId);
   if (!data) throw new Error("Exchange not found.");
   const longSupported = Boolean(data.supports_spot_buy) || Boolean(data.supports_margin_long);
   const shortSupported = Boolean(data.supports_margin_short);

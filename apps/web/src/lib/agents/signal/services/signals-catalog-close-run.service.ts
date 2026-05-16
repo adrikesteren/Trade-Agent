@@ -15,6 +15,8 @@ import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval.service";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval.service";
 import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids.service";
 
+import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+
 /**
  * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
  * Accepts numbers; returns null for missing / non-finite values so the
@@ -144,9 +146,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     };
   }
 
-  const { data: ex, error: exErr } = await admin.schema("catalog").from("exchanges").select("id").eq("code", "bitvavo").single();
-  if (exErr || !ex) throw new Error("Bitvavo exchange not found");
-  const exchangeId = ex.id as string;
+  const exchangeId = await ExchangesSelector.selectIdByCode(admin, "bitvavo");
 
   const quoteNorm = quote != null && String(quote).trim() !== "" ? String(quote).trim().toUpperCase() : null;
   const quoteAssetIdFilter = quoteNorm ? await resolveQuoteAssetId(admin, quoteNorm) : null;
