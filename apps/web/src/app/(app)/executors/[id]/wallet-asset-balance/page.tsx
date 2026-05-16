@@ -4,6 +4,8 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as WalletAssetBalanceSelector from "@/lib/selectors/wallet-asset-balance-selector";
+import * as WalletsSelector from "@/lib/selectors/wallets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -20,12 +22,7 @@ import { notFound, redirect } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
 
-type BalanceRow = {
-  id: string;
-  asset_id: string;
-  amount: string | number | null;
-  updated_at: string;
-};
+type BalanceRow = WalletAssetBalanceSelector.WalletAssetBalanceListRow;
 
 /**
  * Read-only view-all of all `trading.wallet_asset_balance` rows for the executor's wallet.
@@ -59,25 +56,24 @@ export default async function ExecutorWalletAssetBalanceRelatedPage({ params }: 
   const walletIdFromExecutor = String(ex.wallet_id ?? "").trim();
   let walletId = walletIdFromExecutor;
   if (!walletId) {
-    const { data: walletRow } = await supabase
-      .schema("trading")
-      .from("wallets")
-      .select("id")
-      .eq("executor_id", id)
-      .maybeSingle();
-    walletId = String((walletRow as { id?: string } | null)?.id ?? "").trim();
+    try {
+      walletId = String((await WalletsSelector.selectIdByExecutorId(supabase, id)) ?? "").trim();
+    } catch {
+      walletId = "";
+    }
   }
 
-  const { data: rows, error } = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_asset_balance")
-        .select("id, asset_id, amount, updated_at")
-        .eq("wallet_id", walletId)
-        .order("updated_at", { ascending: false })
-    : { data: [] as BalanceRow[], error: null };
+  let rows: BalanceRow[] = [];
+  let error: { message: string } | null = null;
+  if (walletId) {
+    try {
+      rows = await WalletAssetBalanceSelector.selectListByWallet(supabase, walletId);
+    } catch (e) {
+      error = { message: e instanceof Error ? e.message : String(e) };
+    }
+  }
 
-  const list = (rows ?? []) as BalanceRow[];
+  const list = rows;
 
   const assetIds = [...new Set(list.map((r) => r.asset_id))].filter(Boolean);
   const codeById = new Map<string, string>();

@@ -9,6 +9,7 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { runExecutorCatalogCloseDrain } from "@/lib/agents/executor/services/catalog-close-executor-run.service";
 import { runMediatorCatalogCloseDrain } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-run.service";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as ExecutorHistoricalRunsSelector from "@/lib/selectors/executor-historical-runs-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 import { replaySignalsForBars } from "@/lib/agents/signal/services/replay-signals-for-bars.service";
@@ -90,21 +91,14 @@ export async function runHistoricalExecutorReplay(
     throw new Error(`Invalid historical window: ${win.reason}`);
   }
 
-  const { data: runIns, error: runInsErr } = await admin
-    .schema("trading")
-    .from("executor_historical_runs")
-    .insert({
-      executor_id: args.executorId,
-      user_id: args.userId,
-      status: "running",
-      bars_total: win.barCount,
-      bars_done: 0,
-      metadata: { marketId, marketSymbol, timeframe, warmupBars: HISTORICAL_REPLAY_WARMUP_BARS },
-    })
-    .select("id")
-    .single();
-  if (runInsErr) throw new Error(runInsErr.message);
-  const runId = runIns?.id as string;
+  const runId = await ExecutorHistoricalRunsSelector.insertRunningReturningId(admin, {
+    executor_id: args.executorId,
+    user_id: args.userId,
+    status: "running",
+    bars_total: win.barCount,
+    bars_done: 0,
+    metadata: { marketId, marketSymbol, timeframe, warmupBars: HISTORICAL_REPLAY_WARMUP_BARS },
+  });
 
   try {
     const ingest = await ingestHistoricalCandles(admin, {
@@ -159,31 +153,25 @@ export async function runHistoricalExecutorReplay(
         ordersInsertedTotal += exo.ordersInserted;
 
         if (barsDone % 25 === 0 || barsDone === barsTotal) {
-          await admin
-            .schema("trading")
-            .from("executor_historical_runs")
-            .update({ bars_done: barsDone })
-            .eq("id", runId);
+          await ExecutorHistoricalRunsSelector.updateBarsDoneById(admin, {
+            id: runId,
+            barsDone,
+          });
         }
       },
     });
 
-    await admin
-      .schema("trading")
-      .from("executor_historical_runs")
-      .update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-        bars_done: barsReplayed,
-        metadata: {
-          marketId,
-          marketSymbol,
-          timeframe,
-          candleRowsUpserted: ingest.candleRowsUpserted,
-          barsReplayed,
-        },
-      })
-      .eq("id", runId);
+    await ExecutorHistoricalRunsSelector.updateCompletedById(admin, {
+      id: runId,
+      barsDone: barsReplayed,
+      metadata: {
+        marketId,
+        marketSymbol,
+        timeframe,
+        candleRowsUpserted: ingest.candleRowsUpserted,
+        barsReplayed,
+      },
+    });
 
     return {
       ok: true,
@@ -196,15 +184,10 @@ export async function runHistoricalExecutorReplay(
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await admin
-      .schema("trading")
-      .from("executor_historical_runs")
-      .update({
-        status: "failed",
-        completed_at: new Date().toISOString(),
-        error: msg,
-      })
-      .eq("id", runId);
+    await ExecutorHistoricalRunsSelector.updateFailedById(admin, {
+      id: runId,
+      error: msg,
+    });
     throw e;
   }
 }

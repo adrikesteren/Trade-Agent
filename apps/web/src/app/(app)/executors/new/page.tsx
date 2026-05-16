@@ -11,6 +11,7 @@ import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-ca
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -99,16 +100,16 @@ export default async function NewExecutorPage({ searchParams }: NewExecutorPageP
       const copyName = base ? `${base} (copy)` : "Executor (copy)";
 
       // Clone the source executor's quote-asset budget rows so the new form starts pre-populated.
-      const { data: cloneBudgets } = await supabase
-        .schema("trading")
-        .from("executor_quote_asset_budget")
-        .select("quote_asset_id, max_notional_primary")
-        .eq("executor_id", cloneFromId)
-        .order("created_at", { ascending: true });
-      const quoteBudgets: ExecutorQuoteBudgetInitial[] = ((cloneBudgets ?? []) as {
-        quote_asset_id: string;
-        max_notional_primary: string | number;
-      }[]).map((b) => ({
+      let cloneBudgets: ExecutorQuoteAssetBudgetSelector.ExecutorQuoteBudgetCloneRow[] = [];
+      try {
+        cloneBudgets = await ExecutorQuoteAssetBudgetSelector.selectCloneByExecutorIdOrdered(
+          supabase,
+          cloneFromId,
+        );
+      } catch {
+        /* preserve original soft-fail behavior — clone budgets stay empty */
+      }
+      const quoteBudgets: ExecutorQuoteBudgetInitial[] = cloneBudgets.map((b) => ({
         quote_asset_id: b.quote_asset_id,
         max_notional_primary: String(b.max_notional_primary ?? ""),
       }));

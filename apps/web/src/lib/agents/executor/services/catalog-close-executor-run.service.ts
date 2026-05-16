@@ -29,6 +29,7 @@ import {
 import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
 import * as FillsSelector from "@/lib/selectors/fills-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as OrdersSelector from "@/lib/selectors/orders-selector";
@@ -744,13 +745,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
               orderId,
               creditEur,
             });
-            await admin
-              .schema("trading")
-              .from("executor_moving_floors")
-              .delete()
-              .eq("user_id", ownerId)
-              .eq("executor_id", ex.id)
-              .eq("market_id", marketId);
+            await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+              userId: ownerId,
+              executorId: ex.id,
+              marketId,
+            });
           } catch (e) {
             await OrdersSelector.deleteById(admin, orderId);
             await restoreExecutorPositionSnapshot(admin, {
@@ -942,13 +941,11 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
                     orderId: localOrderId,
                     creditEur: creditLive,
                   });
-                  await admin
-                    .schema("trading")
-                    .from("executor_moving_floors")
-                    .delete()
-                    .eq("user_id", ownerId)
-                    .eq("executor_id", ex.id)
-                    .eq("market_id", marketId);
+                  await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+                    userId: ownerId,
+                    executorId: ex.id,
+                    marketId,
+                  });
                 }
               } catch (ledgerErr) {
                 console.error(`${marketSymbol}: live fill ledger update failed`, ledgerErr);

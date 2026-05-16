@@ -31,10 +31,14 @@ import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as OrdersSelector from "@/lib/selectors/orders-selector";
 import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as WalletAssetBalanceSelector from "@/lib/selectors/wallet-asset-balance-selector";
+import * as WalletsSelector from "@/lib/selectors/wallets-selector";
+import * as WalletTransactionsSelector from "@/lib/selectors/wallet-transactions-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -199,12 +203,7 @@ type LedgerRow = {
   created_at: string;
 };
 
-type WalletAssetBalanceRow = {
-  id: string;
-  asset_id: string;
-  amount: string | number | null;
-  updated_at: string;
-};
+type WalletAssetBalanceRow = WalletAssetBalanceSelector.WalletAssetBalanceListRow;
 
 type TradeDecisionRowDb = {
   id: string;
@@ -353,21 +352,15 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   }
   if (!ex) notFound();
 
-  const { data: budgetRows, error: budgetErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .select("id, quote_asset_id, max_notional_primary")
-    .eq("executor_id", id)
-    .order("created_at", { ascending: true });
-  if (budgetErr) {
-    console.error("executor detail: budgets:", budgetErr.message);
+  let budgetRowsRaw: ExecutorQuoteAssetBudgetSelector.ExecutorQuoteBudgetDetailRow[] = [];
+  try {
+    budgetRowsRaw = await ExecutorQuoteAssetBudgetSelector.selectDetailByExecutorIdOrdered(
+      supabase,
+      id,
+    );
+  } catch (e) {
+    console.error("executor detail: budgets:", e instanceof Error ? e.message : String(e));
   }
-  type BudgetRowDb = {
-    id: string;
-    quote_asset_id: string;
-    max_notional_primary: string | number;
-  };
-  const budgetRowsRaw = (budgetRows ?? []) as BudgetRowDb[];
   const quoteBudgetsForForm: ExecutorQuoteBudgetInitial[] = budgetRowsRaw.map((row) => ({
     quote_asset_id: row.quote_asset_id,
     max_notional_primary: String(row.max_notional_primary ?? ""),
@@ -399,7 +392,13 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     fetchQuoteAssetOptionsByExchange(supabase),
     fetchExchangeCapabilitiesById(supabase),
     loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
-    supabase.schema("trading").from("wallets").select("id").eq("executor_id", id).maybeSingle(),
+    WalletsSelector.selectIdByExecutorId(supabase, id).then(
+      (walletIdRaw) => ({ walletId: walletIdRaw, error: null as { message: string } | null }),
+      (e: unknown) => ({
+        walletId: null as string | null,
+        error: { message: e instanceof Error ? e.message : String(e) },
+      }),
+    ),
     OrdersSelector.selectExecutorRecentWithCount(supabase, {
       executorId: id,
       limit: DASHBOARD_LIST_VIEW_LIMIT,
@@ -416,27 +415,21 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   ]);
 
   const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
-  const walletIdFromTable = String((walletPack.data as { id?: string } | null)?.id ?? "").trim();
+  const walletIdFromTable = String(walletPack.walletId ?? "").trim();
   const walletId = walletIdFromExecutor || walletIdFromTable || null;
   const ledgerPack = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_transactions")
-        .select("id, kind, quantity, asset_id, note, created_at", { count: "exact" })
-        .eq("wallet_id", walletId)
-        .order("created_at", { ascending: false })
-        .limit(ledgerFetchLimit)
+    ? await WalletTransactionsSelector.selectByWalletIdRecentWithCount(supabase, {
+        walletId,
+        limit: ledgerFetchLimit,
+      })
     : { data: [] as LedgerRow[], count: 0, error: null };
 
   const walletAssetBalanceFetchLimit = RECORD_RELATED_LIST_PREVIEW_ROWS;
   const walletAssetBalancePack = walletId
-    ? await supabase
-        .schema("trading")
-        .from("wallet_asset_balance")
-        .select("id, asset_id, amount, updated_at", { count: "exact" })
-        .eq("wallet_id", walletId)
-        .order("updated_at", { ascending: false })
-        .limit(walletAssetBalanceFetchLimit)
+    ? await WalletAssetBalanceSelector.selectListByWalletWithCount(supabase, {
+        walletId,
+        limit: walletAssetBalanceFetchLimit,
+      })
     : { data: [] as WalletAssetBalanceRow[], count: 0, error: null };
 
   const eurFallbackQuoteId = await resolveQuoteAssetId(supabase, "EUR");

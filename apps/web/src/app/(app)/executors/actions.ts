@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensureRiskStateForExecutor } from "@/lib/agents/executor/services/executors-lookup.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 
 function revalidateExecutorSurface(executorId: string) {
@@ -227,25 +228,25 @@ async function replaceQuoteAssetBudgets(
   rows: QuoteBudgetRow[],
 ): Promise<void> {
   // Delete-and-reinsert under the executor-owner RLS policies.
-  const { error: delErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .delete()
-    .eq("executor_id", executorId);
-  if (delErr) throw new Error(`Quote-asset budgets: ${delErr.message}`);
+  try {
+    await ExecutorQuoteAssetBudgetSelector.deleteByExecutorId(supabase, executorId);
+  } catch (e) {
+    throw new Error(`Quote-asset budgets: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   if (!rows.length) return;
-  const { error: insErr } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .insert(
+  try {
+    await ExecutorQuoteAssetBudgetSelector.insertMany(
+      supabase,
       rows.map((r) => ({
         executor_id: executorId,
         quote_asset_id: r.quote_asset_id,
         max_notional_primary: r.max_notional_primary,
       })),
     );
-  if (insErr) throw new Error(`Quote-asset budgets: ${insErr.message}`);
+  } catch (e) {
+    throw new Error(`Quote-asset budgets: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export async function createExecutor(formData: FormData): Promise<void> {
@@ -507,14 +508,11 @@ export async function createExecutorQuoteBudget(
     formData.get("max_notional_primary"),
   );
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .insert({
-      executor_id: executorId,
-      quote_asset_id,
-      max_notional_primary,
-    });
+  const error = await ExecutorQuoteAssetBudgetSelector.insertOne(supabase, {
+    executor_id: executorId,
+    quote_asset_id,
+    max_notional_primary,
+  });
 
   if (error) {
     if (error.code === "23505") {
@@ -544,12 +542,11 @@ export async function updateExecutorQuoteBudget(
     formData.get("max_notional_primary"),
   );
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .update({ quote_asset_id, max_notional_primary })
-    .eq("id", budgetId)
-    .eq("executor_id", executorId);
+  const error = await ExecutorQuoteAssetBudgetSelector.updateByIdAndExecutor(supabase, {
+    id: budgetId,
+    executorId,
+    patch: { quote_asset_id, max_notional_primary },
+  });
 
   if (error) {
     if (error.code === "23505") {
@@ -572,14 +569,10 @@ export async function deleteExecutorQuoteBudget(
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { error } = await supabase
-    .schema("trading")
-    .from("executor_quote_asset_budget")
-    .delete()
-    .eq("id", budgetId)
-    .eq("executor_id", executorId);
-
-  if (error) throw new Error(error.message);
+  await ExecutorQuoteAssetBudgetSelector.deleteByIdAndExecutor(supabase, {
+    id: budgetId,
+    executorId,
+  });
 
   revalidateQuoteBudgetSurface(executorId);
 }

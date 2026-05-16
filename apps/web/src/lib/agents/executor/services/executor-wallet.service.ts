@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { resolveExecutorWalletId } from "@/lib/objects/executors/services/executor-wallet-resolve.service";
 import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as WalletAssetBalanceSelector from "@/lib/selectors/wallet-asset-balance-selector";
 
 /** Paper fee model (matches `run-executor-catalog-close` paper path). */
 export function executorPaperFeeEur(notionalEur: number): number {
@@ -17,15 +18,11 @@ export async function fetchWalletBalanceForAsset(
   const walletId = await resolveExecutorWalletId(admin, { executorId: args.executorId });
   if (!walletId) return 0;
 
-  const { data: bal, error } = await admin
-    .schema("trading")
-    .from("wallet_asset_balance")
-    .select("amount")
-    .eq("wallet_id", walletId)
-    .eq("asset_id", args.assetId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  const raw = (bal as { amount?: unknown } | null)?.amount;
+  const bal = await WalletAssetBalanceSelector.selectAmountByWalletAndAsset(admin, {
+    walletId,
+    assetId: args.assetId,
+  });
+  const raw = bal?.amount;
   const n = raw == null ? 0 : Number(raw);
   return Number.isFinite(n) ? n : 0;
 }

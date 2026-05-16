@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as FillsSelector from "@/lib/selectors/fills-selector";
 import * as OrdersSelector from "@/lib/selectors/orders-selector";
@@ -54,14 +55,11 @@ export async function wipeHistoricalExecutorSimulationState(
     marketId: args.marketId,
   });
 
-  const { error: flDel } = await admin
-    .schema("trading")
-    .from("executor_moving_floors")
-    .delete()
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId);
-  if (flDel) throw new Error(flDel.message);
+  await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   await ExecutorsSelector.updateRiskStateResetByUserAndId(admin, {
     userId: args.userId,

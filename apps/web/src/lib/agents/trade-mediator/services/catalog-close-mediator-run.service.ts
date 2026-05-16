@@ -27,6 +27,7 @@ import {
 import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as PositionsSelector from "@/lib/selectors/positions-selector";
 import * as SignalsSelector from "@/lib/selectors/signals-selector";
@@ -535,15 +536,11 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
         let forceExit = false;
         let movingFloorSnapshot: Record<string, unknown> | null = null;
         if (inPosition) {
-          const { data: floorRow, error: floorErr } = await admin
-            .schema("trading")
-            .from("executor_moving_floors")
-            .select("peak_price_since_entry, floor_price, activated_at")
-            .eq("user_id", ownerId)
-            .eq("executor_id", ex.id)
-            .eq("market_id", marketId)
-            .maybeSingle();
-          if (floorErr) throw new Error(floorErr.message);
+          const floorRow = await ExecutorMovingFloorsSelector.selectByTrio(admin, {
+            userId: ownerId,
+            executorId: ex.id,
+            marketId,
+          });
           if (Number.isFinite(avgPrice) && avgPrice > 0 && rails.profitTakingEnabled) {
             const trailPct = Number(rails.movingFloorTrailPct ?? 0.15);
             const activationProfitPct = Number(rails.movingFloorActivationProfitPct ?? 0.05);
@@ -559,19 +556,15 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               trailPct,
               activationProfitPct,
             });
-            const { error: upFloorErr } = await admin.schema("trading").from("executor_moving_floors").upsert(
-              {
-                user_id: ownerId,
-                executor_id: ex.id,
-                market_id: marketId,
-                peak_price_since_entry: next.peak,
-                floor_price: next.floor,
-                activated_at: next.activated ? (floorRow?.activated_at ?? new Date().toISOString()) : null,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "user_id,executor_id,market_id" },
-            );
-            if (upFloorErr) throw new Error(upFloorErr.message);
+            await ExecutorMovingFloorsSelector.upsertOneByTrio(admin, {
+              user_id: ownerId,
+              executor_id: ex.id,
+              market_id: marketId,
+              peak_price_since_entry: next.peak,
+              floor_price: next.floor,
+              activated_at: next.activated ? (floorRow?.activated_at ?? new Date().toISOString()) : null,
+              updated_at: new Date().toISOString(),
+            });
             forceExit = next.triggerExit;
             movingFloorSnapshot = {
               avgPrice,
@@ -585,14 +578,11 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
             };
           }
         } else {
-          const { error: delFloorErr } = await admin
-            .schema("trading")
-            .from("executor_moving_floors")
-            .delete()
-            .eq("user_id", ownerId)
-            .eq("executor_id", ex.id)
-            .eq("market_id", marketId);
-          if (delFloorErr) throw new Error(delFloorErr.message);
+          await ExecutorMovingFloorsSelector.deleteByTrio(admin, {
+            userId: ownerId,
+            executorId: ex.id,
+            marketId,
+          });
         }
 
         // P3: regime gating. The mediator applies it before evaluating to

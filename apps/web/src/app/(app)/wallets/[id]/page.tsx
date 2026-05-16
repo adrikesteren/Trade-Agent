@@ -2,6 +2,7 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as WalletsSelector from "@/lib/selectors/wallets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -32,16 +33,15 @@ export default async function WalletDetailPage({ params }: PageProps) {
   const formatDt = (v: string | number | Date | null | undefined) =>
     v == null ? "—" : formatDatetime(v, prefs);
 
-  const { data: row, error } = await supabase
-    .schema("trading")
-    .from("wallets")
-    .select("id, executor_id, created_at")
-    .eq("id", walletId)
-    .maybeSingle();
+  let row: WalletsSelector.WalletDetailRow | null = null;
+  try {
+    row = await WalletsSelector.selectDetailById(supabase, walletId);
+  } catch {
+    notFound();
+  }
+  if (!row) notFound();
 
-  if (error || !row) notFound();
-
-  const executorId = String((row as { executor_id?: string }).executor_id ?? "").trim();
+  const executorId = String(row.executor_id ?? "").trim();
   let exName: string | null = null;
   if (executorId) {
     try {
