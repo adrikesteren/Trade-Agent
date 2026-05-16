@@ -47,7 +47,7 @@ export default async function RiskStatePage({ searchParams }: RiskStatePageProps
     .schema("trading")
     .from("executors")
     .select(
-      "id, user_id, name, updated_at, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
+      "id, user_id, name, updated_at, risk_open_position_count, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
     )
     .order("updated_at", { ascending: false })
     .range(from, to);

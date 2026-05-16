@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -13,7 +13,10 @@ import { closeTimesMatch } from "@/lib/trading/close-time-match";
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval.service";
 import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval.service";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval.service";
+import { evaluateRegimeAtClose } from "./regime-classifier-eval.service";
+import { evaluateMultiTfConfluenceAtClose } from "./multi-timeframe-confluence-eval.service";
 import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids.service";
+import { aggregateReplayBarsToTimeframe } from "@/lib/markets/aggregate-replay-bars";
 
 /**
  * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
@@ -275,7 +278,7 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
     );
   }
 
-  const barLimit = barsForRetention(timeframe);
+  const barLimit = barsForIncrementalFetchWindow(timeframe);
   let signalsUpserted = 0;
 
   const noAgentsForTf = activeAgents.length === 0 && rows.length > 0;
@@ -301,7 +304,9 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
         let ev:
           | ReturnType<typeof evaluateMaCrossAtClose>
           | ReturnType<typeof evaluateRsiReversionAtClose>
-          | ReturnType<typeof evaluateBreakoutAtrAtClose>;
+          | ReturnType<typeof evaluateBreakoutAtrAtClose>
+          | ReturnType<typeof evaluateRegimeAtClose>
+          | ReturnType<typeof evaluateMultiTfConfluenceAtClose>;
         if (agent.agent_id === "ma-cross-15m-v1") {
           const fastPeriod = Math.floor(Number(cfg.fastPeriod ?? 9));
           const slowPeriod = Math.floor(Number(cfg.slowPeriod ?? 21));
@@ -354,6 +359,44 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
               ? { volumeLookbackBars: Math.max(2, Math.floor(volumeLookbackBars)) }
               : {}),
             minAdx,
+          });
+        } else if (agent.agent_id === "regime-classifier-15m-v1") {
+          // P3 wireup: aggregate the 15m series to the configured trend timeframe
+          // (default 4h, seeded value) in-memory, then evaluate the SMA(maPeriod)
+          // classifier at the target close.
+          // History needed = `maPeriod × trendTimeframeMinutes` of price data, so
+          // 4h × 200 = ~33 days vs. daily × 200 = ~6.5 months. Bars are aggregated
+          // from the 15m series the catalog stores; ingest already pre-loads enough
+          // warmup for both live and historical-replay paths (see `computeWarmupBars`).
+          const maPeriod = Math.floor(Number(cfg.maPeriod ?? 200));
+          const slopeBars = Math.floor(Number(cfg.slopeLookback ?? 20));
+          const trendTimeframeMinutes = Math.max(15, Math.floor(Number(cfg.trendTimeframeMinutes ?? 240)));
+          const slopePctEps = parseGateNumber(cfg.slopePctEps) ?? undefined;
+          const distancePctEps = parseGateNumber(cfg.distancePctEps) ?? undefined;
+          const trendBars = aggregateReplayBarsToTimeframe(barsAsc, trendTimeframeMinutes);
+          ev = evaluateRegimeAtClose({
+            barsAsc: trendBars,
+            targetCloseTimeIso: closeTimeIso,
+            maPeriod,
+            slopeBars,
+            trendTimeframeMinutes,
+            ...(slopePctEps != null ? { slopePctEps } : {}),
+            ...(distancePctEps != null ? { distancePctEps } : {}),
+          });
+        } else if (agent.agent_id === "multi-tf-confluence-15m-v1") {
+          // P3 wireup: 4h trend leg + 15m entry leg. The 4h bars are an
+          // in-memory aggregation of the same 15m slice.
+          const trendMa = Math.floor(Number(cfg.trendMa ?? 50));
+          const entryRsiPeriod = Math.floor(Number(cfg.entryRsiPeriod ?? 14));
+          const entryRsi = Number(cfg.entryRsi ?? 30);
+          const trendBars = aggregateReplayBarsToTimeframe(barsAsc, 240);
+          ev = evaluateMultiTfConfluenceAtClose({
+            trendBarsAsc: trendBars,
+            entryBarsAsc: barsAsc,
+            targetCloseTimeIso: closeTimeIso,
+            trendMa,
+            entryRsiPeriod,
+            entryRsi,
           });
         } else {
           continue;

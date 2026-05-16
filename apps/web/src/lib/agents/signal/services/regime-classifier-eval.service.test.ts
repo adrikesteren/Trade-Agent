@@ -19,6 +19,10 @@ function fallingBars(start: number, step: number, n: number): RegimeClassifierBa
   return Array.from({ length: n }, (_, i) => bar(start - i * step, i));
 }
 
+// Trend timeframe is opaque to the eval logic; we just thread it through metadata.
+// Tests use 1440 (daily) for backwards compatibility with the original test fixtures.
+const TF_DAILY = 1440;
+
 describe("evaluateRegimeAtClose", () => {
   it("returns sideways with intent=HOLD when params are invalid", () => {
     const r = evaluateRegimeAtClose({
@@ -26,6 +30,7 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: bar(100, 249).closeTimeIso,
       maPeriod: 1,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("sideways");
@@ -38,6 +43,7 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: bar(100, 249).closeTimeIso,
       maPeriod: 200,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("sideways");
@@ -53,6 +59,7 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: bar(100 + 249 * 0.5, 249).closeTimeIso,
       maPeriod: 200,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("bull");
@@ -66,6 +73,7 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: bar(225 - 249 * 0.5, 249).closeTimeIso,
       maPeriod: 200,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("bear");
@@ -79,6 +87,7 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: bar(100 + 9 * 0.5, 9).closeTimeIso,
       maPeriod: 200,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("sideways");
@@ -91,9 +100,22 @@ describe("evaluateRegimeAtClose", () => {
       targetCloseTimeIso: "2099-09-09T00:00:00.000Z",
       maPeriod: 200,
       slopeBars: 5,
+      trendTimeframeMinutes: TF_DAILY,
     });
     expect(r.intent).toBe("HOLD");
     expect(r.metadata.regime).toBe("sideways");
     expect(r.reasons[0]).toBe("target_bar_not_in_series");
+  });
+
+  it("threads trendTimeframeMinutes through metadata + reasons (4h example)", () => {
+    const r = evaluateRegimeAtClose({
+      barsAsc: risingBars(100, 0.5, 250),
+      targetCloseTimeIso: bar(100 + 249 * 0.5, 249).closeTimeIso,
+      maPeriod: 200,
+      slopeBars: 20,
+      trendTimeframeMinutes: 240,
+    });
+    expect(r.metadata.trendTimeframeMinutes).toBe(240);
+    expect(r.reasons[0]).toContain("tf=240m");
   });
 });

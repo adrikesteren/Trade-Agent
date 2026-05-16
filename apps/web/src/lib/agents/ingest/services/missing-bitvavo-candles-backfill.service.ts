@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-list-candles-end-ms.service";
-import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 
 export type BackfillMissingCandlesResult = {
@@ -30,7 +30,7 @@ export async function backfillMissingBitvavoCandles(
   opts: { quote: string; maxMarkets: number; delayMsBetweenMarkets: number },
 ): Promise<BackfillMissingCandlesResult> {
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
-  const barsPerMarket = barsForRetention(timeframe);
+  const barsPerMarket = barsForIncrementalFetchWindow(timeframe);
 
   const { data: ex, error: exErr } = await supabase
     .schema("catalog")
@@ -130,7 +130,7 @@ export async function backfillMissingBitvavoCandles(
     }
   }
 
-  await deleteExpiredCandleTimestamps(supabase);
+  // No TTL pruning anymore — all backfilled candles stay in `catalog.candles` indefinitely.
 
   return {
     seededMarkets: batch.length,

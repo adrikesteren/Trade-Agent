@@ -62,6 +62,8 @@ export const COINGECKO_SYNC_JOB_METRICS = "coingecko_assets_usd_live";
 export const COINGECKO_SYNC_JOB_COIN_ID = "coingecko_asset_coin_id";
 /** `automation.sync_runs.job_key` — catalog-close signal evaluation pass. */
 export const SYNC_JOB_SIGNALS_CATALOG_CLOSE = "signals_catalog_close" as const;
+/** `automation.sync_runs.job_key` — manual "Evaluate signals" header action over all stored bars for one market. */
+export const SYNC_JOB_MARKET_EVALUATE_ALL_SIGNALS = "market_evaluate_all_signals" as const;
 /** `automation.sync_runs.job_key` — mediator pass for one catalog bar close. */
 export const SYNC_JOB_MEDIATOR_CATALOG_CLOSE = "mediator_catalog_close" as const;
 /** `automation.sync_runs.job_key` — executor pass for one catalog bar close. */

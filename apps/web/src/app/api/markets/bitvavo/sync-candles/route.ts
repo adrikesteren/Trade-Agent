@@ -1,9 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
-  barsForRetention,
-  CANDLE_RETENTION_HOURS,
-  CANDLE_TIMESTAMP_TTL_HOURS,
+  barsForIncrementalFetchWindow,
+  CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS,
   CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
 } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
@@ -71,9 +70,9 @@ export async function POST(request: Request) {
   }
 
   const timeframe = body.timeframe ?? "15m";
-  const retentionCap = barsForRetention(timeframe);
-  const barsRequested = body.barsPerMarket ?? retentionCap;
-  const barsPerMarket = Math.min(Math.max(barsRequested, 1), retentionCap);
+  const fetchWindowCap = barsForIncrementalFetchWindow(timeframe);
+  const barsRequested = body.barsPerMarket ?? fetchWindowCap;
+  const barsPerMarket = Math.min(Math.max(barsRequested, 1), fetchWindowCap);
   const quote = body.quote === undefined ? "EUR" : body.quote;
   const marketOffset = Math.max(body.marketOffset ?? 0, 0);
   const marketBatchSize = Math.min(Math.max(body.marketBatchSize ?? 25, 1), 80);
@@ -146,7 +145,7 @@ export async function POST(request: Request) {
           totalMarkets: 0,
           timeframe,
           barsPerMarket: 0,
-          retentionMaxBars: retentionCap,
+          retentionMaxBars: fetchWindowCap,
           syncMode: "window",
         });
       }
@@ -272,14 +271,13 @@ export async function POST(request: Request) {
       planningNotes: {
         approxBytesPerRowAssumed: approxBytesPerRow,
         approxMbThisChunk: Math.round(approxMbStored * 1000) / 1000,
-        retentionHoursForBarCap: CANDLE_RETENTION_HOURS,
+        incrementalFetchWindowHours: CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS,
         initialEmptySyncHistoryHours: CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
-        candleTimestampTtlHours: CANDLE_TIMESTAMP_TTL_HOURS,
-        retentionMaxBars: result.retentionMaxBars,
+        fetchWindowMaxBars: result.retentionMaxBars,
         hint:
-          `Non-window / incremental bar counts use CANDLE_RETENTION_HOURS (${CANDLE_RETENTION_HOURS}h). ` +
+          `Incremental bar counts use CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS (${CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS}h, ~Bitvavo per-call cap). ` +
           `First EUR prepare when candle_timestamps is empty uses ${CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS}h (~480 x 15m bars). ` +
-          `After each chunk, timestamps older than ${CANDLE_TIMESTAMP_TTL_HOURS}h (~365d) are deleted (candles cascade).`,
+          `No TTL pruning: every historical candle is kept indefinitely.`,
       },
     });
   } catch (e) {

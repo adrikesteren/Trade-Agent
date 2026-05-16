@@ -17,7 +17,6 @@ const baseArgs = {
   riskSnap: {
     equityEur: 0,
     openPositionCount: 0,
-    exposureBySymbolEur: {},
     dailyPnlEur: 0,
     maxDrawdownEur: 0,
     consecutiveLosses: 0,

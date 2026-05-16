@@ -14,7 +14,6 @@ const baseEx: ExecutorRow = {
   filter_asset_ids: [],
   max_risk_per_trade: 0.05,
   max_open_positions: 5,
-  max_exposure_per_symbol_eur: 500,
   daily_loss_limit_eur: 100,
   max_drawdown_eur: 500,
   cooldown_after_losses: 3,

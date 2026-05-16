@@ -35,7 +35,6 @@ export type ExecutorRow = {
   updated_at?: string;
   max_risk_per_trade: string | number;
   max_open_positions: string | number;
-  max_exposure_per_symbol_eur: string | number;
   daily_loss_limit_eur: string | number;
   max_drawdown_eur: string | number;
   cooldown_after_losses: string | number;
@@ -51,7 +50,6 @@ export type ExecutorRow = {
   historical_start_date?: string | null;
   historical_end_date?: string | null;
   risk_open_position_count?: number;
-  risk_exposure_by_market?: Record<string, unknown> | null;
   risk_daily_pnl_eur?: string | number;
   risk_runtime_max_drawdown_eur?: string | number;
   risk_kill_switch?: boolean;
@@ -69,7 +67,7 @@ export function sortExecutorsForDefaultPick(rows: ExecutorRow[]): ExecutorRow[] 
 }
 
 const EXECUTOR_ROW_SELECT =
-  "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, created_at, updated_at, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses";
+  "id, user_id, exchange_id, name, enabled, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, created_at, updated_at, max_risk_per_trade, max_open_positions, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses";
 
 export async function fetchExecutorById(admin: SupabaseClient, executorId: string): Promise<ExecutorRow | null> {
   const { data, error } = await admin

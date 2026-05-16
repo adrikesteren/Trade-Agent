@@ -1,6 +1,6 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
-import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import {
   fetchCandleSyncWindowMeta,
   prepareEurCandleSyncRunWindow,
@@ -248,9 +248,9 @@ export async function runEurCandleSweep(body: EurCandleSweepBody = {}): Promise<
   const admin = createServiceRoleClient();
 
   const timeframe = body.timeframe ?? CATALOG_STORAGE_TIMEFRAME;
-  const retentionCap = barsForRetention(timeframe);
-  const barsRequested = body.barsPerMarket ?? retentionCap;
-  const barsPerMarket = Math.min(Math.max(barsRequested, 1), retentionCap);
+  const fetchWindowCap = barsForIncrementalFetchWindow(timeframe);
+  const barsRequested = body.barsPerMarket ?? fetchWindowCap;
+  const barsPerMarket = Math.min(Math.max(barsRequested, 1), fetchWindowCap);
   const quote = body.quote === undefined ? "EUR" : body.quote;
   let marketOffset = Math.max(body.marketOffset ?? 0, 0);
   const marketBatchSize = Math.min(Math.max(body.marketBatchSize ?? 25, 1), 80);

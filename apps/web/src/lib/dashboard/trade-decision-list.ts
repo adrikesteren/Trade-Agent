@@ -33,6 +33,23 @@ export function dedupeTradeDecisionsForListView<T extends SortableDecision & { m
   return uniqueTradeDecisionsByMarket(sorted);
 }
 
+/**
+ * Sort decisions by bar close time, descending. Used on executor-scoped
+ * trade-decisions list pages where the user wants the full audit trail of
+ * what an executor did (not the per-market "latest call" projection that
+ * the global list uses).
+ *
+ * Ties (same close_time, e.g. SAR pairs) are broken by `created_at` desc
+ * so the EXIT/ENTER ordering is reasonable for the eye.
+ */
+export function sortTradeDecisionsByCloseTimeDesc<T extends SortableDecision & { created_at?: string }>(raw: T[]): T[] {
+  return [...raw].sort((a, b) => {
+    const dc = Date.parse(b.close_time) - Date.parse(a.close_time);
+    if (dc !== 0) return dc;
+    return Date.parse(String(b.created_at ?? "")) - Date.parse(String(a.created_at ?? ""));
+  });
+}
+
 export function buildTradeDecisionListViewRows<T extends SortableDecision & { market_id: string }>(
   raw: T[],
   displayLimit: number = DASHBOARD_LIST_VIEW_LIMIT,

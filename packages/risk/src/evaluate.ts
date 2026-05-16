@@ -32,10 +32,13 @@ export function evaluateNewEntry(
     reasonCodes.push("max_open_positions");
   }
 
-  const symExposure = state.exposureBySymbolEur[proposed.symbol] ?? 0;
-  if (symExposure + proposed.notionalEur > config.maxExposurePerSymbolEur) {
-    reasonCodes.push("max_symbol_exposure");
-  }
+  // P1: per-symbol exposure cap dropped. The legacy `max_symbol_exposure`
+  // rail relied on `state.exposureBySymbolEur`, which lived on
+  // `trading.executors.risk_exposure_by_market` — a JSON column that was
+  // never written by the trading flow, only reset in
+  // `historical-simulation-wipe.service.ts`. Per-trade sizing is now
+  // fully covered by `max_risk_per_trade × equity` (below) plus
+  // `executor_quote_asset_budget.max_notional_primary` (mediator-side).
 
   const maxNotional = state.equityEur * config.maxRiskPerTrade;
   if (proposed.notionalEur > maxNotional) {

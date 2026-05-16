@@ -5,6 +5,7 @@ import type { RiskStateSnapshot } from "@repo/risk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { fetchMarketCapabilitiesByMarketIds, marketSupportsSide } from "@/lib/catalog/market-capabilities";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { getCatalogPipelineUserIds } from "@/lib/agents/signal/services/signal-user-ids.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -82,27 +83,15 @@ function buildRiskSnapshot(
   riskRow: {
     equity_eur?: unknown;
     open_position_count?: unknown;
-    exposure_by_market?: unknown;
     daily_pnl_eur?: unknown;
     max_drawdown_eur?: unknown;
     consecutive_losses?: unknown;
     kill_switch?: unknown;
   },
-  marketId: string,
-  marketSymbol: string,
 ): RiskStateSnapshot {
-  const exposureRaw = (riskRow.exposure_by_market ?? {}) as Record<string, unknown>;
-  const exposureBySymbolEur: Record<string, number> = {};
-  for (const [k, v] of Object.entries(exposureRaw)) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) continue;
-    exposureBySymbolEur[k] = n;
-    if (k === marketId) exposureBySymbolEur[marketSymbol] = n;
-  }
   return {
     equityEur: Number(riskRow.equity_eur ?? 0),
     openPositionCount: Math.floor(Number(riskRow.open_position_count ?? 0)),
-    exposureBySymbolEur,
     dailyPnlEur: Number(riskRow.daily_pnl_eur ?? 0),
     maxDrawdownEur: Number(riskRow.max_drawdown_eur ?? 0),
     consecutiveLosses: Math.floor(Number(riskRow.consecutive_losses ?? 0)),
@@ -218,6 +207,64 @@ export function buildQuoteAssetNotAllowedSkipDecision(args: {
       barCloseTimeIso: args.closeTimeIso,
       quoteAssetId: args.quoteAssetIdForMarket,
       positionSide: "long",
+      ...(args.candleSyncRunId ? { candleSyncRunId: args.candleSyncRunId } : {}),
+      ...(args.signalsSyncRunId ? { signalsSyncRunId: args.signalsSyncRunId } : {}),
+      ...(args.mediatorPipelineSyncRunId ? { mediatorSyncRunId: args.mediatorPipelineSyncRunId } : {}),
+    },
+  };
+}
+
+/**
+ * Pure builder for the "this market doesn't support the proposed side" skip-decision row.
+ *
+ * Used when an executor proposes LONG but the market lacks
+ * `supports_spot_buy && supports_margin_long`, or proposes SHORT but the market
+ * lacks `supports_margin_short`. Defense-in-depth on top of the exchange-level
+ * gate done at form-save time — the per-market flags can change while an
+ * executor's `allowed_sides` array stays the same.
+ */
+export function buildSideNotSupportedByMarketSkipDecision(args: {
+  ownerId: string;
+  executor: { id: string; name: string; exchange_id: string };
+  timeframe: string;
+  primarySignalId: string;
+  matched: { id: string; intent: string; agent_slug: string }[];
+  marketSymbol: string;
+  proposedSide: "long" | "short";
+  quoteAssetIdForMarket?: string | null;
+  closeTimeIso: string;
+  riskSnap: RiskStateSnapshot;
+  candleSyncRunId?: string | null;
+  signalsSyncRunId?: string | null;
+  mediatorPipelineSyncRunId?: string | null;
+}) {
+  return {
+    user_id: args.ownerId,
+    executor_id: args.executor.id,
+    timeframe: args.timeframe,
+    signal_id: args.primarySignalId,
+    approved: false,
+    reason_codes: ["side_not_supported_by_market"],
+    risk_snapshot: args.riskSnap,
+    position_side: args.proposedSide,
+    decision_payload: {
+      resolvedIntent: "HOLD" as const,
+      policyVersion: "v1-priority",
+      signalIds: args.matched.map((r) => r.id),
+      signalsIn: args.matched.map((r) => ({
+        id: r.id,
+        intent: r.intent,
+        agent_id: r.agent_slug,
+      })),
+      proposedOrder: null,
+      market_symbol: args.marketSymbol,
+      executorId: args.executor.id,
+      executorName: args.executor.name,
+      exchangeId: args.executor.exchange_id,
+      movingFloor: null,
+      barCloseTimeIso: args.closeTimeIso,
+      positionSide: args.proposedSide,
+      ...(args.quoteAssetIdForMarket ? { quoteAssetId: args.quoteAssetIdForMarket } : {}),
       ...(args.candleSyncRunId ? { candleSyncRunId: args.candleSyncRunId } : {}),
       ...(args.signalsSyncRunId ? { signalsSyncRunId: args.signalsSyncRunId } : {}),
       ...(args.mediatorPipelineSyncRunId ? { mediatorSyncRunId: args.mediatorPipelineSyncRunId } : {}),
@@ -429,6 +476,12 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
 
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
+  // P2/P3 defense-in-depth: load per-market capability flags up front so we
+  // can skip markets that don't support the side this executor would emit.
+  // The exchange-level rollup is already checked at form-save time, but a
+  // capability flip after that point (e.g. Bitvavo enables shorts on a new
+  // market) shouldn't require re-saving every executor.
+  const marketCapsById = await fetchMarketCapabilitiesByMarketIds(admin, marketIdsForAssets);
 
   let decisionsUpserted = 0;
 
@@ -486,23 +539,57 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
 
         const ownerId = ex.user_id;
 
+        // P2/P3 defense-in-depth: even when the executor allows long, the
+        // specific market must support a long channel (spot buy or margin
+        // long). A market without those flags gets a `side_not_supported_by_market`
+        // skip-decision so it shows up on the bar as an explicit no-go.
+        const marketCaps = marketCapsById[marketId];
+        if (!marketSupportsSide(marketCaps, "long")) {
+          if (matched.length && matched[0]?.id) {
+            const skipRow = buildSideNotSupportedByMarketSkipDecision({
+              ownerId,
+              executor: { id: ex.id, name: ex.name, exchange_id: ex.exchange_id },
+              timeframe,
+              primarySignalId: matched[0].id,
+              matched: matched.map((r) => ({ id: r.id, intent: r.intent, agent_slug: agentSlugFromRow(r) })),
+              marketSymbol,
+              proposedSide: "long",
+              quoteAssetIdForMarket,
+              closeTimeIso,
+              riskSnap: buildRiskSnapshot({
+                equity_eur: 0,
+                open_position_count: ex.risk_open_position_count,
+                daily_pnl_eur: ex.risk_daily_pnl_eur,
+                max_drawdown_eur: ex.risk_runtime_max_drawdown_eur,
+                consecutive_losses: ex.risk_consecutive_losses,
+                kill_switch: ex.risk_kill_switch,
+              }),
+              candleSyncRunId: body.candleSyncRunId,
+              signalsSyncRunId: body.signalsSyncRunId,
+              mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
+            });
+            const { error: skipErr } = await admin
+              .schema("trading")
+              .from("decisions")
+              .upsert(skipRow, { onConflict: "user_id,executor_id,signal_id,position_side" });
+            if (skipErr) throw new Error(`${marketSymbol}: decisions side-skip upsert: ${skipErr.message}`);
+            decisionsUpserted += 1;
+          }
+          continue;
+        }
+
         const quoteBalance =
           quoteAssetIdForMarket != null
             ? await fetchWalletBalanceForAsset(admin, { executorId: ex.id, assetId: quoteAssetIdForMarket })
             : 0;
-        const riskSnap = buildRiskSnapshot(
-          {
-            equity_eur: quoteBalance,
-            open_position_count: ex.risk_open_position_count,
-            exposure_by_market: ex.risk_exposure_by_market ?? {},
-            daily_pnl_eur: ex.risk_daily_pnl_eur,
-            max_drawdown_eur: ex.risk_runtime_max_drawdown_eur,
-            consecutive_losses: ex.risk_consecutive_losses,
-            kill_switch: ex.risk_kill_switch,
-          },
-          marketId,
-          marketSymbol,
-        );
+        const riskSnap = buildRiskSnapshot({
+          equity_eur: quoteBalance,
+          open_position_count: ex.risk_open_position_count,
+          daily_pnl_eur: ex.risk_daily_pnl_eur,
+          max_drawdown_eur: ex.risk_runtime_max_drawdown_eur,
+          consecutive_losses: ex.risk_consecutive_losses,
+          kill_switch: ex.risk_kill_switch,
+        });
         const rails = executorToMediatorRails(ex);
 
         // Quote-asset budget lookup (P1): every (executor, market quote) pair must have a row in

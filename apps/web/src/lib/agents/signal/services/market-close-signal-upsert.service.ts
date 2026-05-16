@@ -7,7 +7,10 @@ import { closeTimesMatch } from "@/lib/trading/close-time-match";
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval.service";
 import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval.service";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval.service";
+import { evaluateRegimeAtClose } from "./regime-classifier-eval.service";
+import { evaluateMultiTfConfluenceAtClose } from "./multi-timeframe-confluence-eval.service";
 import { filterSignalUserIdsToExistingAuthUsers } from "./signal-user-ids.service";
+import { aggregateReplayBarsToTimeframe } from "@/lib/markets/aggregate-replay-bars";
 
 type SortedBar = {
   id: string;
@@ -31,6 +34,10 @@ function parseGateNumber(raw: unknown): number | null {
 
 /**
  * Upserts `trading.signals` for one catalog close using preloaded ascending bars (same agents as catalog-close).
+ *
+ * `onlyAgentIds` (optional): when set, restrict evaluation to those `signal_agents.id` values
+ * (used by `runMarketEvaluateAllSignals` to skip agent/candle pairs that already have signals).
+ * Absent = legacy behavior (all enabled agents whose `allowed_timeframes` matches).
  */
 export async function upsertSignalsForMarketCloseFromBars(
   admin: SupabaseClient,
@@ -43,10 +50,12 @@ export async function upsertSignalsForMarketCloseFromBars(
     signalUserIds: string[];
     candleSyncRunId?: string | null;
     signalsSyncRunId?: string | null;
+    onlyAgentIds?: ReadonlySet<string>;
   },
 ): Promise<number> {
   const signalUserIds = await filterSignalUserIdsToExistingAuthUsers(admin, body.signalUserIds);
   if (!signalUserIds.length) return 0;
+  if (body.onlyAgentIds && body.onlyAgentIds.size === 0) return 0;
 
   const { data: agentRows, error: agentErr } = await admin
     .schema("trading")
@@ -64,6 +73,7 @@ export async function upsertSignalsForMarketCloseFromBars(
   }[];
 
   const activeAgents = agents.filter((a) => {
+    if (body.onlyAgentIds && !body.onlyAgentIds.has(a.id)) return false;
     const tf = a.allowed_timeframes;
     if (!tf || tf.length === 0) return true;
     return tf.includes(body.timeframe);
@@ -84,7 +94,9 @@ export async function upsertSignalsForMarketCloseFromBars(
     let ev:
       | ReturnType<typeof evaluateMaCrossAtClose>
       | ReturnType<typeof evaluateRsiReversionAtClose>
-      | ReturnType<typeof evaluateBreakoutAtrAtClose>;
+      | ReturnType<typeof evaluateBreakoutAtrAtClose>
+      | ReturnType<typeof evaluateRegimeAtClose>
+      | ReturnType<typeof evaluateMultiTfConfluenceAtClose>;
     const minAtrPct = parseGateNumber(cfg.minAtrPct);
     const maxAtrPct = parseGateNumber(cfg.maxAtrPct);
     if (agent.agent_id === "ma-cross-15m-v1") {
@@ -139,6 +151,36 @@ export async function upsertSignalsForMarketCloseFromBars(
           ? { volumeLookbackBars: Math.max(2, Math.floor(volumeLookbackBars)) }
           : {}),
         minAdx,
+      });
+    } else if (agent.agent_id === "regime-classifier-15m-v1") {
+      // Same trend-timeframe handling as the live dispatcher; default seed = 4h × MA(200).
+      const maPeriod = Math.floor(Number(cfg.maPeriod ?? 200));
+      const slopeBars = Math.floor(Number(cfg.slopeLookback ?? 20));
+      const trendTimeframeMinutes = Math.max(15, Math.floor(Number(cfg.trendTimeframeMinutes ?? 240)));
+      const slopePctEps = parseGateNumber(cfg.slopePctEps) ?? undefined;
+      const distancePctEps = parseGateNumber(cfg.distancePctEps) ?? undefined;
+      const trendBars = aggregateReplayBarsToTimeframe(barsAsc, trendTimeframeMinutes);
+      ev = evaluateRegimeAtClose({
+        barsAsc: trendBars,
+        targetCloseTimeIso: body.closeTimeIso,
+        maPeriod,
+        slopeBars,
+        trendTimeframeMinutes,
+        ...(slopePctEps != null ? { slopePctEps } : {}),
+        ...(distancePctEps != null ? { distancePctEps } : {}),
+      });
+    } else if (agent.agent_id === "multi-tf-confluence-15m-v1") {
+      const trendMa = Math.floor(Number(cfg.trendMa ?? 50));
+      const entryRsiPeriod = Math.floor(Number(cfg.entryRsiPeriod ?? 14));
+      const entryRsi = Number(cfg.entryRsi ?? 30);
+      const trendBars = aggregateReplayBarsToTimeframe(barsAsc, 240);
+      ev = evaluateMultiTfConfluenceAtClose({
+        trendBarsAsc: trendBars,
+        entryBarsAsc: barsAsc,
+        targetCloseTimeIso: body.closeTimeIso,
+        trendMa,
+        entryRsiPeriod,
+        entryRsi,
       });
     } else {
       continue;

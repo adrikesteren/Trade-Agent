@@ -5,6 +5,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { bulkUpsertCandleTimestampsForWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import {
+  computeWarmupBars,
+  countCandlesForMarketByCloseTimeRange,
+  type WarmupAgentInput,
+} from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 
 import { computeHistoricalCandleWindow } from "./historical-candle-window.service";
 
@@ -26,18 +31,80 @@ export async function ingestHistoricalCandles(
     quote: string;
     historicalStartDate: string;
     historicalEndDate: string;
+    /**
+     * Optional list of enabled signal agents (slug + raw `config` JSON) used to derive extra
+     * warmup. Each agent's warmup is computed from its config (e.g. regime classifier reads
+     * `maPeriod` × `trendTimeframeMinutes` to know how many 15m bars it needs). Pass-through to
+     * {@link computeWarmupBars}; defaults to the legacy 120-bar floor when omitted.
+     */
+    enabledAgents?: readonly WarmupAgentInput[];
   },
-): Promise<{ barCount: number; candleRowsUpserted: number; startOpenIso: string; endCloseIso: string }> {
+): Promise<{
+  barCount: number;
+  candleRowsUpserted: number;
+  startOpenIso: string;
+  endCloseIso: string;
+  /**
+   * `true` when the full ingest window (`ingestStartOpenMs`..`endCloseMs`) was already covered
+   * by `catalog.candles` and the Bitvavo HTTP fetch was skipped. Diagnostic only — the caller
+   * can treat the candles in DB as the source of truth either way.
+   */
+  cached: boolean;
+  /** Number of `catalog.candles` rows already present in the ingest window when we checked. */
+  candlesAlreadyInDb: number;
+  /** Expected number of bars in the ingest window (warmup + replay). */
+  ingestBarCount: number;
+}> {
+  const stepMs = timeframeDurationMs(args.timeframe);
+  const warmupBars = computeWarmupBars(args.timeframe, args.enabledAgents ?? []);
+  const extraWarmupMs = warmupBars * stepMs;
   const win = computeHistoricalCandleWindow({
     startDate: args.historicalStartDate,
     endDate: args.historicalEndDate,
     timeframe: args.timeframe,
+    extraWarmupMs,
   });
   if (win.kind !== "ok") {
     throw new Error(`Historical candle window: ${win.reason}`);
   }
 
-  await bulkUpsertCandleTimestampsForWindow(admin, win.startOpenMs, win.endCloseMs, timeframeDurationMs(args.timeframe));
+  // Bulk-upsert `candle_timestamps` for the full ingest window (warmup + replay) so the
+  // Bitvavo fetch can attach candle_id → candle_timestamp_id without lookups failing.
+  // (Idempotent — `ignoreDuplicates` makes the cached path cheap too.)
+  await bulkUpsertCandleTimestampsForWindow(admin, win.ingestStartOpenMs, win.endCloseMs, stepMs);
+
+  const startOpenIso = new Date(win.ingestStartOpenMs).toISOString();
+  const endCloseIso = new Date(win.endCloseMs).toISOString();
+
+  // Optimization: if the full ingest window (warmup + replay) is already covered in
+  // `catalog.candles`, skip the Bitvavo HTTP fetch entirely. We compare against the
+  // **expected** `ingestBarCount` derived from the window — if Bitvavo had previously
+  // returned data for this window, the count in DB is stable and re-fetching would be
+  // wasted bandwidth.
+  //
+  // `firstIngestCloseIso` = first bucket boundary at/after `ingestStartOpenMs`
+  // (= `ingestStartOpenMs + stepMs`). `endCloseIso` is the inclusive upper bound.
+  const firstIngestCloseIso = new Date(win.ingestStartOpenMs + stepMs).toISOString();
+  const candlesAlreadyInDb = await countCandlesForMarketByCloseTimeRange(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    closeTimeGteIso: firstIngestCloseIso,
+    closeTimeLteIso: endCloseIso,
+  });
+
+  if (candlesAlreadyInDb >= win.ingestBarCount) {
+    return {
+      // `barCount` is the **replay-only** count so callers using it as `bars_total`
+      // (e.g. `executor_historical_runs.bars_total`) don't double-count warmup bars.
+      barCount: win.barCount,
+      candleRowsUpserted: 0,
+      startOpenIso,
+      endCloseIso,
+      cached: true,
+      candlesAlreadyInDb,
+      ingestBarCount: win.ingestBarCount,
+    };
+  }
 
   const { data: mrow, error: mErr } = await admin
     .schema("catalog")
@@ -73,12 +140,9 @@ export async function ingestHistoricalCandles(
     throw new Error("market not in Bitvavo quote slice");
   }
 
-  const startOpenIso = new Date(win.startOpenMs).toISOString();
-  const endCloseIso = new Date(win.endCloseMs).toISOString();
-
   const r = await syncBitvavoCandlesChunk(admin, {
     timeframe: args.timeframe,
-    barsPerMarket: win.barCount,
+    barsPerMarket: win.ingestBarCount,
     quote,
     marketOffset: offset,
     marketBatchSize: 1,
@@ -86,7 +150,7 @@ export async function ingestHistoricalCandles(
     syncMode: "window",
     windowStartOpen: startOpenIso,
     windowEndClose: endCloseIso,
-    windowBarCount: win.barCount,
+    windowBarCount: win.ingestBarCount,
   });
 
   return {
@@ -94,5 +158,8 @@ export async function ingestHistoricalCandles(
     candleRowsUpserted: r.candleRowsUpserted,
     startOpenIso,
     endCloseIso,
+    cached: false,
+    candlesAlreadyInDb,
+    ingestBarCount: win.ingestBarCount,
   };
 }

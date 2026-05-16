@@ -5,6 +5,7 @@ import { DASHBOARD_LIST_VIEW_LIMIT } from "@/lib/dashboard/list-view-limit";
 import {
   TRADE_DECISIONS_FETCH_POOL,
   dedupeTradeDecisionsForListView,
+  sortTradeDecisionsByCloseTimeDesc,
 } from "@/lib/dashboard/trade-decision-list";
 import {
   clampPage,
@@ -210,19 +211,29 @@ export async function TradeDecisionsListView({
     .filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
   const raw = rawDb.map((r) => normalizeTradeDecisionRow(r, candleById));
-  const deduped = dedupeTradeDecisionsForListView(raw);
-  const totalCount = deduped.length;
+  // On the global trade-decisions list we collapse rows to one-per-market
+  // (latest approved per market) so the page reads as "what's the current
+  // call across all markets". On an executor-scoped view that dedup hides
+  // most of the history — typically a single executor trades one or two
+  // markets, so dedup would leave you with 1-2 rows. In executor scope
+  // we show every decision sorted by close_time desc (audit trail).
+  const ordered = executorIdFilter
+    ? sortTradeDecisionsByCloseTimeDesc(raw)
+    : dedupeTradeDecisionsForListView(raw);
+  const totalCount = ordered.length;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
-  const list = deduped.slice(from, to + 1);
+  const list = ordered.slice(from, to + 1);
 
   const marketIds = [...new Set(list.map((r) => r.market_id).filter(Boolean))];
   const symbolByMarketId = await fetchMarketSymbolsById(supabase, marketIds);
   const executorIds = [...new Set(list.map((r) => r.executor_id).filter(Boolean))];
   const executorNameById = await fetchExecutorNamesById(supabase, executorIds);
 
-  const sortLineCore = `Approved first · bar close desc · one row per market · ${totalCount} ranked from last ${TRADE_DECISIONS_FETCH_POOL} rows · Page ${page} of ${pages}`;
+  const sortLineCore = executorIdFilter
+    ? `Bar close desc · ${totalCount} of last ${TRADE_DECISIONS_FETCH_POOL} rows · Page ${page} of ${pages}`
+    : `Approved first · bar close desc · one row per market · ${totalCount} ranked from last ${TRADE_DECISIONS_FETCH_POOL} rows · Page ${page} of ${pages}`;
 
   const extraQuery: Record<string, string | undefined> = {};
   if (executorIdFilter) extraQuery.executorId = executorIdFilter;

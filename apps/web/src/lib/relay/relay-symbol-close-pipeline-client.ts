@@ -13,6 +13,9 @@ export const RELAY_HISTORICAL_EXECUTOR_REPLAY_TIMEOUT_S = 30 * 60;
 /** Per-message `timeout` (seconds) for Relay `market-backfill-candles` jobs — 30 minutes. */
 export const RELAY_MARKET_BACKFILL_CANDLES_TIMEOUT_S = 30 * 60;
 
+/** Per-message `timeout` (seconds) for Relay `market-evaluate-all-signals` jobs — 10 minutes. */
+export const RELAY_MARKET_EVALUATE_ALL_SIGNALS_TIMEOUT_S = 10 * 60;
+
 export function normalizeRelayBaseUrl(): string {
   loadMonorepoDotenvOnce();
   const raw = process.env.RELAY_APP_URL?.trim();
@@ -117,6 +120,35 @@ export function buildMarketBackfillCandlesWorkerUrl(
   u.searchParams.set("startDate", args.startDate.trim());
   const end = (args.endDate ?? "").trim();
   if (end) u.searchParams.set("endDate", end);
+  return u.toString();
+}
+
+/**
+ * Worker URL for "Evaluate signals" header action: re-runs Signal Agent over every stored
+ * 15m candle for one market, **skipping** `(agent, candle)` tuples that already have signals
+ * for the automation user.
+ */
+export function buildMarketEvaluateAllSignalsWorkerUrl(
+  appBase: string,
+  marketId: string,
+  options?: {
+    forceAgentSlugs?: readonly string[];
+    /** Optional close-time slice (ISO 8601) — used by the chunked Relay publisher. */
+    closeTimeGteIso?: string | null;
+    /** Optional close-time slice (ISO 8601) — used by the chunked Relay publisher. */
+    closeTimeLteIso?: string | null;
+  },
+): string {
+  const u = new URL(`${appBase.replace(/\/$/, "")}/api/workers/market-evaluate-all-signals`);
+  u.searchParams.set("marketId", marketId.trim());
+  const force = (options?.forceAgentSlugs ?? []).map((s) => s.trim()).filter(Boolean);
+  if (force.length > 0) {
+    u.searchParams.set("forceAgentSlugs", force.join(","));
+  }
+  const gte = (options?.closeTimeGteIso ?? "").trim();
+  if (gte) u.searchParams.set("closeTimeGteIso", gte);
+  const lte = (options?.closeTimeLteIso ?? "").trim();
+  if (lte) u.searchParams.set("closeTimeLteIso", lte);
   return u.toString();
 }
 

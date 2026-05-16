@@ -5,7 +5,6 @@ import type { RiskRailsConfig, RiskStateSnapshot } from "./types";
 const baseConfig: RiskRailsConfig = {
   maxRiskPerTrade: 0.05,
   maxOpenPositions: 5,
-  maxExposurePerSymbolEur: 500,
   dailyLossLimitEur: 100,
   maxDrawdownEur: 500,
   cooldownAfterLosses: 3,
@@ -14,7 +13,6 @@ const baseConfig: RiskRailsConfig = {
 const healthyState: RiskStateSnapshot = {
   equityEur: 10_000,
   openPositionCount: 1,
-  exposureBySymbolEur: { "BTC-EUR": 200 },
   dailyPnlEur: 0,
   maxDrawdownEur: 0,
   consecutiveLosses: 0,

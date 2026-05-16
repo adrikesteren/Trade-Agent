@@ -11,7 +11,6 @@ export type ExecutorRowForFormInitial = {
   filter_asset_ids: unknown;
   max_risk_per_trade: unknown;
   max_open_positions: unknown;
-  max_exposure_per_symbol_eur: unknown;
   daily_loss_limit_eur: unknown;
   max_drawdown_eur: unknown;
   cooldown_after_losses: unknown;
@@ -69,7 +68,6 @@ export function executorRowToFormInitial(
     quote_budgets: options?.quoteBudgets ?? [],
     max_risk_per_trade: String(ex.max_risk_per_trade ?? "0.05"),
     max_open_positions: String(ex.max_open_positions ?? "5"),
-    max_exposure_per_symbol_eur: String(ex.max_exposure_per_symbol_eur ?? "500"),
     daily_loss_limit_eur: String(ex.daily_loss_limit_eur ?? "100"),
     max_drawdown_eur: String(ex.max_drawdown_eur ?? "500"),
     cooldown_after_losses: String(ex.cooldown_after_losses ?? "3"),

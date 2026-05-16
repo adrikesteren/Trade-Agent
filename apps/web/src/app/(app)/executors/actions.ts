@@ -83,11 +83,14 @@ async function assertSidesAllowedByExchange(
   exchangeId: string,
   sides: PositionSideValue[],
 ): Promise<void> {
+  // Reads the rollup view `catalog.v_exchange_capabilities` which `bool_or`s
+  // the per-market capability flags. Per-market gating still happens at
+  // decision/execution time (see fetchMarketCapabilitiesByMarketIds).
   const { data, error } = await supabase
     .schema("catalog")
-    .from("exchanges")
+    .from("v_exchange_capabilities")
     .select("supports_spot_buy, supports_spot_sell, supports_margin_long, supports_margin_short")
-    .eq("id", exchangeId)
+    .eq("exchange_id", exchangeId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Exchange not found.");
@@ -95,10 +98,10 @@ async function assertSidesAllowedByExchange(
   const shortSupported = Boolean(data.supports_margin_short);
   for (const s of sides) {
     if (s === "long" && !longSupported) {
-      throw new Error("This exchange does not support long entries (no spot buy and no margin long).");
+      throw new Error("This exchange does not support long entries on any market.");
     }
     if (s === "short" && !shortSupported) {
-      throw new Error("This exchange does not support short selling.");
+      throw new Error("This exchange does not support short selling on any market.");
     }
   }
 }
@@ -171,10 +174,6 @@ function mediatorFieldsFromForm(formData: FormData) {
   return {
     max_risk_per_trade: parseMaxRiskPerTrade(formData.get("max_risk_per_trade")),
     max_open_positions: parseNonNegInt("Max open positions", formData.get("max_open_positions")),
-    max_exposure_per_symbol_eur: parseNonNegNumber(
-      "Max exposure per symbol (EUR)",
-      formData.get("max_exposure_per_symbol_eur"),
-    ),
     daily_loss_limit_eur: parseNonNegNumber("Daily loss limit (EUR)", formData.get("daily_loss_limit_eur")),
     max_drawdown_eur: parseNonNegNumber("Max drawdown (EUR)", formData.get("max_drawdown_eur")),
     cooldown_after_losses: parseNonNegInt("Cooldown after losses", formData.get("cooldown_after_losses")),

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BitvavoAdapter, type Candle } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-list-candles-end-ms.service";
-import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { fetchAllCandleTimestampRowsForCandleWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 
@@ -140,7 +140,7 @@ export async function syncBitvavoCandlesChunk(
       totalMarkets: 0,
       timeframe: opts.timeframe,
       barsPerMarket: 0,
-      retentionMaxBars: barsForRetention(opts.timeframe),
+      retentionMaxBars: barsForIncrementalFetchWindow(opts.timeframe),
       syncMode: opts.syncMode ?? "full",
     };
   }
@@ -162,7 +162,7 @@ export async function syncBitvavoCandlesChunk(
 
   const total = totalMarkets ?? 0;
 
-  const maxBars = barsForRetention(opts.timeframe);
+  const maxBars = barsForIncrementalFetchWindow(opts.timeframe);
   const windowMode =
     opts.syncMode === "window" &&
     Boolean(opts.windowStartOpen && opts.windowEndClose && opts.windowBarCount && opts.windowBarCount > 0);
@@ -385,9 +385,8 @@ export async function syncBitvavoCandlesChunk(
   const nextStart = from + processed;
   const nextMarketOffset = nextStart < total ? nextStart : null;
 
-  if (!windowMode) {
-    await deleteExpiredCandleTimestamps(supabase);
-  }
+  // No TTL pruning anymore — all historical candles stay in `catalog.candles` indefinitely.
+  // (Pre-cleanup this branch called `deleteExpiredCandleTimestamps(supabase)` here.)
 
   const resultMode: CandleSyncMode = windowMode ? "window" : incremental ? "incremental" : "full";
 

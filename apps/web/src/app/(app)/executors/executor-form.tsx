@@ -14,12 +14,26 @@ export type ExchangeOption = { id: string; code: string; name: string };
 export type PositionSide = "long" | "short";
 
 /**
- * Per-exchange capability flags that gate which sides the user may pick.
- * Mirrors the boolean columns added in 20260723110000_exchange_capabilities.sql.
+ * High-level trading stance picker on the executor form. Maps 1:1 to a
+ * `trading.executors.allowed_sides` array — the DB column stays as
+ * `position_side[]` so SAR (`['long','short']`) keeps working — but the
+ * form surfaces it as a single radio choice to avoid the "two
+ * independent checkboxes" footgun.
  *
- * `long` is allowed if the exchange supports either spot buy or margin long.
- * `short` is allowed if the exchange supports margin short. Pure-spot venues
- * (e.g. Bitvavo) therefore offer "long" only and the "short" checkbox is hidden.
+ * - `long_only`  → `allowed_sides = ['long']`           (bull-bias only)
+ * - `short_only` → `allowed_sides = ['short']`          (bear-bias only)
+ * - `both_sar`   → `allowed_sides = ['long','short']`   (flips on regime change)
+ */
+export type TradingStance = "long_only" | "short_only" | "both_sar";
+
+/**
+ * Per-exchange capability rollup (from `catalog.v_exchange_capabilities`)
+ * that gates which stance options the user may pick.
+ *
+ * `long` is allowed if the exchange has at least one market that supports
+ * spot buy or margin long. `short` is allowed if any market supports
+ * margin short. Per-market runtime gating in the mediator/executor uses
+ * `MarketCapabilities` from `market-capabilities.ts`.
  */
 export type ExchangeCapabilities = {
   supports_spot_buy: boolean;
@@ -27,6 +41,22 @@ export type ExchangeCapabilities = {
   supports_margin_long: boolean;
   supports_margin_short: boolean;
 };
+
+/** `allowed_sides` array → form radio value. Empty / unknown defaults to long_only. */
+export function tradingStanceFromAllowedSides(sides: readonly PositionSide[] | undefined): TradingStance {
+  const hasLong = !!sides?.includes("long");
+  const hasShort = !!sides?.includes("short");
+  if (hasLong && hasShort) return "both_sar";
+  if (hasShort) return "short_only";
+  return "long_only";
+}
+
+/** Form radio value → `allowed_sides` array shipped to the server action. */
+export function allowedSidesFromTradingStance(stance: TradingStance): PositionSide[] {
+  if (stance === "long_only") return ["long"];
+  if (stance === "short_only") return ["short"];
+  return ["long", "short"];
+}
 
 export type ExecutorQuoteBudgetInitial = {
   /** catalog.assets.id of the quote asset (e.g. EUR / USDT) */
@@ -46,7 +76,6 @@ export type ExecutorFormInitial = {
   quote_budgets?: ExecutorQuoteBudgetInitial[];
   max_risk_per_trade?: string;
   max_open_positions?: string;
-  max_exposure_per_symbol_eur?: string;
   daily_loss_limit_eur?: string;
   max_drawdown_eur?: string;
   cooldown_after_losses?: string;
@@ -137,13 +166,14 @@ export function ExecutorForm({
 
   const primaryCode = primaryAssetCode?.trim() || "EUR";
 
-  // Sides framework. The selected sides default to the saved row's value, or
-  // ["long"] for new executors. When the exchange changes we strip any side that
-  // the new exchange doesn't support (pure spot exchanges hide "short"); this
-  // matches the DB CHECK that requires at least one element.
-  const initialSides: PositionSide[] =
-    initial?.allowed_sides && initial.allowed_sides.length > 0 ? initial.allowed_sides : ["long"];
-  const [allowedSides, setAllowedSides] = useState<PositionSide[]>(initialSides);
+  // Trading stance picker. The radio value is derived from the saved row's
+  // `allowed_sides` array (or defaults to "Long / Spot only" for new
+  // executors). When the exchange changes we fall back to the closest valid
+  // stance — preference order: long_only -> both_sar -> short_only — so the
+  // form is never stuck in an unsupported state.
+  const [tradingStance, setTradingStance] = useState<TradingStance>(() =>
+    tradingStanceFromAllowedSides(initial?.allowed_sides),
+  );
 
   const capabilities = useMemo<ExchangeCapabilities | null>(() => {
     return exchangeCapabilitiesById?.[exchangeId] ?? null;
@@ -151,16 +181,31 @@ export function ExecutorForm({
 
   const longSupported = capabilities ? capabilities.supports_spot_buy || capabilities.supports_margin_long : true;
   const shortSupported = capabilities ? capabilities.supports_margin_short : false;
+  const bothSupported = longSupported && shortSupported;
+
+  function isStanceAllowed(stance: TradingStance): boolean {
+    if (stance === "long_only") return longSupported;
+    if (stance === "short_only") return shortSupported;
+    return bothSupported;
+  }
 
   useEffect(() => {
-    setAllowedSides((prev) => {
-      const next = prev.filter((s) => (s === "long" ? longSupported : shortSupported));
-      // Never let the array go empty — fall back to "long" when the exchange supports it.
-      if (next.length === 0 && longSupported) return ["long"];
-      if (next.length === 0 && shortSupported) return ["short"];
-      return next;
+    setTradingStance((prev) => {
+      if (isStanceAllowed(prev)) return prev;
+      if (longSupported) return "long_only";
+      if (bothSupported) return "both_sar";
+      if (shortSupported) return "short_only";
+      // No supported stance at all — keep current to avoid a flicker; the
+      // server-side validator will reject the submission with a clearer error.
+      return prev;
     });
-  }, [longSupported, shortSupported]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [longSupported, shortSupported, bothSupported]);
+
+  const allowedSidesForSubmit = useMemo(
+    () => allowedSidesFromTradingStance(tradingStance),
+    [tradingStance],
+  );
 
   useEffect(() => {
     if (execMode === "historical") {
@@ -486,63 +531,81 @@ export function ExecutorForm({
           </div>
 
           <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
-            Allowed position sides
+            Trading stance
           </div>
           <p className="bk-text-muted text-xs">
-            The mediator only emits decisions for sides this executor allows; the executor rejects orders for any
-            side not listed here with reason{" "}
-            <code className="font-mono text-[var(--text)]">side_not_allowed</code>. The exchange itself further
-            limits which sides can ever be picked (Bitvavo is spot-only, so &quot;short&quot; is unavailable).
+            Pick how this executor takes positions. Each stance maps to a value of{" "}
+            <code className="font-mono text-[var(--text)]">allowed_sides</code>; the mediator only emits
+            decisions for those sides and the executor rejects everything else with reason{" "}
+            <code className="font-mono text-[var(--text)]">side_not_allowed</code>. Options the exchange
+            cannot support on any market are hidden.
           </p>
           <div className="bk-stack bk-stack_gap-xs">
             {longSupported ? (
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
                 <input
-                  type="checkbox"
-                  name="allowed_sides"
-                  value="long"
-                  checked={allowedSides.includes("long")}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setAllowedSides((prev) => {
-                      const without = prev.filter((s) => s !== "long");
-                      const next = checked ? [...without, "long" as const] : without;
-                      // Enforce at least one selected side (DB CHECK).
-                      return next.length ? next : prev;
-                    });
-                  }}
+                  type="radio"
+                  name="trading_stance"
+                  value="long_only"
+                  className="mt-1"
+                  checked={tradingStance === "long_only"}
+                  onChange={() => setTradingStance("long_only")}
                 />
-                Long (spot buy or margin long)
+                <span>
+                  <span className="font-medium">Long / Spot only</span>
+                  <span className="bk-text-muted ml-2 text-xs">
+                    Buys base with quote in bull regimes, closes (sells back) in bear. No shorts.
+                  </span>
+                </span>
               </label>
-            ) : (
-              <p className="bk-text-muted text-xs">
-                This exchange does not support long entries (no spot buy and no margin long).
-              </p>
-            )}
+            ) : null}
             {shortSupported ? (
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
                 <input
-                  type="checkbox"
-                  name="allowed_sides"
-                  value="short"
-                  checked={allowedSides.includes("short")}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setAllowedSides((prev) => {
-                      const without = prev.filter((s) => s !== "short");
-                      const next = checked ? [...without, "short" as const] : without;
-                      return next.length ? next : prev;
-                    });
-                  }}
+                  type="radio"
+                  name="trading_stance"
+                  value="short_only"
+                  className="mt-1"
+                  checked={tradingStance === "short_only"}
+                  onChange={() => setTradingStance("short_only")}
                 />
-                Short (margin short — execution stub for now)
+                <span>
+                  <span className="font-medium">Short only</span>
+                  <span className="bk-text-muted ml-2 text-xs">
+                    Borrow-and-sell in bear regimes, closes (buys back) in bull. No longs.
+                  </span>
+                </span>
               </label>
-            ) : (
+            ) : null}
+            {bothSupported ? (
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="trading_stance"
+                  value="both_sar"
+                  className="mt-1"
+                  checked={tradingStance === "both_sar"}
+                  onChange={() => setTradingStance("both_sar")}
+                />
+                <span>
+                  <span className="font-medium">Both (SAR &mdash; Stop &amp; Reverse)</span>
+                  <span className="bk-text-muted ml-2 text-xs">
+                    Flips automatically between long and short on regime change. EXIT runs before ENTER.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {!longSupported && !shortSupported ? (
               <p className="bk-text-muted text-xs">
-                This exchange does not support short selling.
+                This exchange has no market that supports either long or short. Pick a different exchange.
               </p>
-            )}
+            ) : null}
           </div>
+          {/* Hidden inputs that ship the actual `allowed_sides` array to the server action.
+              The radio above is purely for the user; the action still reads `allowed_sides`. */}
+          {allowedSidesForSubmit.map((side) => (
+            <input key={side} type="hidden" name="allowed_sides" value={side} readOnly />
+          ))}
 
           <div className="border-border bk-text-muted border-t pt-4 text-xs font-medium uppercase tracking-wide">
             Mediator / risk rails
@@ -581,22 +644,6 @@ export function ExecutorForm({
               step="1"
               className="bk-input mt-1 w-full max-w-md font-mono text-sm"
               defaultValue={initial?.max_open_positions ?? "5"}
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="ex-max-exp" className="bk-form-label">
-              Max exposure per symbol (EUR)
-            </label>
-            <input
-              id="ex-max-exp"
-              name="max_exposure_per_symbol_eur"
-              type="number"
-              min={0}
-              step="1"
-              className="bk-input mt-1 w-full max-w-md font-mono text-sm"
-              defaultValue={initial?.max_exposure_per_symbol_eur ?? "500"}
               required
             />
           </div>

@@ -5,8 +5,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapBitvavoOrderStatusToDb } from "@/lib/bitvavo/bitvavo-order-status";
 import { placeBitvavoMarketBuyQuote, placeBitvavoMarketSellAmount } from "@/lib/bitvavo/private/place-market-order";
 import { bitvavoCredentialsFromExchangeApiFields } from "@/lib/bitvavo/private/signed-request";
-import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { fetchMarketCapabilitiesByMarketIds, marketSupportsSide } from "@/lib/catalog/market-capabilities";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { getCatalogPipelineUserIds } from "@/lib/agents/signal/services/signal-user-ids.service";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -195,7 +196,7 @@ async function findClosePriceForBar(
   const raw = await fetchCandlesForMarket(admin, {
     marketId: args.marketId,
     timeframe: args.timeframe,
-    barLimit: barsForRetention(args.timeframe),
+    barLimit: barsForIncrementalFetchWindow(args.timeframe),
   });
   const sorted = mapCandleRows(raw);
   const hit = sorted.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
@@ -485,6 +486,12 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   const marketIdsForAssets = rows.map((r) => r.id as string);
   const assetIdByMarket = await fetchMarketAssetIds(admin, marketIdsForAssets);
   const assetNameByMarketIdRaw = await fetchAssetDisplayNameByMarketId(admin, assetIdByMarket);
+  // P2/P3 defense-in-depth: per-market capability flags. The mediator already
+  // gates LONG decisions, but the executor runs against decisions written by
+  // any pipeline (mediator, SAR, manual replay) — so we re-check the market's
+  // supports_*_buy / supports_*_short flag against the decision's position_side
+  // before placing or simulating an order.
+  const marketCapsById = await fetchMarketCapabilitiesByMarketIds(admin, marketIdsForAssets);
 
   let ordersInserted = 0;
 
@@ -595,6 +602,33 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         });
         if (rejErr && !/duplicate|unique/i.test(rejErr.message)) {
           throw new Error(`${marketSymbol}: side_not_allowed reject insert: ${rejErr.message}`);
+        }
+        continue;
+      }
+
+      // P2/P3 defense-in-depth: per-market side gate. The market itself must
+      // support the decision's side (e.g. Bitvavo only supports shorts on 20
+      // specific EUR pairs). Mediator should already have skipped these, but
+      // SAR / manual replays / legacy decisions could still land here.
+      if (!marketSupportsSide(marketCapsById[marketId], decisionPositionSide)) {
+        const inferredSide = proposedSell ? "sell" : "buy";
+        const inferredNotional = proposedBuy?.notionalEur ?? 0;
+        const { error: rejMktErr } = await admin.schema("trading").from("orders").insert({
+          user_id: ownerId,
+          executor_id: ex.id,
+          decision_id: dec.id,
+          side: inferredSide,
+          quantity: 0,
+          notional_eur: inferredNotional,
+          status: "rejected",
+          paper: ex.execution_mode !== "live",
+          position_side: decisionPositionSide,
+          external_id: null,
+        });
+        if (rejMktErr && !/duplicate|unique/i.test(rejMktErr.message)) {
+          throw new Error(
+            `${marketSymbol}: position_side_not_supported_by_market reject insert: ${rejMktErr.message}`,
+          );
         }
         continue;
       }

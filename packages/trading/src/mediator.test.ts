@@ -5,7 +5,6 @@ import type { RiskStateSnapshot } from "@repo/risk";
 const rails: MediatorRailsConfig = {
   maxRiskPerTrade: 0.05,
   maxOpenPositions: 5,
-  maxExposurePerSymbolEur: 500,
   dailyLossLimitEur: 100,
   maxDrawdownEur: 500,
   cooldownAfterLosses: 3,
@@ -15,7 +14,6 @@ const rails: MediatorRailsConfig = {
 const risk: RiskStateSnapshot = {
   equityEur: 10_000,
   openPositionCount: 0,
-  exposureBySymbolEur: {},
   dailyPnlEur: 0,
   maxDrawdownEur: 0,
   consecutiveLosses: 0,
@@ -96,7 +94,6 @@ describe("evaluateTradeDecision", () => {
       risk: {
         ...risk,
         openPositionCount: 1,
-        exposureBySymbolEur: { "BTC-EUR": 100 },
       },
       marketSymbol: "BTC-EUR",
       signalIntents: ["ENTER"],

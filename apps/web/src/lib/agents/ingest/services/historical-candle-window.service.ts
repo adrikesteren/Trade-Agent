@@ -5,7 +5,23 @@ import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-tim
 
 export type HistoricalWindowResult =
   | { kind: "empty"; reason: string }
-  | { kind: "ok"; startOpenMs: number; endCloseMs: number; barCount: number };
+  | {
+      kind: "ok";
+      /** Start of the **replay** window — first bar's open time. Unchanged by `extraWarmupMs`. */
+      startOpenMs: number;
+      /** Close of the last replay bar. */
+      endCloseMs: number;
+      /** Bar count of the replay window only (excluding any extra warmup). */
+      barCount: number;
+      /**
+       * Bitvavo fetch lower bound when the caller asked for extra warmup (e.g. so the
+       * regime classifier's daily SMA(200) has enough history before the first replay bar).
+       * Equals `startOpenMs` when `extraWarmupMs` is 0/unset.
+       */
+      ingestStartOpenMs: number;
+      /** Bar count of `[ingestStartOpenMs, endCloseMs]` — what Bitvavo should be told to fetch. */
+      ingestBarCount: number;
+    };
 
 function parseYmd(s: string): { y: number; mo: number; d: number } {
   const parts = s.trim().split("-");
@@ -34,6 +50,13 @@ export function computeHistoricalCandleWindow(args: {
   startDate: string;
   endDate: string;
   timeframe: string;
+  /**
+   * Extra Bitvavo-fetch leadtime (ms) to add **before** the replay window start. Used by
+   * historical replay to pull enough bars for slow indicators (regime classifier needs ~200
+   * daily ≈ 19_200 × 15m bars). Does not affect `startOpenMs` / `barCount` — those still
+   * describe the replay window.
+   */
+  extraWarmupMs?: number;
 }): HistoricalWindowResult {
   const stepMs = timeframeDurationMs(args.timeframe);
   const { y: ys, mo: ms, d: ds } = parseYmd(args.startDate);
@@ -64,5 +87,17 @@ export function computeHistoricalCandleWindow(args: {
     return { kind: "empty", reason: "invalid_bar_count" };
   }
 
-  return { kind: "ok", startOpenMs, endCloseMs, barCount };
+  // Bitvavo fetch lower bound — replay start minus the requested warmup, snapped down to
+  // the previous bar-open grid. If no warmup was requested, this is identical to startOpenMs.
+  const extraWarmupMs = Math.max(0, Math.floor(args.extraWarmupMs ?? 0));
+  let ingestStartOpenMs = startOpenMs;
+  if (extraWarmupMs > 0) {
+    const candidate = startOpenMs - extraWarmupMs;
+    // Snap down to a bar-open boundary so the resulting span is a whole number of bars.
+    ingestStartOpenMs = Math.floor(candidate / stepMs) * stepMs;
+  }
+  const ingestSpan = endCloseMs - ingestStartOpenMs;
+  const ingestBarCount = ingestSpan % stepMs === 0 && ingestSpan > 0 ? ingestSpan / stepMs : barCount;
+
+  return { kind: "ok", startOpenMs, endCloseMs, barCount, ingestStartOpenMs, ingestBarCount };
 }

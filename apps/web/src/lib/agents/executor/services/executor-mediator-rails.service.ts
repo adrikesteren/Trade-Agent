@@ -42,7 +42,6 @@ export function executorToMediatorRails(ex: ExecutorRow): MediatorRailsConfig {
   const base: MediatorRailsConfig = {
     maxRiskPerTrade: Number(ex.max_risk_per_trade),
     maxOpenPositions: Math.floor(Number(ex.max_open_positions)),
-    maxExposurePerSymbolEur: Number(ex.max_exposure_per_symbol_eur),
     dailyLossLimitEur: Number(ex.daily_loss_limit_eur),
     maxDrawdownEur: Number(ex.max_drawdown_eur),
     cooldownAfterLosses: Math.floor(Number(ex.cooldown_after_losses)),
@@ -61,7 +60,6 @@ export function executorToMediatorRails(ex: ExecutorRow): MediatorRailsConfig {
     ...base,
     maxRiskPerTrade: num(raw.maxRiskPerTrade, base.maxRiskPerTrade),
     maxOpenPositions: int(raw.maxOpenPositions, base.maxOpenPositions),
-    maxExposurePerSymbolEur: num(raw.maxExposurePerSymbolEur, base.maxExposurePerSymbolEur),
     dailyLossLimitEur: num(raw.dailyLossLimitEur, base.dailyLossLimitEur),
     maxDrawdownEur: num(raw.maxDrawdownEur, base.maxDrawdownEur),
     cooldownAfterLosses: int(raw.cooldownAfterLosses, base.cooldownAfterLosses),

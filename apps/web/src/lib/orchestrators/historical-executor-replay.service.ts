@@ -10,12 +10,13 @@ import { runExecutorCatalogCloseDrain } from "@/lib/agents/executor/services/cat
 import { runMediatorCatalogCloseDrain } from "@/lib/agents/trade-mediator/services/catalog-close-mediator-run.service";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
 
+import { fetchEnabledSignalAgents } from "@/lib/agents/signal/services/enabled-signal-agents-fetch.service";
 import { replaySignalsForBars } from "@/lib/agents/signal/services/replay-signals-for-bars.service";
 
 import { computeHistoricalCandleWindow } from "@/lib/agents/ingest/services/historical-candle-window.service";
 import { ingestHistoricalCandles } from "@/lib/agents/ingest/services/historical-candles-ingest.service";
 import {
-  HISTORICAL_REPLAY_WARMUP_BARS,
+  computeWarmupBars,
   loadHistoricalCandlesForReplay,
 } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 
@@ -75,12 +76,6 @@ export async function runHistoricalExecutorReplay(
     throw new Error("Historical executor must have exactly one whitelisted asset.");
   }
   const baseAssetId = assetIds[0]!;
-  const baseBalance = await fetchWalletBalanceForAsset(admin, { executorId: args.executorId, assetId: baseAssetId });
-  if (!Number.isFinite(baseBalance) || baseBalance <= 0) {
-    throw new Error(
-      "Add a positive wallet balance for the whitelisted base asset (same asset as the single filter) before running a historical replay.",
-    );
-  }
   const bitvavoId = await fetchExchangeIdByCode(admin, "bitvavo");
   if (String(ex.exchange_id) !== bitvavoId) {
     throw new Error("Historical replay requires a Bitvavo executor exchange.");
@@ -100,12 +95,34 @@ export async function runHistoricalExecutorReplay(
   if (!paper) {
     throw new Error("No Bitvavo EUR market found for the selected asset.");
   }
-  const { marketId, marketSymbol } = paper;
+  const { marketId, marketSymbol, quoteAssetId } = paper;
+
+  // Long-only spot replay spends the market QUOTE (e.g. EUR for GIGA-EUR), not the base.
+  // Gate the run on a positive quote balance; the base is acquired by the simulated buys.
+  const quoteBalance = await fetchWalletBalanceForAsset(admin, {
+    executorId: args.executorId,
+    assetId: quoteAssetId,
+  });
+  if (!Number.isFinite(quoteBalance) || quoteBalance <= 0) {
+    throw new Error(
+      `Add a positive wallet balance for the market quote asset (${marketSymbol.split("-")[1] ?? "quote"}) before running a historical replay.`,
+    );
+  }
 
   const win = computeHistoricalCandleWindow({ startDate: hStart, endDate: hEnd, timeframe });
   if (win.kind !== "ok") {
     throw new Error(`Invalid historical window: ${win.reason}`);
   }
+
+  // P3: derive warmup from the agents that are actually enabled — the regime
+  // classifier reads `maPeriod × trendTimeframeMinutes` from its config
+  // (default seed 4h × 200 → 33 days), multi-tf confluence reads 4h × `trendMa`.
+  // `signal_agents` is a global catalog (not per-user); the helper centralises
+  // the "enabled + timeframe-applicable" filter so the same set is used for
+  // warmup, ingest, and signal coverage.
+  const enabledAgents = await fetchEnabledSignalAgents(admin, { timeframe });
+  const enabledAgentSlugs = enabledAgents.map((a) => a.slug);
+  const warmupBars = computeWarmupBars(timeframe, enabledAgents);
 
   const { data: runIns, error: runInsErr } = await admin
     .schema("trading")
@@ -116,7 +133,7 @@ export async function runHistoricalExecutorReplay(
       status: "running",
       bars_total: win.barCount,
       bars_done: 0,
-      metadata: { marketId, marketSymbol, timeframe, warmupBars: HISTORICAL_REPLAY_WARMUP_BARS },
+      metadata: { marketId, marketSymbol, timeframe, warmupBars, enabledAgentSlugs },
     })
     .select("id")
     .single();
@@ -130,6 +147,7 @@ export async function runHistoricalExecutorReplay(
       quote,
       historicalStartDate: hStart,
       historicalEndDate: hEnd,
+      enabledAgents,
     });
 
     const loaded = await loadHistoricalCandlesForReplay(admin, {
@@ -137,19 +155,29 @@ export async function runHistoricalExecutorReplay(
       timeframe,
       historicalStartDate: hStart,
       historicalEndDate: hEnd,
+      warmupBars,
     });
 
     const signalUserIds = [automatedUserId];
     let decisionsUpsertedTotal = 0;
     let ordersInsertedTotal = 0;
 
-    const { barsReplayed, signalsUpsertedTotal } = await replaySignalsForBars(admin, {
+    const {
+      barsReplayed,
+      signalsUpsertedTotal,
+      barsReusedFromExistingSignals,
+      barsPartiallyReused,
+    } = await replaySignalsForBars(admin, {
       marketId,
       marketSymbol,
       timeframe,
       sortedAll: loaded.sortedAll,
       replayCloses: loaded.replayCloses,
       signalUserIds,
+      // Re-use any `(agent, candle)` signal that already exists for the automation
+      // user from an earlier replay or the evaluate-all-signals worker. Fully-covered
+      // bars skip the Signal Agent eval entirely (mediator still runs and reads them).
+      reuseExistingSignals: true,
       onBarComplete: async ({ bar, barsDone, barsTotal }) => {
         const targetClose = bar.closeTimeIso;
 
@@ -198,6 +226,24 @@ export async function runHistoricalExecutorReplay(
           timeframe,
           candleRowsUpserted: ingest.candleRowsUpserted,
           barsReplayed,
+          warmupBars,
+          enabledAgentSlugs,
+          // Ingest cache: when `true`, the Bitvavo HTTP fetch was skipped because
+          // every bar in the warmup+replay window was already in `catalog.candles`.
+          ingestCached: ingest.cached,
+          ingestCandlesAlreadyInDb: ingest.candlesAlreadyInDb,
+          ingestBarCount: ingest.ingestBarCount,
+          // Signal reuse: bars whose `(agent, candle)` coverage was already fully /
+          // partially populated for the automation user, so the Signal Agent eval
+          // was skipped or restricted to the missing agents only.
+          barsReusedFromExistingSignals,
+          barsPartiallyReused,
+          // Ingest coverage + soft warnings so the user can see "we forward-
+          // filled 4321 synthetic bars because Bitvavo had no trades there"
+          // without re-running anything. Surfaces sparse-market issues
+          // (e.g. GIGA-EUR) without aborting the run.
+          ingestCoverage: loaded.coverage,
+          ingestWarnings: loaded.warnings,
         },
       })
       .eq("id", runId);

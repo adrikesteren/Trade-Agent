@@ -1,4 +1,6 @@
 import { MarketBackfillCandlesDialog } from "@/app/(app)/markets/[id]/market-backfill-candles-dialog";
+import { MarketDeleteSignalsDialog } from "@/app/(app)/markets/[id]/market-delete-signals-dialog";
+import { MarketHeaderEvaluateSignalsButton } from "@/app/(app)/markets/[id]/market-header-evaluate-signals-button";
 import { MarketHeaderSyncButton } from "@/app/(app)/markets/[id]/market-header-sync-button";
 import { MarketCandleChart } from "@/components/market-candle-chart";
 import { RecordPageTabs } from "@/components/record-page-tabs";
@@ -7,9 +9,13 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { resolveChartDisplayIana, userTimezoneToIana } from "@/lib/locale/timezones";
 import { aggregateOhlcvToTarget } from "@/lib/markets/aggregate-ohlcv";
-import type { CandleRowJson } from "@/lib/markets/chart-types";
+import type { CandleRowJson, ChartRegimeChange, ChartSignal } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchAllMarketStorageCandles, mapCatalogCandleRowToJson } from "@/lib/markets/fetch-market-chart-candles";
+import {
+  fetchMarketChartSignalsAndRegime,
+  type RegimeInsufficientHistoryHint,
+} from "@/lib/markets/fetch-market-chart-signals";
 import { objectRegistry } from "@/lib/objects/registry";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -192,6 +198,21 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const baseCandles = [...candleRows].sort((a, b) => Date.parse(a.closeTime) - Date.parse(b.closeTime));
   const initialCandles = aggregateOhlcvToTarget(baseCandles, CHART_DEFAULT_TF);
 
+  let initialChartSignals: ChartSignal[] = [];
+  let initialRegimeChanges: ChartRegimeChange[] = [];
+  let initialRegimeInsufficient: RegimeInsufficientHistoryHint | null = null;
+  try {
+    const result = await fetchMarketChartSignalsAndRegime(supabase, {
+      marketId: id,
+      timeframe: CHART_DEFAULT_TF,
+    });
+    initialChartSignals = result.signals;
+    initialRegimeChanges = result.regimeChanges;
+    initialRegimeInsufficient = result.regimeInsufficient;
+  } catch (e) {
+    console.error("market detail: chart signals fetch:", e);
+  }
+
   const metadataJson =
     market.metadata && typeof market.metadata === "object"
       ? JSON.stringify(market.metadata, null, 2)
@@ -284,6 +305,8 @@ export default async function MarketDetailPage({ params }: PageProps) {
         actions: (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <MarketBackfillCandlesDialog marketId={id} marketSymbol={market.market_symbol} />
+            <MarketHeaderEvaluateSignalsButton marketId={id} />
+            <MarketDeleteSignalsDialog marketId={id} marketSymbol={market.market_symbol} />
             <MarketHeaderSyncButton marketId={id} />
           </div>
         ),
@@ -385,6 +408,9 @@ export default async function MarketDetailPage({ params }: PageProps) {
             marketId={id}
             initialTimeframe={CHART_DEFAULT_TF}
             initialCandles={initialCandles}
+            initialChartSignals={initialChartSignals}
+            initialRegimeChanges={initialRegimeChanges}
+            initialRegimeInsufficient={initialRegimeInsufficient}
             chartDisplayIana={chartDisplayIana}
             userTimezone={prefs.timezone}
             decimalFormat={prefs.decimal_format}

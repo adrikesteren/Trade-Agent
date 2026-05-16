@@ -1,6 +1,7 @@
 import type { ExecutorAssetFilterMode } from "@/app/(app)/executors/actions";
 import { ExecutorDetailBalanceActions } from "@/app/(app)/executors/[id]/executor-detail-balance-actions";
 import { ExecutorHistoricalRunHeaderAction } from "@/app/(app)/executors/[id]/executor-historical-run-header-action";
+import { ExecutorResetTradeHeaderAction } from "@/app/(app)/executors/[id]/executor-reset-trade-header-action";
 import { ExecutorEditDialog } from "@/app/(app)/executors/[id]/executor-edit-dialog";
 import { ExecutorQuoteBudgetCreateDialog } from "@/app/(app)/executors/[id]/executor-quote-budget-create-dialog";
 import { ExecutorQuoteBudgetDeleteDialog } from "@/app/(app)/executors/[id]/executor-quote-budget-delete-dialog";
@@ -338,7 +339,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     .schema("trading")
     .from("executors")
     .select(
-      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, updated_at, max_risk_per_trade, max_open_positions, max_exposure_per_symbol_eur, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_exposure_by_market, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
+      "id, wallet_id, name, enabled, exchange_id, execution_mode, asset_filter_mode, filter_asset_ids, allowed_sides, updated_at, max_risk_per_trade, max_open_positions, daily_loss_limit_eur, max_drawdown_eur, cooldown_after_losses, allow_add, mediator_rails_extra, profit_taking_enabled, moving_floor_trail_pct, moving_floor_activation_profit_pct, moving_floor_timeframe, slack_trade_notifications_enabled, exchange_api_key, exchange_api_secret, historical_start_date, historical_end_date, risk_open_position_count, risk_daily_pnl_eur, risk_runtime_max_drawdown_eur, risk_kill_switch, risk_consecutive_losses",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -652,7 +653,10 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                   }
                 />
                 {String(ex.execution_mode) === "historical" ? (
-                  <ExecutorHistoricalRunHeaderAction executorId={id} />
+                  <>
+                    <ExecutorHistoricalRunHeaderAction executorId={id} />
+                    <ExecutorResetTradeHeaderAction executorId={id} />
+                  </>
                 ) : null}
                 <ExecutorEditDialog
                   executorId={id}
@@ -799,7 +803,6 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                   <RecordPageGrid>
                     <Output label="Max risk per trade (0–1)" type="text" value={String(ex.max_risk_per_trade ?? "—")} />
                     <Output label="Max open positions" type="number" value={ex.max_open_positions ?? 0} />
-                    <Output label="Max exposure per symbol (EUR)" type="text" value={fmtEur(ex.max_exposure_per_symbol_eur)} />
                     <Output label="Daily loss limit (EUR)" type="text" value={fmtEur(ex.daily_loss_limit_eur)} />
                     <Output label="Max drawdown (EUR)" type="text" value={fmtEur(ex.max_drawdown_eur)} />
                     <Output label="Cooldown after losses" type="number" value={ex.cooldown_after_losses ?? 0} />

@@ -29,10 +29,19 @@ type Props = {
   marketSymbol?: string | null;
 };
 
+type SuccessFeedback = {
+  chunkCount: number;
+  groupId: string | null;
+  messageId: string | null;
+  inline: boolean;
+};
+
 /**
  * Header action: opens a popup with a `startDate` (required) + `endDate` (optional, defaults to today UTC)
- * form. On Run we enqueue the {@link enqueueMarketBackfillCandlesViaRelay} job on the Relay App with a
- * 30-minute timeout, then close the dialog.
+ * form. On Run we enqueue the {@link enqueueMarketBackfillCandlesViaRelay} job — when Relay is configured
+ * the work is split into UTC day chunks and published as a sequential Relay message group so each chunk
+ * gets its own timeout / retry budget. The dialog stays open with a success summary so the user can copy
+ * the group id; clicking Close (or hitting esc) dismisses it.
  */
 export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
   const uid = useId();
@@ -40,6 +49,7 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<SuccessFeedback | null>(null);
   const [pending, startTransition] = useTransition();
 
   const today = todayUtcYmd();
@@ -48,6 +58,7 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
     setStartDate("");
     setEndDate("");
     setError(null);
+    setSuccess(null);
   };
 
   return (
@@ -68,7 +79,10 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          if (!next) setError(null);
+          if (!next) {
+            setError(null);
+            setSuccess(null);
+          }
         }}
       >
         <DialogContent className="w-[min(92vw,30rem)]">
@@ -77,16 +91,27 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
           </DialogTitle>
           <DialogDescription>
             Ingest Bitvavo OHLCV history into the catalog and run the Signal Agent for every closed bar in the
-            range. Dates are inclusive UTC. Leave the end date empty to use today.
+            range. Dates are inclusive UTC. Leave the end date empty to use today. Long ranges are split into
+            ~30-day chunks and published as a sequential Relay message group.
           </DialogDescription>
 
           {error ? <Alert tone="error">{error}</Alert> : null}
+          {success ? (
+            <Alert tone="success">
+              {success.inline
+                ? `Ran inline — ${success.chunkCount} backfill completed.`
+                : success.chunkCount === 1
+                  ? `Queued 1 backfill chunk on Relay${success.messageId ? ` (message ${success.messageId.slice(0, 8)}…)` : ""}.`
+                  : `Queued ${success.chunkCount} backfill chunks on Relay${success.groupId ? ` (group ${success.groupId.slice(0, 8)}…)` : ""}.`}
+            </Alert>
+          ) : null}
 
           <form
             className="bk-stack bk-stack_gap-sm mt-3"
             onSubmit={(ev) => {
               ev.preventDefault();
               setError(null);
+              setSuccess(null);
 
               const start = startDate.trim();
               const end = endDate.trim();
@@ -113,7 +138,12 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
                   setError(r.error);
                   return;
                 }
-                setOpen(false);
+                setSuccess({
+                  chunkCount: r.chunkCount ?? 1,
+                  groupId: r.relayMessageGroupId ?? null,
+                  messageId: r.relayMessageId ?? null,
+                  inline: !r.queued,
+                });
               });
             }}
           >
@@ -152,11 +182,11 @@ export function MarketBackfillCandlesDialog({ marketId, marketSymbol }: Props) {
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="ghost" size="sm" disabled={pending}>
-                  Cancel
+                  {success ? "Close" : "Cancel"}
                 </Button>
               </DialogClose>
               <Button type="submit" variant="brand" size="sm" disabled={pending}>
-                {pending ? "Running…" : "Run"}
+                {pending ? "Queueing…" : success ? "Run again" : "Run"}
               </Button>
             </DialogFooter>
           </form>

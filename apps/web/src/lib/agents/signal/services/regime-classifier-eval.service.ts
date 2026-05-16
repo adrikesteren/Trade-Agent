@@ -66,13 +66,19 @@ function smaAt(barsAsc: RegimeClassifierBar[], i: number, period: number): numbe
 }
 
 export function evaluateRegimeAtClose(params: {
-  /** Daily (or other trend-timeframe) bars, ascending. Must include the target bar. */
+  /** Trend-timeframe bars, ascending (caller aggregates 15m → trend tf). Must include the target bar. */
   barsAsc: RegimeClassifierBar[];
   targetCloseTimeIso: string;
-  /** SMA period for the trend (default 200 daily bars ≈ 200-day MA). */
+  /** SMA period in trend-timeframe bars (default seed = 200). */
   maPeriod: number;
-  /** Number of bars-back for the slope estimate (default 5). */
+  /** Slope lookback in trend-timeframe bars (default seed = 20). */
   slopeBars: number;
+  /**
+   * Trend-timeframe bar length in minutes (e.g. `1440` for daily, `240` for 4h, `60` for 1h).
+   * Recorded in `metadata.trendTimeframeMinutes` so the chart / debugger knows which
+   * timeframe the SMA was computed on.
+   */
+  trendTimeframeMinutes: number;
   /**
    * Minimum |slopePct| to consider the trend "directional".
    * Below this, regime is `sideways` regardless of price-vs-MA.
@@ -90,6 +96,7 @@ export function evaluateRegimeAtClose(params: {
     targetCloseTimeIso,
     maPeriod,
     slopeBars,
+    trendTimeframeMinutes,
     slopePctEps = 0.0005,
     distancePctEps = 0.005,
   } = params;
@@ -101,7 +108,7 @@ export function evaluateRegimeAtClose(params: {
       signalSide: "long",
       confidence: null,
       reasons: ["invalid_params"],
-      metadata: { rule, regime: "sideways", maPeriod, slopeBars },
+      metadata: { rule, regime: "sideways", maPeriod, slopeBars, trendTimeframeMinutes },
     };
   }
 
@@ -112,7 +119,7 @@ export function evaluateRegimeAtClose(params: {
       signalSide: "long",
       confidence: null,
       reasons: ["target_bar_not_in_series"],
-      metadata: { rule, regime: "sideways", targetCloseTimeIso },
+      metadata: { rule, regime: "sideways", targetCloseTimeIso, trendTimeframeMinutes },
     };
   }
 
@@ -123,7 +130,13 @@ export function evaluateRegimeAtClose(params: {
       signalSide: "long",
       confidence: null,
       reasons: ["insufficient_bars"],
-      metadata: { rule, regime: "sideways", needBars: needed + 1, haveBars: idx + 1 },
+      metadata: {
+        rule,
+        regime: "sideways",
+        needBars: needed + 1,
+        haveBars: idx + 1,
+        trendTimeframeMinutes,
+      },
     };
   }
 
@@ -137,7 +150,7 @@ export function evaluateRegimeAtClose(params: {
       signalSide: "long",
       confidence: null,
       reasons: ["non_finite_metrics"],
-      metadata: { rule, regime: "sideways", maNow, maPrev, closeNow },
+      metadata: { rule, regime: "sideways", maNow, maPrev, closeNow, trendTimeframeMinutes },
     };
   }
 
@@ -172,12 +185,13 @@ export function evaluateRegimeAtClose(params: {
     intent: "HOLD",
     signalSide,
     confidence,
-    reasons: [`regime=${regime} maPeriod=${maPeriod} slopeBars=${slopeBars}`],
+    reasons: [`regime=${regime} maPeriod=${maPeriod} slopeBars=${slopeBars} tf=${trendTimeframeMinutes}m`],
     metadata: {
       rule,
       regime,
       maPeriod,
       slopeBars,
+      trendTimeframeMinutes,
       maNow,
       maPrev,
       closeNow,

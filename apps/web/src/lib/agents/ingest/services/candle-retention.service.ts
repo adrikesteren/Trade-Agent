@@ -1,16 +1,34 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
-/** How far back we keep closed candles (wall clock, UTC) for bar counts / non-empty sync floors. */
-export const CANDLE_RETENTION_HOURS = 72; // 3 days — lighter on DB/disk for dev
+/**
+ * Incremental-sync configuration for `catalog.candles` ingest.
+ *
+ * **Naming clarification:** these constants control how *far back* an incremental sync looks
+ * when it runs (a fetch-window cap) — they do **not** delete or expire any rows. We keep all
+ * historical candles in `catalog.candles` indefinitely (no TTL pruning anymore — see the
+ * companion migration for the "removed deleteExpiredCandleTimestamps" cleanup).
+ *
+ * If you want a sync to backfill a specific historical date range, use the historical
+ * ingest path (`historical-candles-ingest.service.ts` / "Backfill candles" action) — that's
+ * unbounded and not capped by these constants.
+ */
 
 /**
- * When `catalog.candle_timestamps` is empty (or latest row has no close), the EUR sweep seeds
- * this much history on first prepare — 5d at 15m = 480 bars.
+ * Per-call fetch window for incremental syncs ("how many recent bars do we ask Bitvavo
+ * for on each sweep?"). Bitvavo's REST API caps a single call at 1440 candles, so for
+ * 15m we max out at 1440 × 15min = 21,600 minutes = 360 hours = 15 days. This default
+ * leaves a comfortable buffer; bumping it past the cap is a no-op (`barsForIncrementalFetchWindow`
+ * clamps to 1440).
+ *
+ * Was historically named `CANDLE_RETENTION_HOURS = 72` (3 days), suggesting it
+ * controlled deletion. It never did — see the file-level note above.
+ */
+export const CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS = 360;
+
+/**
+ * Seed window for the very first EUR-sweep prepare on an empty `catalog.candle_timestamps`.
+ * Used only on the first run; subsequent runs incrementally extend forward from the latest
+ * recorded bucket.
  */
 export const CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS = 5 * 24;
-
-/** Delete `catalog.candle_timestamps` rows whose bar has fully ended before this age (wall clock). */
-export const CANDLE_TIMESTAMP_TTL_HOURS = 365 * 24;
 
 /** Bitvavo allows at most 1440 candles per REST call. */
 const BITVAVO_MAX_LIMIT = 1440;
@@ -24,35 +42,21 @@ const TF_MINUTES: Record<string, number> = {
 };
 
 /**
- * Number of bars needed to cover the retention window (ceiling), capped for Bitvavo API.
+ * Number of bars to fetch on a single incremental sync call, derived from
+ * {@link CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS} and clamped to Bitvavo's per-call cap.
+ *
+ * This is **only a fetch-window size**: bars older than the window stay in the DB; they
+ * just won't be re-fetched on the next sweep.
  */
-export function barsForRetention(timeframe: string, retentionHours = CANDLE_RETENTION_HOURS): number {
+export function barsForIncrementalFetchWindow(
+  timeframe: string,
+  windowHours = CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS,
+): number {
   const m = TF_MINUTES[timeframe];
   if (!m) {
-    throw new Error(`Unknown timeframe for retention: ${timeframe}`);
+    throw new Error(`Unknown timeframe for incremental fetch window: ${timeframe}`);
   }
-  const retentionMinutes = retentionHours * 60;
-  const bars = Math.ceil(retentionMinutes / m);
+  const windowMinutes = windowHours * 60;
+  const bars = Math.ceil(windowMinutes / m);
   return Math.min(Math.max(bars, 1), BITVAVO_MAX_LIMIT);
-}
-
-/**
- * Deletes `catalog.candle_timestamps` whose `close_time` is older than `maxAgeHours` (UTC wall clock).
- * Related `catalog.candles` rows are removed via ON DELETE CASCADE.
- */
-export async function deleteExpiredCandleTimestamps(
-  supabase: SupabaseClient,
-  maxAgeHours = CANDLE_TIMESTAMP_TTL_HOURS,
-): Promise<void> {
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000).toISOString();
-
-  const { error } = await supabase
-    .schema("catalog")
-    .from("candle_timestamps")
-    .delete()
-    .lt("close_time", cutoff);
-
-  if (error) {
-    throw new Error(error.message);
-  }
 }

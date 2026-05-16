@@ -10,3 +10,12 @@ dist
 
 # Supabase CLI local metadata (do not commit)
 supabase/.temp/
+
+# Claude Code session artifacts (worktrees, plans, launch configs)
+.claude/
+
+# Editor metadata
+.vscode/
+
+# Stray npm lockfile (we use pnpm)
+package-lock.json

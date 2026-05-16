@@ -1,13 +1,7 @@
 import type { CandleRowJson, ChartTimeframe } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import { bucketStartMs, TIMEFRAME_MINUTES } from "@/lib/markets/aggregate-bucket-key";
 import { candleTimeToUnixSeconds } from "@/lib/agents/ingest/services/candle-time.service";
-
-const MINUTES: Record<ChartTimeframe, number> = {
-  "15m": 15,
-  "1h": 60,
-  "4h": 240,
-  "1d": 1440,
-};
 
 const SOURCE = CATALOG_STORAGE_TIMEFRAME as ChartTimeframe;
 
@@ -22,11 +16,11 @@ export function aggregateOhlcvToTarget(rows: CandleRowJson[], target: ChartTimef
     );
   }
 
-  if (MINUTES[target] < MINUTES[SOURCE]) {
+  if (TIMEFRAME_MINUTES[target] < TIMEFRAME_MINUTES[SOURCE]) {
     throw new Error(`Cannot build ${target} candles from ${SOURCE} storage`);
   }
 
-  const periodMs = MINUTES[target] * 60_000;
+  const periodMs = TIMEFRAME_MINUTES[target] * 60_000;
   const sorted = [...rows].sort(
     (a, b) => candleTimeToUnixSeconds(a.openTime) - candleTimeToUnixSeconds(b.openTime),
   );
@@ -35,10 +29,10 @@ export function aggregateOhlcvToTarget(rows: CandleRowJson[], target: ChartTimef
   const buckets = new Map<number, CandleRowJson[]>();
   for (const row of sorted) {
     const t = candleTimeToUnixSeconds(row.openTime) * 1000;
-    const bucketStart = Math.floor(t / periodMs) * periodMs;
-    const list = buckets.get(bucketStart);
+    const start = bucketStartMs(t, target);
+    const list = buckets.get(start);
     if (list) list.push(row);
-    else buckets.set(bucketStart, [row]);
+    else buckets.set(start, [row]);
   }
 
   const keys = [...buckets.keys()].sort((a, b) => a - b);

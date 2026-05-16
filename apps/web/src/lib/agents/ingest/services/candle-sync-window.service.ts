@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  CANDLE_RETENTION_HOURS,
+  CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS,
   CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS,
 } from "@/lib/agents/ingest/services/candle-retention.service";
 import { patchSyncRunMetadata } from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
@@ -34,14 +34,19 @@ export type CandleSyncWindowCompute =
 /**
  * Computes the candle timestamp window: end = last closed bucket close from "now";
  * start = last stored close as next open, or an initial-history floor when the table is empty
- * (see `CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS`), else `retentionHours` when rows exist but
- * the latest close is missing.
+ * (see `CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS`).
+ *
+ * `fetchWindowHours` is unused today — kept for API stability with older callers; defaults to
+ * {@link CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS}. The actual lookback when the table is empty
+ * uses `CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS` (5 days), and otherwise picks up from the
+ * last stored close — no historical data is ever skipped.
  */
 export async function computeCandleSyncWindow(
   admin: SupabaseClient,
   timeframe: string,
-  retentionHours = CANDLE_RETENTION_HOURS,
+  fetchWindowHours = CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS,
 ): Promise<CandleSyncWindowCompute> {
+  void fetchWindowHours;
   const stepMs = timeframeDurationMs(timeframe);
   const nowMs = Date.now();
   const endCloseMs = floorLastClosedCloseMs(nowMs, stepMs);
@@ -168,13 +173,21 @@ export async function bulkUpsertCandleTimestampsForWindow(
       close_time: new Date(open + stepMs).toISOString(),
     });
   }
+  // `ignoreDuplicates: true` makes PostgREST emit `ON CONFLICT DO NOTHING`
+  // instead of `ON CONFLICT DO UPDATE`. For the historical replay path this
+  // matters: the call is idempotent (we only need the rows to exist, not to
+  // be re-written), and on a large window (1 year of 15m = ~35k rows) the
+  // DO UPDATE path repeatedly rewrites every existing row, blows past the
+  // statement_timeout, and surfaces as "candle_timestamps: canceling
+  // statement due to statement timeout". DO NOTHING is a fast no-op when
+  // rows already exist.
   const batchSize = 500;
   for (let i = 0; i < pairs.length; i += batchSize) {
     const slice = pairs.slice(i, i + batchSize);
     const { error } = await admin
       .schema("catalog")
       .from("candle_timestamps")
-      .upsert(slice, { onConflict: "open_time,close_time" });
+      .upsert(slice, { onConflict: "open_time,close_time", ignoreDuplicates: true });
     if (error) throw new Error(`candle_timestamps: ${error.message}`);
   }
 }

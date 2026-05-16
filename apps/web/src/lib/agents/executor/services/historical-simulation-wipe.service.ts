@@ -76,7 +76,6 @@ export async function wipeHistoricalExecutorSimulationState(
     .from("executors")
     .update({
       risk_open_position_count: 0,
-      risk_exposure_by_market: {},
       risk_daily_pnl_eur: 0,
       risk_runtime_max_drawdown_eur: 0,
       risk_consecutive_losses: 0,

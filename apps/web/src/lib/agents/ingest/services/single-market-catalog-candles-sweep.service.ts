@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
+import { barsForIncrementalFetchWindow } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
 
@@ -50,7 +50,7 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
   }
 
   const timeframe = CATALOG_STORAGE_TIMEFRAME;
-  const barsPerMarket = barsForRetention(timeframe);
+  const barsPerMarket = barsForIncrementalFetchWindow(timeframe);
 
   const { data: ordered, error: listErr } = await supabase
     .schema("catalog")

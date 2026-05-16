@@ -108,6 +108,27 @@ Phase 3 of Trading Framework v2 turns the v1 single-rule pipeline into a small *
 
 All P3 agents stamp `signal_side` (`long` / `short`) on `trading.signals`. v1 agents default to `long` for backwards compatibility.
 
+### Dispatcher routing + historical warmup (May 2026 wireup)
+
+The regime classifier and multi-timeframe confluence agents are routed through the same dispatchers as the v1 agents:
+
+- Live: [`signals-catalog-close-run.service.ts`](../apps/web/src/lib/agents/signal/services/signals-catalog-close-run.service.ts) — one dispatch per closed 15m bar across the active Bitvavo catalog.
+- Historical replay: [`market-close-signal-upsert.service.ts`](../apps/web/src/lib/agents/signal/services/market-close-signal-upsert.service.ts), called per bar by the replay orchestrator.
+
+Both branches feed the same 15m series into an in-memory **bar aggregator** ([`aggregate-replay-bars.ts`](../apps/web/src/lib/markets/aggregate-replay-bars.ts)) to produce the 4h and 1d series the evaluators need. The aggregator runs on every dispatch, so no extra storage is required — but it does need enough source bars to fill the target lookback (see warmup below).
+
+**Historical warmup** is sized per run by [`computeWarmupBars`](../apps/web/src/lib/agents/ingest/services/historical-candles-for-replay-load.service.ts), which derives the bar count from each agent's `config` JSON (no hardcoded per-slug numbers — change the seed and warmup tracks automatically). With the current seed:
+
+| Agent | Lookback (4h / 15m) | Warmup in 15m bars |
+| --- | --- | --- |
+| `regime-classifier-15m-v1` | SMA(`maPeriod`) on `trendTimeframeMinutes` (default 4h × 200) | 200 × 16 = **3_200** |
+| `multi-tf-confluence-15m-v1` | SMA(`trendMa`) on 4h (default 50) | 50 × 16 = **800** |
+| v1 entry agents | SMA/RSI/ATR ≤ 30 on 15m | floor = **120** |
+
+The replay orchestrator threads enabled agents (slug + config) through both `loadHistoricalCandlesForReplay` (in-memory load) and `ingestHistoricalCandles` → `computeHistoricalCandleWindow.extraWarmupMs` (Bitvavo fetch lower bound). The window helper returns `ingestStartOpenMs` / `ingestBarCount` for the Bitvavo fetch while keeping `barCount` at the replay-only count (which the orchestrator writes to `executor_historical_runs.bars_total`).
+
+**Live mode**: `catalog.candles` has no TTL anymore — every historical bar is kept indefinitely (the legacy `CANDLE_RETENTION_HOURS = 72` was misnamed and never deleted anything; it has been renamed to `CANDLE_INCREMENTAL_FETCH_WINDOW_HOURS` and only caps the per-call fetch window). Once a market has ~33 days of 15m history backfilled, the regime classifier produces real bull/bear/sideways labels for every closed bar.
+
 ### P3 cross-cutting filters (configurable per agent)
 
 - **Volatility gate** (`minAtrPct`, `maxAtrPct`, optional `atrPeriod`) — applied to **ENTER** intents in all three deterministic entry agents. Skips bars where ATR-as-percentage-of-price falls outside the configured band. Pure helper: [`apps/web/src/lib/markets/atr-volatility-gate.ts`](../apps/web/src/lib/markets/atr-volatility-gate.ts).
@@ -145,9 +166,18 @@ Helpers:
 - [`sar-decision-emit.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/sar-decision-emit.service.ts) — pure proposal emitter (paired EXIT + ENTER).
 - [`sar-mediator-run.service.ts`](../apps/web/src/lib/agents/trade-mediator/services/sar-mediator-run.service.ts) — Supabase wiring (fetch previous regime points + open positions, write paired decisions).
 
-### Bitvavo specifics (long-only spot)
+### Bitvavo specifics (spot + 1x borrow-short)
 
-`catalog.exchanges` capability flags for Bitvavo are `supports_spot_buy = true`, all others `false`. The executor form refuses `short` checkboxes for Bitvavo executors. SAR on Bitvavo therefore reduces to **EXIT-long only on a confirmed bull→bear flip** (no ENTER-short pair). When/if margin/short capable exchanges are added, SAR will fire the full pair without code changes — only `executor.allowed_sides` and `catalog.exchanges` flags need updating.
+Capability flags now live on `catalog.markets` (per market), with an exchange-level rollup view at `catalog.v_exchange_capabilities`. Bitvavo's market-level picture as of February 2026:
+
+- **All** Bitvavo markets: `supports_spot_buy = true`, `supports_spot_sell = true`.
+- The 20 EUR pairs that gained borrow-and-sell shorts on 4 Feb 2026 (BTC, ETH, XRP, SOL, ADA, LINK, SUI, DOGE, HBAR, AVAX, TAO, LTC, ONDO, TRX, FET, VET, SHIB, PEPE, XLM, QNT): `supports_margin_short = true`.
+- Every other Bitvavo market: `supports_margin_short = false`.
+- `supports_margin_long = false` everywhere (Bitvavo has no leveraged longs).
+
+The executor form's **"Trading stance"** radio offers "Both (SAR)" on Bitvavo because the rollup view says shorts exist on at least one market. On a **shortable** Bitvavo market SAR fires the full EXIT-long + ENTER-short pair through the mediator. On a **non-shortable** Bitvavo market the mediator skips the short half with `reason_codes=["side_not_supported_by_market"]` and only the EXIT-long survives. The executor enforces the same gate as defense-in-depth before placing or simulating an order.
+
+Live short execution against Bitvavo's borrow-and-sell API is **not** wired up yet — the executor currently rejects every short with `short_execution_not_implemented`. That stub catches SAR-emitted shorts loud rather than silently flipping them into a buy. Wiring the live borrow client is a separate piece of work (API key flow, leen-kosten in PnL, liquidatie-monitoring, MiCA-kennistest acknowledgment).
 
 ### Paper-validation checklist
 

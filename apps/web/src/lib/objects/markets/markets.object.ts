@@ -67,5 +67,29 @@ export class MarketsModel extends ObjectMetadata {
         ),
       );
     }
+
+    // Per-market capability flags (see 20260724000000_market_capabilities.sql).
+    // Surface them in the market list/detail so users can audit which markets
+    // accept which sides without dropping into SQL.
+    this.fieldRegistry.add(
+      new ObjectFieldMetadata("supports_spot_buy", "Supports spot buy", ObjectFieldDataTypes.Boolean, {
+        sourceObject: this,
+      }),
+    );
+    this.fieldRegistry.add(
+      new ObjectFieldMetadata("supports_spot_sell", "Supports spot sell", ObjectFieldDataTypes.Boolean, {
+        sourceObject: this,
+      }),
+    );
+    this.fieldRegistry.add(
+      new ObjectFieldMetadata("supports_margin_long", "Supports margin long", ObjectFieldDataTypes.Boolean, {
+        sourceObject: this,
+      }),
+    );
+    this.fieldRegistry.add(
+      new ObjectFieldMetadata("supports_margin_short", "Supports margin short", ObjectFieldDataTypes.Boolean, {
+        sourceObject: this,
+      }),
+    );
   }
 }
