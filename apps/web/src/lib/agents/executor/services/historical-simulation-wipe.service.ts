@@ -4,6 +4,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 
 /**
  * Clears simulated trading state for a historical replay on one market, without touching the balance ledger.
@@ -32,34 +35,24 @@ export async function wipeHistoricalExecutorSimulationState(
     const chunk = 80;
     for (let i = 0; i < decisionIds.length; i += chunk) {
       const part = decisionIds.slice(i, i + chunk);
-      const { data: ordRows, error: oSelErr } = await admin
-        .schema("trading")
-        .from("orders")
-        .select("id")
-        .in("decision_id", part);
-      if (oSelErr) throw new Error(oSelErr.message);
-      const orderIds = (ordRows ?? []).map((r) => r.id as string).filter(Boolean);
+      const ordRows = await OrdersSelector.selectIdsByDecisionIds(admin, part);
+      const orderIds = ordRows.map((r) => r.id).filter(Boolean);
       if (orderIds.length) {
         for (let j = 0; j < orderIds.length; j += chunk) {
           const orderPart = orderIds.slice(j, j + chunk);
-          const { error: fDel } = await admin.schema("trading").from("fills").delete().in("order_id", orderPart);
-          if (fDel) throw new Error(fDel.message);
-          const { error: oDel } = await admin.schema("trading").from("orders").delete().in("id", orderPart);
-          if (oDel) throw new Error(oDel.message);
+          await FillsSelector.deleteByOrderIds(admin, orderPart);
+          await OrdersSelector.deleteByIds(admin, orderPart);
         }
       }
       await DecisionsSelector.deleteByIds(admin, part);
     }
   }
 
-  const { error: posDel } = await admin
-    .schema("trading")
-    .from("positions")
-    .delete()
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId);
-  if (posDel) throw new Error(posDel.message);
+  await PositionsSelector.deleteByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   const { error: flDel } = await admin
     .schema("trading")

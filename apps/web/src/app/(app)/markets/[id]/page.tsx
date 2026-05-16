@@ -13,6 +13,7 @@ import { fetchAllMarketStorageCandles, mapCatalogCandleRowToJson } from "@/lib/m
 import { objectRegistry } from "@/lib/objects/registry";
 import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -211,16 +212,13 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const SIGNAL_IN_CHUNK = 100;
   for (let i = 0; i < candleIdsForSignals.length; i += SIGNAL_IN_CHUNK) {
     const chunk = candleIdsForSignals.slice(i, i + SIGNAL_IN_CHUNK);
-    const { data: sigPart, error: sigPartErr } = await supabase
-      .schema("trading")
-      .from("signals")
-      .select("id, signal_agent_id, created_at, intent, confidence, candle_id, signal_agents ( agent_id )")
-      .in("candle_id", chunk);
-    if (sigPartErr) {
-      console.error("market detail: signals by candle_id batch:", sigPartErr.message);
+    try {
+      const sigPart = await SignalsSelector.selectForMarketRelatedByCandleIds(supabase, chunk);
+      signalRowsRaw.push(...(sigPart as MarketRelatedSignalRaw[]));
+    } catch (e) {
+      console.error("market detail: signals by candle_id batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    signalRowsRaw.push(...((sigPart ?? []) as MarketRelatedSignalRaw[]));
   }
 
   const relatedSignals = sortMarketRelatedSignals(

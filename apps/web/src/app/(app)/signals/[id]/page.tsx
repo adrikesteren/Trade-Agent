@@ -5,6 +5,7 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -101,16 +102,14 @@ export default async function SignalDetailPage({ params }: PageProps) {
   const fmtConfidence = (v: number | string | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const { data: sigRow, error: sigErr } = await supabase
-    .schema("trading")
-    .from("signals")
-    .select(
-      "id, signal_agent_id, candle_id, intent, confidence, reasons, metadata, created_at, signal_agents ( agent_id )",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  let sigRow: SignalsSelector.SignalDetailRow | null = null;
+  try {
+    sigRow = await SignalsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
 
-  if (sigErr || !sigRow) notFound();
+  if (!sigRow) notFound();
 
   const rowDb = sigRow as SignalRowDb;
   const cid = String(rowDb.candle_id ?? "").trim();

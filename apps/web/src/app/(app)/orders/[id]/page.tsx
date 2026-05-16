@@ -7,7 +7,9 @@ import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -120,18 +122,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const { data: orderRow, error: ordErr } = await supabase
-    .schema("trading")
-    .from("orders")
-    .select(
-      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( signals ( candle_id ) )",
-    )
-    .eq("id", orderId)
-    .maybeSingle();
+  let orderRow: OrderRowDb | null = null;
+  try {
+    orderRow = (await OrdersSelector.selectDetailById(supabase, orderId)) as OrderRowDb | null;
+  } catch {
+    /* selectDetailById throws on error — treat as not found */
+  }
+  if (!orderRow) notFound();
 
-  if (ordErr || !orderRow) notFound();
-
-  const rowDb = orderRow as OrderRowDb;
+  const rowDb: OrderRowDb = orderRow;
   const cid = String(unwrapOne(unwrapOne(rowDb.decisions)?.signals)?.candle_id ?? "").trim();
   const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
   const order = flattenOrderDetail(rowDb, candleById);
@@ -149,13 +148,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
   }
   const execName = String(exName ?? "").trim();
 
-  const { data: fillRows, count: fillCount, error: fillErr } = await supabase
-    .schema("trading")
-    .from("fills")
-    .select("id, price, quantity, fee, created_at", { count: "exact" })
-    .eq("order_id", orderId)
-    .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  const { data: fillRows, count: fillCount, error: fillErr } =
+    await FillsSelector.selectDetailByOrderIdWithCount(supabase, {
+      orderId,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    });
 
   const fills = (fillRows ?? []) as FillRow[];
   const fillTotal = typeof fillCount === "number" ? fillCount : fills.length;

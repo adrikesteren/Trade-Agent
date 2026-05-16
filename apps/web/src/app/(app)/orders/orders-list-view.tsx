@@ -13,6 +13,7 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { objectRegistry } from "@/lib/objects/registry";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -161,31 +162,19 @@ export async function OrdersListView({
   const fmtEur = (v: string | number | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  let countQ = supabase
-    .schema("trading")
-    .from("orders")
-    .select("*", { count: "exact", head: true });
-  if (executorIdFilter) {
-    countQ = countQ.eq("executor_id", executorIdFilter);
-  }
-  const { count: totalRaw, error: countError } = await countQ;
+  const { count: totalRaw, error: countError } = await OrdersSelector.countListView(supabase, {
+    executorIdFilter,
+  });
   const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("orders")
-    .select(
-      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
-    )
-    .order("created_at", { ascending: false })
-    .range(from, to);
-  if (executorIdFilter) {
-    q = q.eq("executor_id", executorIdFilter);
-  }
-  const { data: rows, error } = await q;
+  const { data: rows, error } = await OrdersSelector.selectListViewPaginated(supabase, {
+    from,
+    to,
+    executorIdFilter,
+  });
 
   const raw = (rows ?? []) as OrderRowRaw[];
   const candleIds = raw

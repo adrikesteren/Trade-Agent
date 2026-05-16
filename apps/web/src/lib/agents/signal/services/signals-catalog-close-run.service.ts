@@ -19,6 +19,7 @@ import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 /**
  * P3: parse a "min/max ATR pct" entry from `signal_agents.config` JSON.
@@ -350,10 +351,11 @@ export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Pro
             },
           };
 
-          const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-            onConflict: "user_id,signal_agent_id,candle_id",
-          });
-          if (upErr) throw new Error(`${m.market_symbol}: signals upsert: ${upErr.message}`);
+          try {
+            await SignalsSelector.upsertOneByUserAgentCandle(admin, row);
+          } catch (e) {
+            throw new Error(`${m.market_symbol}: signals upsert: ${e instanceof Error ? e.message : String(e)}`);
+          }
           signalsUpserted += 1;
         }
       }

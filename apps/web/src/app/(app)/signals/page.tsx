@@ -12,6 +12,7 @@ import { formatUsdMetric, numericOrNegInf } from "@/lib/format-usd-metric";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -215,16 +216,15 @@ export default async function SignalsPage({
   const fmtDt = (iso: string | null | undefined) => (iso ? formatDatetime(iso, prefs) : "â€”");
   const fmtConfidence = (v: number | string | null | undefined) =>
     formatDecimal(v, prefs, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const { data: rows, error } = await supabase
-    .schema("trading")
-    .from("signals")
-    .select(
-      "id, signal_agent_id, candle_id, intent, confidence, created_at, metadata, signal_agents ( agent_id )",
-    )
-    .order("created_at", { ascending: false })
-    .limit(SIGNALS_LIST_RAW_FETCH_CAP);
+  let rows: SignalsSelector.SignalListRow[] = [];
+  let error: { message: string } | null = null;
+  try {
+    rows = await SignalsSelector.selectListLatestLimited(supabase, SIGNALS_LIST_RAW_FETCH_CAP);
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
+  }
 
-  const rawDb = (rows ?? []) as SignalRowRaw[];
+  const rawDb = rows as SignalRowRaw[];
   const candleIds = rawDb.map((r) => String(r.candle_id ?? "").trim()).filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
   const raw = rawDb.map((r) => normalizeSignalRow(r, candleById));

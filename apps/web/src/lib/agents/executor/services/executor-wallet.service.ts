@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { resolveExecutorWalletId } from "@/lib/objects/executors/services/executor-wallet-resolve.service";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 
 /** Paper fee model (matches `run-executor-catalog-close` paper path). */
 export function executorPaperFeeEur(notionalEur: number): number {
@@ -98,15 +99,11 @@ export async function fetchExecutorPositionSnapshot(
   admin: SupabaseClient,
   args: { userId: string; executorId: string; marketId: string },
 ): Promise<PositionSnapshot> {
-  const { data: pos, error: selErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("quantity, avg_price, paper")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
+  const pos = await PositionsSelector.selectQtyAvgPaperByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
   if (!pos) return null;
   const qty = Number(pos.quantity ?? 0);
   const avg = pos.avg_price != null ? Number(pos.avg_price) : null;
@@ -128,14 +125,7 @@ export async function restoreExecutorPositionSnapshot(
 ): Promise<void> {
   const { userId, executorId, marketId, snapshot } = args;
   if (!snapshot || snapshot.quantity <= 0 || snapshot.avg_price == null || !Number.isFinite(snapshot.avg_price)) {
-    const { error: delErr } = await admin
-      .schema("trading")
-      .from("positions")
-      .delete()
-      .eq("user_id", userId)
-      .eq("executor_id", executorId)
-      .eq("market_id", marketId);
-    if (delErr) throw new Error(delErr.message);
+    await PositionsSelector.deleteByTrio(admin, { userId, executorId, marketId });
     return;
   }
 
@@ -148,8 +138,5 @@ export async function restoreExecutorPositionSnapshot(
     avg_price: snapshot.avg_price,
     updated_at: new Date().toISOString(),
   };
-  const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
-    onConflict: "user_id,executor_id,market_id",
-  });
-  if (upErr) throw new Error(upErr.message);
+  await PositionsSelector.upsertOneByTrio(admin, row);
 }

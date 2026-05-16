@@ -20,7 +20,10 @@ import { fetchMarketAssetIds } from "@/lib/agents/executor/services/executors-lo
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/agents/executor/services/executor-wallet.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 
 function batchSize(): number {
   const n = Number(process.env.BITVAVO_RECONCILE_BATCH ?? 40);
@@ -98,15 +101,11 @@ async function upsertPositionAfterBuy(
     price: number;
   },
 ): Promise<void> {
-  const { data: pos, error: selErr } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("id, quantity, avg_price")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId)
-    .maybeSingle();
-  if (selErr) throw new Error(selErr.message);
+  const pos = await PositionsSelector.selectIdQtyAvgByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
 
   const existingQty = Number(pos?.quantity ?? 0);
   const existingAvg = pos?.avg_price != null ? Number(pos.avg_price) : null;
@@ -127,10 +126,12 @@ async function upsertPositionAfterBuy(
     updated_at: new Date().toISOString(),
   };
 
-  const { error: upErr } = await admin.schema("trading").from("positions").upsert(row, {
-    onConflict: "user_id,executor_id,market_id",
-  });
-  if (upErr) throw new Error(`positions upsert: ${upErr.message}`);
+  try {
+    await PositionsSelector.upsertOneByTrio(admin, row);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`positions upsert: ${msg}`);
+  }
 }
 
 export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> {
@@ -142,21 +143,9 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   const admin = createServiceRoleClient();
   const lim = batchSize();
 
-  const { data: ordRows, error: ordErr } = await admin
-    .schema("trading")
-    .from("orders")
-    .select(
-      "id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( signals ( candle_id ) )",
-    )
-    .eq("paper", false)
-    .in("status", ["pending", "open"])
-    .not("external_id", "is", null)
-    .order("created_at", { ascending: true })
-    .limit(lim);
+  const ordRows = await OrdersSelector.selectLiveOpenForReconcile(admin, { limit: lim });
 
-  if (ordErr) throw new Error(ordErr.message);
-
-  const ordersRaw = (ordRows ?? []) as OrderRowDb[];
+  const ordersRaw = ordRows as OrderRowDb[];
   const candleIds = ordersRaw
     .map((r) => {
       const td = unwrapOne(r.decisions);
@@ -285,23 +274,21 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
         qtyUpdate = snap.filledAmount;
       }
 
-      const { data: existingFill } = await admin
-        .schema("trading")
-        .from("fills")
-        .select("id")
-        .eq("order_id", o.id)
-        .maybeSingle();
+      const existingFill = await FillsSelector.selectIdByOrderId(admin, o.id);
 
       if (dbStatus === "filled" && !existingFill) {
         if (Number.isFinite(fillPrice) && Number.isFinite(fillQty) && fillQty > 0) {
-          const { error: fillErr } = await admin.schema("trading").from("fills").insert({
-            user_id: o.user_id,
-            order_id: o.id,
-            price: fillPrice,
-            quantity: fillQty,
-            fee: Number.isFinite(fillFee) ? fillFee : 0,
-          });
-          if (fillErr) throw new Error(fillErr.message);
+          try {
+            await FillsSelector.insertOne(admin, {
+              user_id: o.user_id,
+              order_id: o.id,
+              price: fillPrice,
+              quantity: fillQty,
+              fee: Number.isFinite(fillFee) ? fillFee : 0,
+            });
+          } catch (e) {
+            throw new Error(e instanceof Error ? e.message : String(e));
+          }
           fillsInserted += 1;
           await upsertPositionAfterBuy(admin, {
             userId: o.user_id,
@@ -345,16 +332,14 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
       const statusChanged = String(o.status) !== dbStatus;
       const qtyChanged = qtyUpdate !== prevQty;
       if (statusChanged || qtyChanged) {
-        const { error: upOrd } = await admin
-          .schema("trading")
-          .from("orders")
-          .update({
+        await OrdersSelector.updateById(admin, {
+          id: o.id,
+          patch: {
             status: dbStatus,
             quantity: qtyUpdate,
             updated_at: new Date().toISOString(),
-          })
-          .eq("id", o.id);
-        if (upOrd) throw new Error(upOrd.message);
+          },
+        });
         updated += 1;
       }
     } catch (e) {

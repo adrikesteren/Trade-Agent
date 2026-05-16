@@ -9,6 +9,7 @@ import {
   totalPages,
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as FillsSelector from "@/lib/selectors/fills-selector";
 import { createClient } from "@/lib/supabase/server";
 import { Alert, Card, CardBody } from "@adrikesteren/adricore/blocks";
 
@@ -23,28 +24,24 @@ export default async function FillsPage({ searchParams }: FillsPageProps) {
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  let countQ = supabase.schema("trading").from("fills").select("*", { count: "exact", head: true });
-  if (orderIdFilter) {
-    countQ = countQ.eq("order_id", orderIdFilter);
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = await FillsSelector.countAll(supabase, { orderIdFilter });
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { count: totalRaw, error: countError } = await countQ;
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("fills")
-    .select("id, user_id, order_id, price, quantity, fee, created_at")
-    .order("created_at", { ascending: false })
-    .range(from, to);
-  if (orderIdFilter) {
-    q = q.eq("order_id", orderIdFilter);
+  let list: Awaited<ReturnType<typeof FillsSelector.selectListPaginated>> = [];
+  let error: { message: string } | null = null;
+  try {
+    list = await FillsSelector.selectListPaginated(supabase, { from, to, orderIdFilter });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { data: rows, error } = await q;
-
-  const list = rows ?? [];
   const extraQuery: Record<string, string | undefined> = {};
   if (orderIdFilter) extraQuery.orderId = orderIdFilter;
 

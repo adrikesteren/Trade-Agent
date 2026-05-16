@@ -9,6 +9,7 @@ import { objectRegistry } from "@/lib/objects/registry";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -170,13 +171,11 @@ export default async function TradeDecisionDetailPage({ params }: PageProps) {
   }
   const execName = String(exName ?? "").trim();
 
-  const { data: ordRows, count: ordCount, error: ordErr } = await supabase
-    .schema("trading")
-    .from("orders")
-    .select("id, side, notional_eur, status, created_at", { count: "exact" })
-    .eq("decision_id", id)
-    .order("created_at", { ascending: false })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  const { data: ordRows, count: ordCount, error: ordErr } =
+    await OrdersSelector.selectForDecisionWithCount(supabase, {
+      decisionId: id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    });
 
   const orders = (ordRows ?? []) as OrderRow[];
   const orderTotal = typeof ordCount === "number" ? ordCount : orders.length;

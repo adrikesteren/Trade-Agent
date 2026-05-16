@@ -28,6 +28,8 @@ import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 export type MediatorCatalogCloseBody = {
   closeTimeIso: string;
@@ -430,16 +432,17 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     if (!bar) continue;
 
     for (const signalUid of signalQueryUserIds) {
-      const { data: sigData, error: sigErr } = await admin
-        .schema("trading")
-        .from("signals")
-        .select("id, intent, created_at, metadata, signal_agents ( agent_id )")
-        .eq("user_id", signalUid)
-        .eq("candle_id", bar.candleId);
+      let sigData: SignalsSelector.SignalForMediatorRow[];
+      try {
+        sigData = await SignalsSelector.selectForMediatorByUserAndCandle(admin, {
+          userId: signalUid,
+          candleId: bar.candleId,
+        });
+      } catch (e) {
+        throw new Error(`${marketSymbol}: signals select: ${e instanceof Error ? e.message : String(e)}`);
+      }
 
-      if (sigErr) throw new Error(`${marketSymbol}: signals select: ${sigErr.message}`);
-
-      const matched = (sigData ?? []) as SignalRow[];
+      const matched = sigData as SignalRow[];
       matched.sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
 
       const executors = onlyExecutorId
@@ -519,16 +522,11 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           continue;
         }
 
-        const { data: posRow, error: posErr } = await admin
-          .schema("trading")
-          .from("positions")
-          .select("quantity, avg_price")
-          .eq("user_id", ownerId)
-          .eq("executor_id", ex.id)
-          .eq("market_id", marketId)
-          .maybeSingle();
-
-        if (posErr) throw new Error(posErr.message);
+        const posRow = await PositionsSelector.selectQtyAvgByTrio(admin, {
+          userId: ownerId,
+          executorId: ex.id,
+          marketId,
+        });
         const positionQty = Number(posRow?.quantity ?? 0);
         const avgPrice = Number(posRow?.avg_price ?? 0);
         const inPosition = positionQty > 0;

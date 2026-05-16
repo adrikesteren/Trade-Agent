@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ReplayCandleBar } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 import { upsertSignalsForMarketCloseFromBars } from "./market-close-signal-upsert.service";
 
@@ -68,16 +69,14 @@ export async function replayMissingSignalsForBars(
     barsInspected += 1;
     if (expectedCount === 0) continue;
 
-    const { data: existingRows, error: sigErr } = await admin
-      .schema("trading")
-      .from("signals")
-      .select("signal_agent_id")
-      .eq("candle_id", bar.id);
-    if (sigErr) throw new Error(`signals lookup for candle ${bar.id}: ${sigErr.message}`);
+    let existingRows: Awaited<ReturnType<typeof SignalsSelector.selectSignalAgentIdsByCandleId>>;
+    try {
+      existingRows = await SignalsSelector.selectSignalAgentIdsByCandleId(admin, bar.id);
+    } catch (e) {
+      throw new Error(`signals lookup for candle ${bar.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
-    const existingAgentIds = new Set(
-      (existingRows ?? []).map((r) => String((r as { signal_agent_id: string }).signal_agent_id)),
-    );
+    const existingAgentIds = new Set(existingRows.map((r) => String(r.signal_agent_id)));
 
     const missingAgentIds = activeAgentIds.filter((id) => !existingAgentIds.has(id));
     if (missingAgentIds.length === 0) {

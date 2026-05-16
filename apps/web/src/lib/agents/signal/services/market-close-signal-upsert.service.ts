@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 import { closeTimesMatch } from "@/lib/trading/close-time-match";
 
 import { evaluateMaCrossAtClose, type MaCrossBar } from "./ma-cross-eval.service";
@@ -159,10 +160,11 @@ export async function upsertSignalsForMarketCloseFromBars(
         },
       };
 
-      const { error: upErr } = await admin.schema("trading").from("signals").upsert(row, {
-        onConflict: "user_id,signal_agent_id,candle_id",
-      });
-      if (upErr) throw new Error(`${body.marketSymbol}: signals upsert: ${upErr.message}`);
+      try {
+        await SignalsSelector.upsertOneByUserAgentCandle(admin, row);
+      } catch (e) {
+        throw new Error(`${body.marketSymbol}: signals upsert: ${e instanceof Error ? e.message : String(e)}`);
+      }
       signalsUpserted += 1;
     }
   }

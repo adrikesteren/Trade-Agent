@@ -3,7 +3,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 import { detectRegimeFlip, type RegimePoint, type RegimeLabel } from "./regime-flip-detect.service";
 import { emitSarDecisions, type PositionSide, type SarOpenPosition } from "./sar-decision-emit.service";
@@ -39,25 +41,19 @@ async function fetchPreviousRegimeSignals(
   }
   if (!signalAgentId) return [];
 
-  const { data, error } = await admin
-    .schema("trading")
-    .from("signals")
-    .select("metadata, candles!inner ( market_id, candle_timestamps!inner ( close_time ) )")
-    .eq("user_id", args.userId)
-    .eq("signal_agent_id", signalAgentId)
-    .lt("candles.candle_timestamps.close_time", args.beforeCloseTimeIso)
-    .eq("candles.market_id", args.marketId)
-    .order("close_time", { ascending: false, foreignTable: "candles.candle_timestamps" })
-    .limit(args.limit);
-  if (error) return [];
+  let rows: Awaited<ReturnType<typeof SignalsSelector.selectRegimeSignalsBeforeCloseTime>>;
+  try {
+    rows = await SignalsSelector.selectRegimeSignalsBeforeCloseTime(admin, {
+      userId: args.userId,
+      signalAgentId,
+      marketId: args.marketId,
+      beforeCloseTimeIso: args.beforeCloseTimeIso,
+      limit: args.limit,
+    });
+  } catch {
+    return [];
+  }
 
-  const rows = (data ?? []) as Array<{
-    metadata: Record<string, unknown> | null;
-    candles?:
-      | { candle_timestamps?: { close_time?: string } | { close_time?: string }[] | null }
-      | { candle_timestamps?: { close_time?: string } | { close_time?: string }[] | null }[]
-      | null;
-  }>;
   const points: RegimePoint[] = [];
   for (const r of rows) {
     const candle = Array.isArray(r.candles) ? r.candles[0] : r.candles;
@@ -77,16 +73,13 @@ async function fetchOpenPositionsBySide(
   admin: SupabaseClient,
   args: { userId: string; executorId: string; marketId: string },
 ): Promise<SarOpenPosition[]> {
-  const { data, error } = await admin
-    .schema("trading")
-    .from("positions")
-    .select("position_side, quantity")
-    .eq("user_id", args.userId)
-    .eq("executor_id", args.executorId)
-    .eq("market_id", args.marketId);
-  if (error) return [];
+  const rows = await PositionsSelector.selectSideAndQuantityByTrio(admin, {
+    userId: args.userId,
+    executorId: args.executorId,
+    marketId: args.marketId,
+  });
   const out: SarOpenPosition[] = [];
-  for (const r of (data ?? []) as Array<{ position_side: string | null; quantity: number | string | null }>) {
+  for (const r of rows) {
     const qty = Number(r.quantity ?? 0);
     if (!Number.isFinite(qty) || qty <= 0) continue;
     const side = r.position_side === "short" ? "short" : "long";

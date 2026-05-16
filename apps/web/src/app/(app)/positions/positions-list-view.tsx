@@ -8,6 +8,7 @@ import {
 } from "@/lib/dashboard/list-pagination";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Alert, Card, CardBody, ListViewLayout, listViewOutlineActionClass } from "@adrikesteren/adricore/blocks";
@@ -54,26 +55,24 @@ export async function PositionsListView({
   const pageSize = DASHBOARD_LIST_VIEW_LIMIT;
   const supabase = await createClient();
 
-  let countQ = supabase.schema("trading").from("positions").select("*", { count: "exact", head: true });
-  if (executorIdFilter) {
-    countQ = countQ.eq("executor_id", executorIdFilter);
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = await PositionsSelector.countAllOrFiltered(supabase, { executorIdFilter });
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { count: totalRaw, error: countError } = await countQ;
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let q = supabase
-    .schema("trading")
-    .from("positions")
-    .select("id, user_id, executor_id, market_id, position_side, quantity, avg_price, paper, updated_at")
-    .order("updated_at", { ascending: false })
-    .range(from, to);
-  if (executorIdFilter) {
-    q = q.eq("executor_id", executorIdFilter);
+  let rows: Awaited<ReturnType<typeof PositionsSelector.selectListPaginated>> = [];
+  let error: { message: string } | null = null;
+  try {
+    rows = await PositionsSelector.selectListPaginated(supabase, { from, to, executorIdFilter });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-  const { data: rows, error } = await q;
 
   const list = rows ?? [];
   const executorIds = [...new Set((list as { executor_id?: string }[]).map((r) => r.executor_id).filter(Boolean))] as string[];

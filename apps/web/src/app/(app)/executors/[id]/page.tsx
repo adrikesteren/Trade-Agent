@@ -33,6 +33,8 @@ import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as OrdersSelector from "@/lib/selectors/orders-selector";
+import * as PositionsSelector from "@/lib/selectors/positions-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -398,28 +400,19 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
     fetchExchangeCapabilitiesById(supabase),
     loadExecutorPnlSnapshot(supabase, { executorId: id, userId: user.id }),
     supabase.schema("trading").from("wallets").select("id").eq("executor_id", id).maybeSingle(),
-    supabase
-      .schema("trading")
-      .from("orders")
-      .select(
-        "id, side, quantity, notional_eur, status, created_at, decisions ( signals ( candle_id ) )",
-        { count: "exact" },
-      )
-      .eq("executor_id", id)
-      .order("created_at", { ascending: false })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    OrdersSelector.selectExecutorRecentWithCount(supabase, {
+      executorId: id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    }),
     DecisionsSelector.selectExecutorRecentWithCount(supabase, {
       executorId: id,
       limit: EXECUTOR_DETAIL_TRADE_DECISION_POOL,
     }),
-    supabase
-      .schema("trading")
-      .from("positions")
-      .select("id, market_id, quantity, avg_price, paper, updated_at", { count: "exact" })
-      .eq("executor_id", id)
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false })
-      .limit(DASHBOARD_LIST_VIEW_LIMIT),
+    PositionsSelector.selectExecutorListWithCount(supabase, {
+      executorId: id,
+      userId: user.id,
+      limit: DASHBOARD_LIST_VIEW_LIMIT,
+    }),
   ]);
 
   const walletIdFromExecutor = String((ex as { wallet_id?: string | null }).wallet_id ?? "").trim();
