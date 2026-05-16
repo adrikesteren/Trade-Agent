@@ -8,6 +8,7 @@ import {
 import { patchSyncRunMetadata } from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
 import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
+import * as SyncRunsSelector from "@/lib/selectors/sync-runs-selector";
 
 /** `automation.sync_runs.metadata` — open_time (ISO) of the first candle bucket in this run. */
 export const CANDLE_SYNC_META_WINDOW_START_OPEN = "candleSyncWindowStartOpen";
@@ -186,16 +187,13 @@ export async function fetchCandleSyncWindowMeta(
   runId: string,
   jobKey: string,
 ): Promise<{ startOpenIso: string; endCloseIso: string; barCount: number } | null> {
-  const { data, error } = await admin
-    .schema("automation")
-    .from("sync_runs")
-    .select("metadata")
-    .eq("id", runId)
-    .eq("job_key", jobKey)
-    .maybeSingle();
-
-  if (error) throw new Error(`sync_runs: ${error.message}`);
-  return parseCandleSyncWindowFromMetadata(data?.metadata);
+  let row: SyncRunsSelector.SyncRunMetadataRow | null;
+  try {
+    row = await SyncRunsSelector.selectMetadataByIdAndJobKey(admin, { runId, jobKey });
+  } catch (e) {
+    throw new Error(`sync_runs: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return parseCandleSyncWindowFromMetadata(row?.metadata);
 }
 
 export function parseCandleSyncWindowFromMetadata(metadata: unknown): {
@@ -226,15 +224,15 @@ export async function prepareEurCandleSyncRunWindow(
   admin: SupabaseClient,
   args: { runId: string; jobKey: string; timeframe: string },
 ): Promise<PrepareEurCandleSyncRunWindowResult> {
-  const { data: row, error } = await admin
-    .schema("automation")
-    .from("sync_runs")
-    .select("metadata")
-    .eq("id", args.runId)
-    .eq("job_key", args.jobKey)
-    .maybeSingle();
-
-  if (error) throw new Error(`sync_runs: ${error.message}`);
+  let row: SyncRunsSelector.SyncRunMetadataRow | null;
+  try {
+    row = await SyncRunsSelector.selectMetadataByIdAndJobKey(admin, {
+      runId: args.runId,
+      jobKey: args.jobKey,
+    });
+  } catch (e) {
+    throw new Error(`sync_runs: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   const existing = parseCandleSyncWindowFromMetadata(row?.metadata);
   if (existing) {
