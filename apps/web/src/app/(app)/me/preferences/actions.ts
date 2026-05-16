@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as UserPreferencesSelector from "@/lib/selectors/user-preferences-selector";
 import {
   USER_DATE_FORMAT_CHOICES,
   USER_DECIMAL_FORMAT_CHOICES,
@@ -62,19 +63,17 @@ export async function updateUserLocalePreferences(formData: FormData): Promise<v
   const fiatOkId = await AssetsSelector.selectFiatIdById(supabase, primary_asset_id);
   if (!fiatOkId) throw new Error("Primary asset must be a fiat catalog asset.");
 
-  const { error } = await supabase
-    .from("user_preferences")
-    .update({
+  await UserPreferencesSelector.upsertLocaleByUserId(supabase, {
+    userId: user.id,
+    patch: {
       timezone,
       decimal_format,
       date_format,
       time_format,
       primary_asset_id,
       updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", user.id);
-
-  if (error) throw new Error(error.message);
+    },
+  });
 
   revalidatePath("/me/preferences");
   revalidatePath("/overview");

@@ -10,6 +10,7 @@ import {
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildTaskListStatusSelectOptions,
@@ -36,17 +37,6 @@ type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type TaskRow = {
-  id: string;
-  title: string;
-  status: string;
-  task_type: string;
-  related_schema: string;
-  related_table: string;
-  related_id: string;
-  created_at: string;
-};
-
 export default async function TasksListPage({ searchParams }: PageProps) {
   const sp = (await searchParams) ?? {};
   const pageRaw = parseListPage(sp);
@@ -64,31 +54,27 @@ export default async function TasksListPage({ searchParams }: PageProps) {
     filter.mode === "eq" ? [...distinctFromDb, filter.status] : distinctFromDb;
   const statusOptions = buildTaskListStatusSelectOptions(statusOptionSource);
 
-  let countQ = supabase.from("tasks").select("*", { count: "exact", head: true }).is("parent_task_id", null);
-  if (filter.mode === "eq") {
-    countQ = countQ.eq("status", filter.status);
+  const statusFilter = filter.mode === "eq" ? filter.status : null;
+
+  let totalCount = 0;
+  let countError: { message: string } | null = null;
+  try {
+    totalCount = await TasksSelector.countRoots(supabase, { status: statusFilter });
+  } catch (e) {
+    countError = { message: e instanceof Error ? e.message : String(e) };
   }
 
-  const { count: totalRaw, error: countError } = await countQ;
-
-  const totalCount = totalRaw ?? 0;
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  let rowsQ = supabase
-    .from("tasks")
-    .select("id, title, status, task_type, related_schema, related_table, related_id, created_at")
-    .is("parent_task_id", null)
-    .order("created_at", { ascending: false })
-    .range(from, to);
-  if (filter.mode === "eq") {
-    rowsQ = rowsQ.eq("status", filter.status);
+  let list: Awaited<ReturnType<typeof TasksSelector.selectRootsPaginated>> = [];
+  let error: { message: string } | null = null;
+  try {
+    list = await TasksSelector.selectRootsPaginated(supabase, { from, to, status: statusFilter });
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
-
-  const { data: rows, error } = await rowsQ;
-
-  const list = (rows ?? []) as TaskRow[];
 
   return (
     <ListViewLayout className="bk-container bk-container_lg bk-stack bk-stack_gap-md">

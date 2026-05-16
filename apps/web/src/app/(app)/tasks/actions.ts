@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { resolveRelatedHref } from "@/lib/tasks/resolve-related-href";
 import { DASHBOARD_TASK_EDITABLE_STATUSES } from "@/lib/tasks/task-statuses";
 import { createClient } from "@/lib/supabase/server";
@@ -39,14 +40,14 @@ export async function updateTaskDetails(input: {
     return { ok: false, error: "You must be signed in." };
   }
 
-  const { data: row, error: selErr } = await supabase
-    .from("tasks")
-    .select("id, related_schema, related_table, related_id, parent_task_id")
-    .eq("id", taskId)
-    .maybeSingle();
-
-  if (selErr || !row) {
-    return { ok: false, error: selErr?.message ?? "Task not found." };
+  let row: Awaited<ReturnType<typeof TasksSelector.selectRelatedAndParentById>>;
+  try {
+    row = await TasksSelector.selectRelatedAndParentById(supabase, taskId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!row) {
+    return { ok: false, error: "Task not found." };
   }
 
   const description = input.description?.trim() ? input.description.trim() : null;
@@ -61,23 +62,16 @@ export async function updateTaskDetails(input: {
   }
 
   const now = new Date().toISOString();
-  const { data: updated, error: upErr } = await supabase
-    .from("tasks")
-    .update({
-      title,
-      description,
-      priority,
-      due_at,
-      status,
-      updated_at: now,
-    })
-    .eq("id", taskId)
-    .select("id");
-
-  if (upErr) {
-    return { ok: false, error: upErr.message };
+  let updated: { id: string }[];
+  try {
+    updated = await TasksSelector.updateByIdReturningIds(supabase, {
+      id: taskId,
+      patch: { title, description, priority, due_at, status, updated_at: now },
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  if (!updated?.length) {
+  if (!updated.length) {
     return {
       ok: false,
       error: "Nothing was updated: no matching row (missing migration for task RLS, or task id invalid).",
@@ -87,7 +81,7 @@ export async function updateTaskDetails(input: {
   revalidatePath("/tasks");
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath(`/tasks/${taskId}/tasks`);
-  const parentId = (row as { parent_task_id?: string | null }).parent_task_id;
+  const parentId = row.parent_task_id;
   if (parentId) {
     revalidatePath(`/tasks/${parentId}/tasks`);
   }
@@ -121,24 +115,25 @@ export async function deleteTask(taskId: string): Promise<TaskMutationResult> {
     return { ok: false, error: "You must be signed in." };
   }
 
-  const { data: row, error: selErr } = await supabase
-    .from("tasks")
-    .select("id, related_schema, related_table, related_id, parent_task_id")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (selErr || !row) {
-    return { ok: false, error: selErr?.message ?? "Task not found." };
+  let row: Awaited<ReturnType<typeof TasksSelector.selectRelatedAndParentById>>;
+  try {
+    row = await TasksSelector.selectRelatedAndParentById(supabase, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!row) {
+    return { ok: false, error: "Task not found." };
   }
 
-  const parentId = (row as { parent_task_id?: string | null }).parent_task_id;
+  const parentId = row.parent_task_id;
 
-  const { data: deleted, error: delErr } = await supabase.from("tasks").delete().eq("id", id).select("id");
-
-  if (delErr) {
-    return { ok: false, error: delErr.message };
+  let deleted: { id: string }[];
+  try {
+    deleted = await TasksSelector.deleteByIdReturningIds(supabase, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  if (!deleted?.length) {
+  if (!deleted.length) {
     return { ok: false, error: "Delete had no effect (no matching row or access denied)." };
   }
 

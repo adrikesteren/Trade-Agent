@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { primaryUnitsToQuoteUnits } from "@/lib/catalog/primary-to-quote";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExecutorQuoteAssetBudgetSelector from "@/lib/selectors/executor-quote-asset-budget-selector";
+import * as UserPreferencesSelector from "@/lib/selectors/user-preferences-selector";
 
 /**
  * Resolve the per-trade notional for an executor + quote asset, expressed in **quote-asset units**.
@@ -43,13 +44,8 @@ export async function fetchExecutorQuoteBudgetInQuoteUnits(
   if (!ownerId) return null;
 
   // Owner's primary asset id
-  const { data: prefRow, error: pErr } = await admin
-    .from("user_preferences")
-    .select("primary_asset_id")
-    .eq("user_id", ownerId)
-    .maybeSingle();
-  if (pErr) throw new Error(pErr.message);
-  const primaryAssetId = String((prefRow as { primary_asset_id?: string } | null)?.primary_asset_id ?? "").trim();
+  const prefRow = await UserPreferencesSelector.selectPrimaryAssetIdByUserId(admin, ownerId);
+  const primaryAssetId = String(prefRow?.primary_asset_id ?? "").trim();
   if (!primaryAssetId) return null;
 
   // Same fiat as the market quote → just return the number stored as primary units (no conversion needed)

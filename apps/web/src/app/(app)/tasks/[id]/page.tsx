@@ -4,6 +4,7 @@ import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { resolveRelatedHref } from "@/lib/tasks/resolve-related-href";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -19,23 +20,7 @@ import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ id: string }> };
 
-type TaskDetail = {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  priority: string | null;
-  due_at: string | null;
-  related_schema: string;
-  related_table: string;
-  related_id: string;
-  parent_task_id: string | null;
-  task_type: string;
-  job_identifier: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-};
+type TaskDetail = TasksSelector.TaskDetailRow;
 
 function isUuidLike(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
@@ -59,33 +44,32 @@ export default async function TaskDetailPage({ params }: PageProps) {
   const formatDt = (v: string | number | Date | null | undefined) =>
     v == null ? "—" : formatDatetime(v, prefs);
 
-  const { data: task, error } = await supabase
-    .from("tasks")
-    .select(
-      "id, title, description, status, priority, due_at, related_schema, related_table, related_id, parent_task_id, task_type, job_identifier, metadata, created_at, updated_at",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  let task: TaskDetail | null = null;
+  try {
+    task = await TasksSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!task) notFound();
 
-  if (error || !task) notFound();
-
-  const t = task as TaskDetail;
+  const t = task;
   const relatedHref = resolveRelatedHref(t.related_schema, t.related_table, t.related_id);
 
   let parentTitle: string | null = null;
   if (t.parent_task_id) {
-    const { data: p } = await supabase.from("tasks").select("title").eq("id", t.parent_task_id).maybeSingle();
-    parentTitle = (p as { title?: string } | null)?.title ?? null;
+    try {
+      parentTitle = await TasksSelector.selectTitleById(supabase, t.parent_task_id);
+    } catch {
+      /* preserve original soft-fail behavior */
+    }
   }
 
-  const { data: subRows } = await supabase
-    .from("tasks")
-    .select("id, title, status, task_type, created_at")
-    .eq("parent_task_id", id)
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  const subtasks = (subRows ?? []) as { id: string; title: string; status: string; task_type: string; created_at: string }[];
+  let subtasks: Awaited<ReturnType<typeof TasksSelector.selectSubtasksByParentId>> = [];
+  try {
+    subtasks = await TasksSelector.selectSubtasksByParentId(supabase, { parentId: id, limit: 50 });
+  } catch {
+    /* preserve original soft-fail behavior */
+  }
 
   return (
     <DetailPageLayout

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { getAppBaseUrl } from "@/lib/env/app-base-url";
 import { runHistoricalExecutorReplay } from "@/lib/orchestrators/historical-executor-replay.service";
-import { insertUserAppLog } from "@/lib/logs/insert-user-app-log";
+import * as LogsSelector from "@/lib/selectors/logs-selector";
 import {
   buildHistoricalExecutorReplayWorkerUrl,
   downstreamWorkerHeaders,
@@ -57,8 +57,8 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await insertUserAppLog(supabase, {
-      userId: user.id,
+    await LogsSelector.insertOne(supabase, {
+      user_id: user.id,
       level: "error",
       message: msg,
       context: "POST /api/executors/[id]/historical-run",

@@ -16,6 +16,7 @@ import type { RelayClient } from "@adrikesteren/relay-client";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 
 import { listCryptoAssetsNeedingCoinIdSearch } from "@/lib/agents/ingest/services/coingecko-coin-id-sync.service";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 
 export type PublishCoingeckoFindIdRelayFailure = { assetCode: string; message: string };
 
@@ -49,23 +50,22 @@ export async function publishCoingeckoFindIdRelayJobs(
 
   const distinctAssetCodes: string[] = [];
   for (const r of rows) {
-    const { data: skipRow, error: skipErr } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", r.id)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-
-    if (skipErr) {
+    let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>>;
+    try {
+      skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: r.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       return {
         ok: false,
         published: 0,
         distinctAssetCodes: [],
-        failures: [{ assetCode: String(r.code), message: skipErr.message }],
-        error: skipErr.message,
+        failures: [{ assetCode: String(r.code), message: msg }],
+        error: msg,
       };
     }
     if (skipRow?.id) continue;

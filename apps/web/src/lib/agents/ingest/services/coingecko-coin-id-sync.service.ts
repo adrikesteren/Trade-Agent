@@ -14,6 +14,7 @@ import {
 } from "@/lib/tasks/constants";
 import { escapeIlikeExactPattern } from "@/lib/agents/ingest/services/primary-market-by-codes-resolve.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 
 function parsePositiveInt(envVal: string | undefined, fallback: number): number {
   if (envVal === undefined || envVal === "") return fallback;
@@ -154,18 +155,20 @@ export async function syncCoingeckoCoinIdForAssetByCode(
     };
   }
 
-  const { data: skipRow, error: skipErr } = await admin
-    .from("tasks")
-    .select("id")
-    .eq("related_schema", "catalog")
-    .eq("related_table", "assets")
-    .eq("related_id", row.id)
-    .eq("status", "open")
-    .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-    .maybeSingle();
-
-  if (skipErr) {
-    return { ...empty, assetCode: String(row.code), failures: [`skip-task query: ${skipErr.message}`] };
+  let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>>;
+  try {
+    skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+      relatedSchema: "catalog",
+      relatedTable: "assets",
+      relatedId: row.id,
+      jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+    });
+  } catch (e) {
+    return {
+      ...empty,
+      assetCode: String(row.code),
+      failures: [`skip-task query: ${e instanceof Error ? e.message : String(e)}`],
+    };
   }
   if (skipRow?.id) {
     return { ...empty, assetCode: String(row.code), skippedReason: "skip_task_open" };
@@ -217,16 +220,18 @@ export async function syncCoingeckoCoinIdForAssetByCode(
       };
     }
 
-    const { data: existingOpen } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", row.id)
-      .eq("status", "open")
-      .eq("task_type", TASK_TYPE_REQUIRES_MANUAL_COINGECKO_SEARCH)
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
+    let existingOpen: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+    try {
+      existingOpen = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: row.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+        taskType: TASK_TYPE_REQUIRES_MANUAL_COINGECKO_SEARCH,
+      });
+    } catch {
+      /* preserve original soft-fail behavior (data only, no error returned) */
+    }
 
     if (existingOpen?.id) {
       return {
@@ -246,7 +251,7 @@ export async function syncCoingeckoCoinIdForAssetByCode(
         ? "CoinGecko /search returned no coins for this ticker. Set `coingecko_coin_id` manually or add metadata.coingecko_id."
         : "CoinGecko /search did not resolve to a unique coin id for this asset (ambiguous symbol or name mismatch). Pick the correct id manually.";
 
-    const { error: insErr } = await admin.from("tasks").insert({
+    const insErr = await TasksSelector.insertOne(admin, {
       user_id: automatedUserId,
       title,
       description,
@@ -355,18 +360,16 @@ export async function syncCoingeckoCoinIds(admin: SupabaseClient): Promise<SyncC
   for (const r of needRows) {
     if (searchAttempts >= COINGECKO_COIN_ID_SEARCH_MAX_PER_RUN) break;
 
-    const { data: skipRow, error: skipErr } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", r.id)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-
-    if (skipErr) {
-      failures.push(`${r.code}: skip-task query: ${skipErr.message}`);
+    let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+    try {
+      skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: r.id,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+    } catch (e) {
+      failures.push(`${r.code}: skip-task query: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
     if (skipRow?.id) {

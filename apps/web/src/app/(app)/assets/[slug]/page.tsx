@@ -13,6 +13,7 @@ import { isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-p
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
@@ -81,16 +82,17 @@ export default async function AssetDetailPage({ params }: PageProps) {
   let hasOpenSkipAutoCoingeckoCoinIdTask = false;
   if (isCrypto && coingeckoIdEmpty) {
     const admin = createServiceRoleClient();
-    const { data: skipTaskRow } = await admin
-      .from("tasks")
-      .select("id")
-      .eq("related_schema", "catalog")
-      .eq("related_table", "assets")
-      .eq("related_id", assetId)
-      .eq("status", "open")
-      .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-      .maybeSingle();
-    hasOpenSkipAutoCoingeckoCoinIdTask = Boolean(skipTaskRow?.id);
+    try {
+      const skipTaskRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+        relatedSchema: "catalog",
+        relatedTable: "assets",
+        relatedId: assetId,
+        jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+      });
+      hasOpenSkipAutoCoingeckoCoinIdTask = Boolean(skipTaskRow?.id);
+    } catch {
+      /* preserve original soft-fail behavior (flag stays false) */
+    }
   }
 
   return (

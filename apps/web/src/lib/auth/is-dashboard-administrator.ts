@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as UserProfilesSelector from "@/lib/selectors/user-profiles-selector";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -13,12 +14,6 @@ export async function isDashboardAdministrator(): Promise<boolean> {
   } = await supabase.auth.getUser();
   if (!user) return false;
 
-  const { data, error } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error || !data) return false;
-  return data.role === "administrator";
+  const role = await UserProfilesSelector.selectRoleByUserId(supabase, user.id);
+  return role === "administrator";
 }

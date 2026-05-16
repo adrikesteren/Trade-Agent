@@ -2,6 +2,7 @@ import { SystemSettingDetailActions } from "@/app/(app)/system-settings/[key]/sy
 import { isDashboardAdministrator } from "@/lib/auth/is-dashboard-administrator";
 import { formatDatetime } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as SystemSettingsSelector from "@/lib/selectors/system-settings-selector";
 import { getNumericSystemSetting } from "@/lib/system-settings/read-settings";
 import {
   getNumericSystemSettingDef,
@@ -64,14 +65,9 @@ export default async function SystemSettingDetailPage({ params }: PageProps) {
   }
 
   const admin = createServiceRoleClient();
-  const { data: row } = await admin
-    .from("system_settings")
-    .select("key, value, updated_at")
-    .eq("key", settingKey)
-    .maybeSingle();
+  const db = await SystemSettingsSelector.selectByKey(admin, settingKey);
 
   const effective = await getNumericSystemSetting(admin, settingKey as SystemSettingNumericKey);
-  const db = row as { key: string; value: unknown; updated_at: string | null } | null;
 
   return (
     <DetailPageLayout

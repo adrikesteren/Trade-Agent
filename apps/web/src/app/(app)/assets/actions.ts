@@ -13,6 +13,7 @@ import {
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
+import * as TasksSelector from "@/lib/selectors/tasks-selector";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -114,15 +115,17 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
     return { ok: false, error: "This asset already has a CoinGecko coin id." };
   }
 
-  const { data: skipRow } = await admin
-    .from("tasks")
-    .select("id")
-    .eq("related_schema", "catalog")
-    .eq("related_table", "assets")
-    .eq("related_id", assetId)
-    .eq("status", "open")
-    .eq("job_identifier", JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID)
-    .maybeSingle();
+  let skipRow: Awaited<ReturnType<typeof TasksSelector.selectOpenIdForRelatedJob>> = null;
+  try {
+    skipRow = await TasksSelector.selectOpenIdForRelatedJob(admin, {
+      relatedSchema: "catalog",
+      relatedTable: "assets",
+      relatedId: assetId,
+      jobIdentifier: JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID,
+    });
+  } catch {
+    /* preserve original soft-fail behavior (skipRow remains null) */
+  }
 
   if (skipRow?.id) {
     return {

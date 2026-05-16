@@ -2,6 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AutomationActorSelector from "@/lib/selectors/automation-actor-selector";
+import * as UserProfilesSelector from "@/lib/selectors/user-profiles-selector";
+
 /** `public.automation_actor.key` for the catalog pipeline system user. */
 export const AUTOMATED_PROCESS_ACTOR_KEY = "automated_process" as const;
 
@@ -14,20 +17,15 @@ export const AUTOMATED_PROCESS_USERNAME = "automated_process" as const;
  * {@link AUTOMATED_PROCESS_USERNAME}.
  */
 export async function getAutomatedProcessUserId(admin: SupabaseClient): Promise<string | null> {
-  const { data, error } = await admin
-    .from("automation_actor")
-    .select("user_id")
-    .eq("key", AUTOMATED_PROCESS_ACTOR_KEY)
-    .maybeSingle();
-  if (!error && data?.user_id) {
-    return String(data.user_id);
+  try {
+    const userId = await AutomationActorSelector.selectUserIdByKey(
+      admin,
+      AUTOMATED_PROCESS_ACTOR_KEY,
+    );
+    if (userId) return userId;
+  } catch {
+    // fall through to user_profiles fallback
   }
 
-  const { data: prof, error: pErr } = await admin
-    .from("user_profiles")
-    .select("user_id")
-    .eq("username", AUTOMATED_PROCESS_USERNAME)
-    .maybeSingle();
-  if (pErr || !prof?.user_id) return null;
-  return String(prof.user_id);
+  return UserProfilesSelector.selectUserIdByUsername(admin, AUTOMATED_PROCESS_USERNAME);
 }
