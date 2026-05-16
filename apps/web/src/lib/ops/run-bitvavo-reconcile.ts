@@ -19,6 +19,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { fetchMarketAssetIds } from "@/lib/agents/executor/services/executors-lookup.service";
 import { applyExecutorTradeBuyDebit, tradeBuyDebitEur } from "@/lib/agents/executor/services/executor-wallet.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 function batchSize(): number {
   const n = Number(process.env.BITVAVO_RECONCILE_BATCH ?? 40);
@@ -232,14 +233,9 @@ export async function runBitvavoReconcile(): Promise<RunBitvavoReconcileResult> 
   const marketIds = [...new Set(liveOrders.map((o) => o.market_id))];
   const symByMarket = new Map<string, string>();
   if (marketIds.length) {
-    const { data: mkts, error: mErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol")
-      .in("id", marketIds);
-    if (mErr) throw new Error(mErr.message);
-    for (const m of mkts ?? []) {
-      symByMarket.set(m.id as string, String(m.market_symbol ?? "").trim());
+    const mkts = await MarketsSelector.selectIdAndSymbolByIds(admin, marketIds);
+    for (const m of mkts) {
+      symByMarket.set(m.id, String(m.market_symbol ?? "").trim());
     }
   }
 

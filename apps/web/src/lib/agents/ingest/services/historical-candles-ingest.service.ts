@@ -6,6 +6,7 @@ import { bulkUpsertCandleTimestampsForWindow } from "@/lib/agents/ingest/service
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { computeHistoricalCandleWindow } from "./historical-candle-window.service";
 
@@ -40,13 +41,7 @@ export async function ingestHistoricalCandles(
 
   await bulkUpsertCandleTimestampsForWindow(admin, win.startOpenMs, win.endCloseMs, timeframeDurationMs(args.timeframe));
 
-  const { data: mrow, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id, exchange_id")
-    .eq("id", args.marketId)
-    .maybeSingle();
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectCoreById(admin, args.marketId);
   if (!mrow) throw new Error("market not found");
 
   const quoteCode = await AssetsSelector.selectCodeById(admin, mrow.quote_asset_id as string);

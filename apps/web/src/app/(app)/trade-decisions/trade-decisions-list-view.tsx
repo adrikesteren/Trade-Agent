@@ -15,6 +15,7 @@ import { formatDatetime } from "@/lib/locale/format";
 import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/fetch-candles-by-ids";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -127,12 +128,13 @@ async function fetchMarketSymbolsById(
   const rows: CatalogMarketRow[] = [];
   for (let i = 0; i < marketIds.length; i += MARKET_ID_CHUNK) {
     const chunk = marketIds.slice(i, i + MARKET_ID_CHUNK);
-    const { data, error } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
-    if (error) {
-      console.error("trade-decisions list: markets batch:", error.message);
+    try {
+      const batch = await MarketsSelector.selectIdAndSymbolByIds(supabase, chunk);
+      rows.push(...(batch as CatalogMarketRow[]));
+    } catch (e) {
+      console.error("trade-decisions list: markets batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    rows.push(...((data ?? []) as CatalogMarketRow[]));
   }
 
   for (const m of rows) {

@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { executorAllowsMarketAsset, type ExecutionMode, type ExecutorAssetFilterMode } from "./executor-rules.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type PositionSide = "long" | "short";
 
@@ -146,10 +147,9 @@ export async function fetchMarketAssetIds(
   const chunk = 200;
   for (let i = 0; i < marketIds.length; i += chunk) {
     const part = marketIds.slice(i, i + chunk);
-    const { data, error } = await admin.schema("catalog").from("markets").select("id, asset_id").in("id", part);
-    if (error) throw new Error(error.message);
-    for (const r of data ?? []) {
-      map.set(r.id as string, (r.asset_id as string | null) ?? null);
+    const rows = await MarketsSelector.selectIdAndAssetIdByIds(admin, part);
+    for (const r of rows) {
+      map.set(r.id, r.asset_id ?? null);
     }
   }
   return map;

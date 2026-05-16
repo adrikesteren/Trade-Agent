@@ -5,6 +5,7 @@ import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/in
 import { fetchAllCandleTimestampRowsForCandleWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type CandleSyncMode = "full" | "incremental" | "window";
 
@@ -135,22 +136,10 @@ export async function syncBitvavoCandlesChunk(
     };
   }
 
-  let countQuery = supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id", { count: "exact", head: true })
-    .eq("exchange_id", exchangeId);
-
-  if (quoteAssetId) {
-    countQuery = countQuery.eq("quote_asset_id", quoteAssetId);
-  }
-
-  const { count: totalMarkets, error: countErr } = await countQuery;
-  if (countErr) {
-    throw new Error(countErr.message);
-  }
-
-  const total = totalMarkets ?? 0;
+  const total = await MarketsSelector.countByExchangeAndOptionalQuote(supabase, {
+    exchangeId,
+    quoteAssetId,
+  });
 
   const maxBars = barsForRetention(opts.timeframe);
   const windowMode =

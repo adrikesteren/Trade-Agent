@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { ingestHistoricalCandles } from "@/lib/agents/ingest/services/historical-candles-ingest.service";
 
@@ -67,13 +68,7 @@ export async function runMarketBackfillCandles(
     throw new Error("marketId is required.");
   }
 
-  const { data: mrow, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, exchange_id, quote_asset_id")
-    .eq("id", marketId)
-    .maybeSingle();
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectCoreById(admin, marketId);
   if (!mrow) throw new Error("Market not found.");
   const market = mrow as {
     id: string;

@@ -27,6 +27,7 @@ import {
   type ExecutorRow,
 } from "./executors-lookup.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import {
   applyExecutorTradeSellCredit,
   applyExecutorTradeBuyDebit,
@@ -342,13 +343,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
   let rows: { id: string; market_symbol: string }[];
 
   if (onlyMarketId) {
-    const { data: mrow, error: oneErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, exchange_id")
-      .eq("id", onlyMarketId)
-      .maybeSingle();
-    if (oneErr) throw new Error(oneErr.message);
+    const mrow = await MarketsSelector.selectIdSymbolExchangeById(admin, onlyMarketId);
     if (!mrow) {
       return {
         ok: true,
@@ -375,17 +370,10 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
       };
     }
   } else {
-    let countQuery = admin
-      .schema("catalog")
-      .from("markets")
-      .select("id", { count: "exact", head: true })
-      .eq("exchange_id", exchangeId);
-    if (quoteAssetIdFilter) {
-      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
-    }
-    const { count: totalMarkets, error: countErr } = await countQuery;
-    if (countErr) throw new Error(countErr.message);
-    const total = totalMarkets ?? 0;
+    const total = await MarketsSelector.countByExchangeAndOptionalQuote(admin, {
+      exchangeId,
+      quoteAssetId: quoteAssetIdFilter,
+    });
     const maxTotal = maxTotalMarkets();
     effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
@@ -486,14 +474,7 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
     const marketId = m.id as string;
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
-    const { data: mQuoteRow, error: mqErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("quote_asset_id")
-      .eq("id", marketId)
-      .maybeSingle();
-    if (mqErr) throw new Error(mqErr.message);
-    const quoteAssetIdForMarket = mQuoteRow?.quote_asset_id as string | undefined;
+    const quoteAssetIdForMarket = (await MarketsSelector.selectQuoteAssetIdById(admin, marketId)) ?? undefined;
     if (!quoteAssetIdForMarket) {
       throw new Error(`${marketSymbol}: market missing quote_asset_id`);
     }

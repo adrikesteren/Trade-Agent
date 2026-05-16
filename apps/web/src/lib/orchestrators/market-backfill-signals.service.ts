@@ -6,6 +6,7 @@ import { getAutomatedProcessUserId } from "@/lib/automation-actor";
 import { loadHistoricalCandlesForReplay } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 import { replayMissingSignalsForBars } from "@/lib/agents/signal/services/replay-missing-signals-for-bars.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { todayUtcYmd } from "./market-backfill-candles.service";
 
@@ -64,15 +65,9 @@ export async function runMarketBackfillSignals(
     throw new Error("startDate must be on or before endDate.");
   }
 
-  const { data: mrow, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol")
-    .eq("id", marketId)
-    .maybeSingle();
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectIdAndSymbolById(admin, marketId);
   if (!mrow) throw new Error("Market not found.");
-  const marketSymbol = String((mrow as { market_symbol: string | null }).market_symbol ?? "");
+  const marketSymbol = String(mrow.market_symbol ?? "");
 
   const automatedUserId = await getAutomatedProcessUserId(admin);
   if (!automatedUserId) {

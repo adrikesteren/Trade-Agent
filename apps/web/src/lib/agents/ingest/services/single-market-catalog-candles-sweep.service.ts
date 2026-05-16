@@ -6,6 +6,7 @@ import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 /**
  * One full catalog-timeframe candle fetch for a single Bitvavo market (by `markets.id`).
@@ -15,14 +16,7 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
   supabase: SupabaseClient,
   marketId: string,
 ): Promise<{ candleRowsUpserted: number; marketSymbol: string }> {
-  const { data: mrow, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id, exchange_id")
-    .eq("id", marketId)
-    .maybeSingle();
-
-  if (mErr) throw new Error(mErr.message);
+  const mrow = await MarketsSelector.selectCoreById(supabase, marketId);
   if (!mrow) throw new Error("market not found");
 
   const exCodeRaw = await ExchangesSelector.selectCodeById(supabase, mrow.exchange_id as string);

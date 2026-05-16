@@ -4,6 +4,7 @@ import { fetchBitvavoMarkets } from "@/lib/bitvavo/public/markets";
 import { fetchQuoteAssetIdsByCodes } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type { BitvavoMarketRow } from "@/lib/bitvavo/public/markets";
 
@@ -91,12 +92,7 @@ export async function syncBitvavoMarkets(
   const chunkSize = 200;
   for (let i = 0; i < listingRows.length; i += chunkSize) {
     const chunk = listingRows.slice(i, i + chunkSize);
-    const { error: eaErr } = await supabase.schema("catalog").from("markets").upsert(chunk, {
-      onConflict: "exchange_id,market_symbol",
-    });
-    if (eaErr) {
-      throw new Error(eaErr.message);
-    }
+    await MarketsSelector.upsertManyByExchangeAndSymbol(supabase, chunk);
   }
 
   return {
@@ -199,12 +195,7 @@ export async function upsertBitvavoMarketsForExistingAssets(
 
   for (let i = 0; i < listingRows.length; i += MARKET_UPSERT_CHUNK) {
     const chunk = listingRows.slice(i, i + MARKET_UPSERT_CHUNK);
-    const { error: eaErr } = await supabase.schema("catalog").from("markets").upsert(chunk, {
-      onConflict: "exchange_id,market_symbol",
-    });
-    if (eaErr) {
-      throw new Error(eaErr.message);
-    }
+    await MarketsSelector.upsertManyByExchangeAndSymbol(supabase, chunk);
   }
 
   return {

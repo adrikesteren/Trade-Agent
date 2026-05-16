@@ -25,6 +25,7 @@ import {
   type ExecutorRow,
 } from "@/lib/agents/executor/services/executors-lookup.service";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 export type MediatorCatalogCloseBody = {
   closeTimeIso: string;
@@ -304,13 +305,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
   let rows: { id: string; market_symbol: string }[];
 
   if (onlyMarketId) {
-    const { data: mrow, error: oneErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("id, market_symbol, exchange_id")
-      .eq("id", onlyMarketId)
-      .maybeSingle();
-    if (oneErr) throw new Error(oneErr.message);
+    const mrow = await MarketsSelector.selectIdSymbolExchangeById(admin, onlyMarketId);
     if (!mrow) {
       return {
         ok: true,
@@ -337,17 +332,10 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
       };
     }
   } else {
-    let countQuery = admin
-      .schema("catalog")
-      .from("markets")
-      .select("id", { count: "exact", head: true })
-      .eq("exchange_id", exchangeId);
-    if (quoteAssetIdFilter) {
-      countQuery = countQuery.eq("quote_asset_id", quoteAssetIdFilter);
-    }
-    const { count: totalMarkets, error: countErr } = await countQuery;
-    if (countErr) throw new Error(countErr.message);
-    const total = totalMarkets ?? 0;
+    const total = await MarketsSelector.countByExchangeAndOptionalQuote(admin, {
+      exchangeId,
+      quoteAssetId: quoteAssetIdFilter,
+    });
     const maxTotal = maxTotalMarkets();
     effectiveTotal = maxTotal != null ? Math.min(total, maxTotal) : total;
 
@@ -436,14 +424,8 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
     const marketSymbol = m.market_symbol as string;
     const marketAssetId = assetIdByMarket.get(marketId) ?? null;
 
-    const { data: mktQuote, error: mktQuoteErr } = await admin
-      .schema("catalog")
-      .from("markets")
-      .select("quote_asset_id")
-      .eq("id", marketId)
-      .maybeSingle();
-    if (mktQuoteErr) throw new Error(`${marketSymbol}: markets quote_asset_id: ${mktQuoteErr.message}`);
-    const quoteAssetIdForMarket = String((mktQuote as { quote_asset_id?: string } | null)?.quote_asset_id ?? "").trim() || null;
+    const quoteAssetIdForMarket =
+      String((await MarketsSelector.selectQuoteAssetIdById(admin, marketId)) ?? "").trim() || null;
 
     const bar = await findBarCandle(admin, { marketId, timeframe, closeTimeIso });
     if (!bar) continue;

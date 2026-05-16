@@ -29,6 +29,7 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -78,10 +79,15 @@ async function marketSymbolMap(supabase: SupabaseClient, ids: string[]): Promise
   const uniq = [...new Set(ids)].filter(Boolean);
   for (let i = 0; i < uniq.length; i += 120) {
     const chunk = uniq.slice(i, i + 120);
-    const { data } = await supabase.schema("catalog").from("markets").select("id, market_symbol").in("id", chunk);
-    for (const m of data ?? []) {
-      const sym = String((m as { id: string; market_symbol?: string | null }).market_symbol ?? "").trim();
-      if (sym) map.set(m.id as string, sym);
+    let rows: Awaited<ReturnType<typeof MarketsSelector.selectIdAndSymbolByIds>>;
+    try {
+      rows = await MarketsSelector.selectIdAndSymbolByIds(supabase, chunk);
+    } catch {
+      continue;
+    }
+    for (const m of rows) {
+      const sym = String(m.market_symbol ?? "").trim();
+      if (sym) map.set(m.id, sym);
     }
   }
   return map;

@@ -11,6 +11,7 @@ import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchAllMarketStorageCandles, mapCatalogCandleRowToJson } from "@/lib/markets/fetch-market-chart-candles";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -131,28 +132,13 @@ export default async function MarketDetailPage({ params }: PageProps) {
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
   const chartDisplayIana = resolveChartDisplayIana(userTimezoneToIana(prefs.timezone));
 
-  const { data: market, error } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      id,
-      market_symbol,
-      quote_asset_id,
-      status,
-      metadata,
-      created_at,
-      exchange_id,
-      asset_id,
-      assets!markets_asset_id_fkey ( id, code, kind, name ),
-      quote_asset:assets!markets_quote_asset_id_fkey ( id, code, kind, name ),
-      exchanges ( id, code, name )
-    `,
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error || !market) {
+  let market: Awaited<ReturnType<typeof MarketsSelector.selectDetailById>>;
+  try {
+    market = await MarketsSelector.selectDetailById(supabase, id);
+  } catch {
+    notFound();
+  }
+  if (!market) {
     notFound();
   }
 

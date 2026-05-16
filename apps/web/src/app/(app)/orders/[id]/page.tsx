@@ -6,6 +6,7 @@ import { fetchCatalogCandlesByIds, type CatalogCandleBar } from "@/lib/catalog/f
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   DetailPageLayout,
@@ -134,17 +135,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const candleById = await fetchCatalogCandlesByIds(supabase, cid ? [cid] : []);
   const order = flattenOrderDetail(rowDb, candleById);
 
-  const { data: mRow } = order.market_id
-    ? await supabase
-        .schema("catalog")
-        .from("markets")
-        .select("market_symbol")
-        .eq("id", order.market_id)
-        .maybeSingle()
-    : { data: null };
-  const marketSym = order.market_id
-    ? String((mRow as { market_symbol?: string | null } | null)?.market_symbol ?? "").trim()
-    : "";
+  const mRow = order.market_id
+    ? await MarketsSelector.selectIdAndSymbolById(supabase, order.market_id)
+    : null;
+  const marketSym = order.market_id ? String(mRow?.market_symbol ?? "").trim() : "";
 
   const { data: exRow } = await supabase
     .schema("trading")

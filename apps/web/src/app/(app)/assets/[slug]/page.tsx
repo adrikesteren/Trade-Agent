@@ -12,6 +12,7 @@ import { isFiatQuoteCurrencyCode } from "@/lib/markets/fiat-quote-currency-codes
 import { isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
@@ -60,22 +61,10 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
   const assetId = asset.id;
 
-  const { data: markets, count: marketCount } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      id,
-      market_symbol,
-      status,
-      quote_asset:assets!markets_quote_asset_id_fkey ( code, kind ),
-      exchanges ( id, code, name )
-    `,
-      { count: "exact" },
-    )
-    .eq("asset_id", assetId)
-    .order("market_symbol", { ascending: true })
-    .limit(DASHBOARD_LIST_VIEW_LIMIT);
+  const { rows: markets, count: marketCount } = await MarketsSelector.selectRelatedByAssetId(supabase, {
+    assetId,
+    limit: DASHBOARD_LIST_VIEW_LIMIT,
+  });
 
   const isCrypto = asset.kind === "crypto";
   const meta =

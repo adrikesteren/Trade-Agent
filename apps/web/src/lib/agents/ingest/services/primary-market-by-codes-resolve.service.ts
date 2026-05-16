@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 /** Escape `%`, `_`, and `\` for use as a literal in PostgREST `ilike` without wildcards. */
 export function escapeIlikeExactPattern(raw: string): string {
@@ -96,16 +97,11 @@ export async function resolvePrimaryMarketByCodes(
     );
   }
 
-  const { data: mRows, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol")
-    .eq("exchange_id", exchangeId)
-    .eq("asset_id", assetId)
-    .eq("quote_asset_id", quoteAssetId);
-
-  if (mErr) throw new Error(mErr.message);
-  const markets = (mRows ?? []) as { id: string; market_symbol: string }[];
+  const markets = await MarketsSelector.selectByExchangeAssetQuote(supabase, {
+    exchangeId,
+    assetId,
+    quoteAssetId,
+  });
   if (markets.length === 0) {
     throw new ResolvePrimaryMarketError(
       "market_not_found_for_asset_exchange_quote",

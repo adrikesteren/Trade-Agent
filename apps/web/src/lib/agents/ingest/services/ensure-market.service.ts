@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 /** Bitvavo pairs use `BASE-QUOTE` (e.g. ETH-BTC, FUN-EUR). */
 export function parseMarketSymbol(marketSymbol: string): { base: string; quote: string } {
@@ -31,13 +32,10 @@ export async function ensureMarket(supabase: SupabaseClient, params: { exchangeC
 
   const exchangeId = await ExchangesSelector.selectIdByCode(supabase, params.exchangeCode);
 
-  const { data: existing } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .select("id, asset_id")
-    .eq("exchange_id", exchangeId)
-    .eq("market_symbol", market)
-    .maybeSingle();
+  const existing = await MarketsSelector.selectIdAndAssetIdByExchangeAndSymbol(supabase, {
+    exchangeId,
+    marketSymbol: market,
+  });
 
   if (existing) {
     return {
@@ -60,28 +58,14 @@ export async function ensureMarket(supabase: SupabaseClient, params: { exchangeC
     metadata: {},
   });
 
-  const { data: row, error: mErr } = await supabase
-    .schema("catalog")
-    .from("markets")
-    .upsert(
-      {
-        exchange_id: exchangeId,
-        asset_id: assetId,
-        market_symbol: market,
-        quote_asset_id: quoteAssetId,
-        status: "trading",
-        metadata: {},
-      },
-      { onConflict: "exchange_id,market_symbol" },
-    )
-    .select("id")
-    .single();
-
-  if (mErr || !row) {
-    throw new Error(mErr?.message ?? "markets upsert failed");
-  }
-
-  const marketId = row.id as string;
+  const marketId = await MarketsSelector.upsertOneByExchangeAndSymbolReturningId(supabase, {
+    exchange_id: exchangeId,
+    asset_id: assetId,
+    market_symbol: market,
+    quote_asset_id: quoteAssetId,
+    status: "trading",
+    metadata: {},
+  });
   try {
     const { sweepBitvavoSingleMarketCatalogCandles } = await import(
       "@/lib/agents/ingest/services/single-market-catalog-candles-sweep.service"

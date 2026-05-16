@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { fetchExchangeIdByCode } from "./executors-lookup.service";
 
@@ -30,15 +31,10 @@ export async function fetchHistoricalExecutorPaperMarket(
   const bitvavoId = await fetchExchangeIdByCode(admin, "bitvavo");
   if (String(args.executorExchangeId) !== bitvavoId) return null;
 
-  const { data: mkts, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("id, market_symbol, quote_asset_id")
-    .eq("exchange_id", bitvavoId)
-    .eq("asset_id", args.filterBaseAssetId);
-  if (mErr) throw new Error(mErr.message);
-
-  const list = (mkts ?? []) as MarketRow[];
+  const list = (await MarketsSelector.selectByExchangeAndAsset(admin, {
+    exchangeId: bitvavoId,
+    assetId: args.filterBaseAssetId,
+  })) as MarketRow[];
   if (list.length === 0) return null;
 
   const quoteIds = [...new Set(list.map((m) => m.quote_asset_id).filter(Boolean))];

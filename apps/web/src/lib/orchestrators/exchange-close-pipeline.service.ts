@@ -16,6 +16,7 @@ import {
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import type { RelayClient } from "@adrikesteren/relay-client";
 
@@ -162,22 +163,13 @@ export async function runExchangeClosePipeline(
   const exchangeId = ex.id as string;
   const canonicalExchangeCode = String(ex.code);
 
-  const { data: mRows, error: mErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select(
-      `
-      asset_id,
-      market_symbol,
-      assets!markets_asset_id_fkey (
-        coingecko_market_cap_usd
-      )
-    `,
-    )
-    .eq("exchange_id", exchangeId)
-    .eq("quote_asset_id", quoteAssetId);
-
-  if (mErr) {
+  let marketRows: MarketRowForMcap[];
+  try {
+    marketRows = (await MarketsSelector.selectAssetIdSymbolWithMcapByExchangeAndQuote(admin, {
+      exchangeId,
+      quoteAssetId,
+    })) as MarketRowForMcap[];
+  } catch (e) {
     return {
       ok: false,
       exchangeCode: canonicalExchangeCode,
@@ -185,11 +177,9 @@ export async function runExchangeClosePipeline(
       distinctAssetCodes: [],
       published: 0,
       failures: [],
-      error: mErr.message,
+      error: e instanceof Error ? e.message : String(e),
     };
   }
-
-  const marketRows = (mRows ?? []) as MarketRowForMcap[];
   const sorted = [...marketRows].sort((a, b) => {
     const d = coingeckoMarketCapUsdDescKey(b) - coingeckoMarketCapUsdDescKey(a);
     if (d !== 0) return d;

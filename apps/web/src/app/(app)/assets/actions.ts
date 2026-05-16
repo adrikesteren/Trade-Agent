@@ -12,6 +12,7 @@ import {
   toRelayOriginAndPath,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -170,28 +171,19 @@ export async function deleteCatalogAsset(assetId: string): Promise<DeleteCatalog
 
   const admin = createServiceRoleClient();
 
-  const { count: baseCount, error: baseErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", id);
-
-  if (baseErr) {
-    return { ok: false, error: baseErr.message };
+  let asBase: number;
+  let asQuote: number;
+  try {
+    asBase = await MarketsSelector.countByAssetId(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    asQuote = await MarketsSelector.countByQuoteAssetId(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
-  const { count: quoteCount, error: quoteErr } = await admin
-    .schema("catalog")
-    .from("markets")
-    .select("*", { count: "exact", head: true })
-    .eq("quote_asset_id", id);
-
-  if (quoteErr) {
-    return { ok: false, error: quoteErr.message };
-  }
-
-  const asBase = baseCount ?? 0;
-  const asQuote = quoteCount ?? 0;
   if (asBase > 0 || asQuote > 0) {
     return {
       ok: false,
