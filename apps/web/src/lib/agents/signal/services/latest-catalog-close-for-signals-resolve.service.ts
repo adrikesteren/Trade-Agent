@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
 
 function asIsoString(v: unknown): string | null {
   if (v == null) return null;
@@ -20,17 +21,11 @@ function isMissingCatalogRpc(error: { code?: string; message?: string } | null):
 
 /** @internal Legacy: max `close_time` across all rows in `candle_timestamps` (any timeframe). */
 async function resolveLatestCatalogCandleCloseIsoLegacyGlobal(admin: SupabaseClient): Promise<string | null> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .select("close_time")
-    .order("close_time", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw new Error(`candle_timestamps: ${error.message}`);
-  const t = data?.close_time;
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  try {
+    return await CandleTimestampsSelector.selectLatestCloseTime(admin);
+  } catch (e) {
+    throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /**

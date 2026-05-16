@@ -7,6 +7,7 @@ import {
 } from "@/lib/agents/ingest/services/candle-retention.service";
 import { patchSyncRunMetadata } from "@/lib/agents/ingest/services/bitvavo-sync-status-record.service";
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
 
 /** `automation.sync_runs.metadata` — open_time (ISO) of the first candle bucket in this run. */
 export const CANDLE_SYNC_META_WINDOW_START_OPEN = "candleSyncWindowStartOpen";
@@ -46,29 +47,25 @@ export async function computeCandleSyncWindow(
   const nowMs = Date.now();
   const endCloseMs = floorLastClosedCloseMs(nowMs, stepMs);
 
-  const { count, error: cntErr } = await admin
-    .schema("catalog")
-    .from("candle_timestamps")
-    .select("id", { count: "exact", head: true });
-
-  if (cntErr) throw new Error(`candle_timestamps: ${cntErr.message}`);
+  let count: number;
+  try {
+    count = await CandleTimestampsSelector.countAll(admin);
+  } catch (e) {
+    throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   let startOpenMs: number;
 
-  if ((count ?? 0) === 0) {
+  if (count === 0) {
     const cutoffMs = nowMs - CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS * 60 * 60 * 1000;
     startOpenMs = ceilBarOpenMs(cutoffMs, stepMs);
   } else {
-    const { data: lastRow, error: lastErr } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("close_time")
-      .order("close_time", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (lastErr) throw new Error(`candle_timestamps: ${lastErr.message}`);
-    const lastCloseIso = lastRow?.close_time as string | undefined;
+    let lastCloseIso: string | null;
+    try {
+      lastCloseIso = await CandleTimestampsSelector.selectLatestCloseTime(admin);
+    } catch (e) {
+      throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (!lastCloseIso) {
       const cutoffMs = nowMs - CATALOG_INITIAL_EMPTY_SYNC_HISTORY_HOURS * 60 * 60 * 1000;
       startOpenMs = ceilBarOpenMs(cutoffMs, stepMs);
@@ -101,7 +98,8 @@ export async function computeCandleSyncWindow(
  * PostgREST caps result sets (`[api] max_rows`, often 1000). Unpaginated selects silently truncate,
  * which breaks historical/window candle sync beyond the first page.
  */
-export const CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE = 1000;
+export const CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE =
+  CandleTimestampsSelector.CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE;
 
 /** All `catalog.candle_timestamps.id` with `close_time` in `[gte, lte]` (ordered ascending). */
 export async function fetchAllCandleTimestampIdsInCloseTimeRange(
@@ -112,19 +110,21 @@ export async function fetchAllCandleTimestampIdsInCloseTimeRange(
   const page = CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE;
   for (let from = 0; ; from += page) {
     const to = from + page - 1;
-    const { data, error } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id")
-      .gte("close_time", args.closeTimeGteIso)
-      .lte("close_time", args.closeTimeLteIso)
-      .order("close_time", { ascending: true })
-      .range(from, to);
-    if (error) throw new Error(`candle_timestamps: ${error.message}`);
-    const chunk = (data ?? []).map((r) => r.id as string).filter(Boolean);
-    if (!chunk.length) break;
-    ids.push(...chunk);
-    if (chunk.length < page) break;
+    let chunk: { id: string }[];
+    try {
+      chunk = await CandleTimestampsSelector.selectIdsInCloseTimeRangePaginated(admin, {
+        closeTimeGteIso: args.closeTimeGteIso,
+        closeTimeLteIso: args.closeTimeLteIso,
+        from,
+        to,
+      });
+    } catch (e) {
+      throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const filtered = chunk.map((r) => r.id).filter(Boolean);
+    if (!filtered.length) break;
+    ids.push(...filtered);
+    if (filtered.length < page) break;
   }
   return ids;
 }
@@ -138,16 +138,17 @@ export async function fetchAllCandleTimestampRowsForCandleWindow(
   const page = CATALOG_CANDLE_TIMESTAMPS_FETCH_PAGE_SIZE;
   for (let from = 0; ; from += page) {
     const to = from + page - 1;
-    const { data, error } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id, open_time, close_time")
-      .gte("open_time", args.openTimeGteIso)
-      .lte("close_time", args.closeTimeLteIso)
-      .order("open_time", { ascending: true })
-      .range(from, to);
-    if (error) throw new Error(`candle_timestamps: ${error.message}`);
-    const chunk = (data ?? []) as { id: string; open_time: string; close_time: string }[];
+    let chunk: { id: string; open_time: string; close_time: string }[];
+    try {
+      chunk = await CandleTimestampsSelector.selectRowsForCandleWindowPaginated(admin, {
+        openTimeGteIso: args.openTimeGteIso,
+        closeTimeLteIso: args.closeTimeLteIso,
+        from,
+        to,
+      });
+    } catch (e) {
+      throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (!chunk.length) break;
     rowsOut.push(...chunk);
     if (chunk.length < page) break;
@@ -171,11 +172,11 @@ export async function bulkUpsertCandleTimestampsForWindow(
   const batchSize = 500;
   for (let i = 0; i < pairs.length; i += batchSize) {
     const slice = pairs.slice(i, i + batchSize);
-    const { error } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .upsert(slice, { onConflict: "open_time,close_time" });
-    if (error) throw new Error(`candle_timestamps: ${error.message}`);
+    try {
+      await CandleTimestampsSelector.upsertManyPairs(admin, slice);
+    } catch (e) {
+      throw new Error(`candle_timestamps: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
 

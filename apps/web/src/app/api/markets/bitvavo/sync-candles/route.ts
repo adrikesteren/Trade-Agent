@@ -25,6 +25,7 @@ import {
   syncBitvavoCandlesChunk,
   type CandleSyncMode,
 } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
 import { NextResponse } from "next/server";
 
 type Body = {
@@ -179,13 +180,13 @@ export async function POST(request: Request) {
         body.candleTimestampId &&
         body.targetCloseTimeIso
       ) {
-        const { data: tsHit, error: tsErr } = await admin
-          .schema("catalog")
-          .from("candle_timestamps")
-          .select("id")
-          .eq("id", body.candleTimestampId)
-          .maybeSingle();
-        if (!tsErr && tsHit) {
+        let tsHit: { id: string } | null = null;
+        try {
+          tsHit = await CandleTimestampsSelector.selectById(admin, body.candleTimestampId);
+        } catch {
+          tsHit = null;
+        }
+        if (tsHit) {
           syncMode = "incremental";
           candleTimestampId = body.candleTimestampId;
           targetCloseTimeIso = body.targetCloseTimeIso;
@@ -219,13 +220,13 @@ export async function POST(request: Request) {
     body.candleTimestampId &&
     body.targetCloseTimeIso
   ) {
-    const { data: tsHit, error: tsErr } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id")
-      .eq("id", body.candleTimestampId)
-      .maybeSingle();
-    if (!tsErr && tsHit) {
+    let tsHit: { id: string } | null = null;
+    try {
+      tsHit = await CandleTimestampsSelector.selectById(admin, body.candleTimestampId);
+    } catch {
+      tsHit = null;
+    }
+    if (tsHit) {
       syncMode = "incremental";
       candleTimestampId = body.candleTimestampId;
       targetCloseTimeIso = body.targetCloseTimeIso;

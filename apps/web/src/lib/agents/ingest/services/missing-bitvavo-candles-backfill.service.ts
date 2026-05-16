@@ -3,6 +3,8 @@ import { BitvavoAdapter } from "@/lib/bitvavo/public/candles";
 import { bitvavoListCandlesEndMs } from "@/lib/agents/ingest/services/bitvavo-list-candles-end-ms.service";
 import { barsForRetention, deleteExpiredCandleTimestamps } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 export type BackfillMissingCandlesResult = {
@@ -73,16 +75,15 @@ export async function backfillMissingBitvavoCandles(
     const pairList = [...distinctPairs.values()];
     const idByKey = new Map<string, string>();
     if (pairList.length) {
-      const { data: tsRows, error: tsErr } = await supabase
-        .schema("catalog")
-        .from("candle_timestamps")
-        .upsert(pairList, { onConflict: "open_time,close_time" })
-        .select("id, open_time, close_time");
-      if (tsErr) {
-        throw new Error(`${marketSymbol}: candle_timestamps: ${tsErr.message}`);
+      let tsRows: { id: string; open_time: string; close_time: string }[];
+      try {
+        tsRows = await CandleTimestampsSelector.upsertManyReturningRows(supabase, pairList);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`${marketSymbol}: candle_timestamps: ${msg}`);
       }
-      for (const r of tsRows ?? []) {
-        idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id as string);
+      for (const r of tsRows) {
+        idByKey.set(keyForTs(String(r.open_time), String(r.close_time)), r.id);
       }
     }
 
@@ -105,11 +106,11 @@ export async function backfillMissingBitvavoCandles(
       const chunkSize = 500;
       for (let j = 0; j < rowsToWrite.length; j += chunkSize) {
         const part = rowsToWrite.slice(j, j + chunkSize);
-        const { error: upErr } = await supabase.schema("catalog").from("candles").upsert(part, {
-          onConflict: "market_id,timeframe,candle_timestamp_id",
-        });
-        if (upErr) {
-          throw new Error(`${marketSymbol}: ${upErr.message}`);
+        try {
+          await CandlesSelector.upsertManyByMarketTimeframeCandleTs(supabase, part);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${marketSymbol}: ${msg}`);
         }
         candleRowsUpserted += part.length;
       }

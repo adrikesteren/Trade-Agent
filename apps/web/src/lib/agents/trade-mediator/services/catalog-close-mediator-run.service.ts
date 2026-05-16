@@ -24,6 +24,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
@@ -158,15 +159,12 @@ async function findBarCandle(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; closeTimeIso: string },
 ): Promise<{ price: number; candleId: string } | null> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, close, candle_timestamps ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .limit(500);
-  if (error) throw new Error(error.message);
-  const rows = mapBarCandles((data ?? []) as CandleRow[]);
+  const data = await CandlesSelector.selectBarsWithOpenCloseForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: 500,
+  });
+  const rows = mapBarCandles(data as CandleRow[]);
   const hit = rows.find((r) => closeTimesMatch(r.closeTimeIso, args.closeTimeIso));
   if (!hit || !Number.isFinite(hit.close) || hit.close <= 0) return null;
   return { price: hit.close, candleId: hit.id };

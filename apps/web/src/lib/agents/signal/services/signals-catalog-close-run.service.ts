@@ -15,6 +15,7 @@ import { evaluateRsiReversionAtClose } from "./rsi-reversion-eval.service";
 import { evaluateBreakoutAtrAtClose } from "./breakout-atr-eval.service";
 import { filterSignalUserIdsToExistingAuthUsers, getCatalogPipelineUserIds } from "./signal-user-ids.service";
 
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
@@ -112,17 +113,12 @@ async function fetchCandlesForMarket(
   args: { marketId: string; timeframe: string; barLimit: number },
 ): Promise<CandleRow[]> {
   // Newest bars first, then cap — unbounded LIMIT without ORDER can omit the latest close (wrong eval / missing target bar).
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, open, high, low, close, volume, candle_timestamps!inner ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .order("close_time", { ascending: false, foreignTable: "candle_timestamps" })
-    .limit(args.barLimit);
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as CandleRow[];
+  const data = await CandlesSelector.selectOhlcvWithOpenCloseInnerOrderedDescForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: args.barLimit,
+  });
+  return data as CandleRow[];
 }
 
 export async function runSignalsCatalogClose(body: SignalsCatalogCloseBody): Promise<RunSignalsCatalogCloseResult> {

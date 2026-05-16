@@ -29,6 +29,7 @@ import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/servic
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { objectRegistry } from "@/lib/objects/registry";
 import * as AssetsSelector from "@/lib/selectors/assets-selector";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExecutorsSelector from "@/lib/selectors/executors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
@@ -109,17 +110,17 @@ async function fetchLatestCloseByMarketIds(
   const uniq = [...new Set(marketIds)].filter(Boolean);
   for (let i = 0; i < uniq.length; i += 120) {
     const chunk = uniq.slice(i, i + 120);
-    const { data, error } = await supabase
-      .schema("catalog")
-      .from("candles")
-      .select("market_id, close, candle_timestamps ( close_time )")
-      .eq("timeframe", timeframe)
-      .in("market_id", chunk);
-    if (error) {
-      console.error("executor detail: latest closes batch:", error.message);
+    let data: Awaited<ReturnType<typeof CandlesSelector.selectMarketCloseByMarketIdsAndTimeframe>>;
+    try {
+      data = await CandlesSelector.selectMarketCloseByMarketIdsAndTimeframe(supabase, {
+        marketIds: chunk,
+        timeframe,
+      });
+    } catch (e) {
+      console.error("executor detail: latest closes batch:", e instanceof Error ? e.message : String(e));
       continue;
     }
-    for (const row of (data ?? []) as {
+    for (const row of data as {
       market_id: string;
       close: unknown;
       candle_timestamps?: { close_time?: string | null } | { close_time?: string | null }[] | null;

@@ -6,6 +6,7 @@ import { getAutomatedProcessUserId } from "@/lib/automation-actor";
 import { loadHistoricalCandlesForReplay } from "@/lib/agents/ingest/services/historical-candles-for-replay-load.service";
 import { replayMissingSignalsForBars } from "@/lib/agents/signal/services/replay-missing-signals-for-bars.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 
 import { todayUtcYmd } from "./market-backfill-candles.service";
@@ -122,18 +123,11 @@ export async function fetchEarliestStoredCandleDate(
   admin: SupabaseClient,
   marketId: string,
 ): Promise<string | null> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("candle_timestamps ( close_time )")
-    .eq("market_id", marketId)
-    .eq("timeframe", CATALOG_STORAGE_TIMEFRAME)
-    .order("close_time", { ascending: true, foreignTable: "candle_timestamps" })
-    .limit(1);
-  if (error) throw new Error(error.message);
-  const row = (data ?? [])[0] as
-    | { candle_timestamps?: { close_time?: string } | { close_time?: string }[] }
-    | undefined;
+  const data = await CandlesSelector.selectEarliestCloseTimeForMarket(admin, {
+    marketId,
+    timeframe: CATALOG_STORAGE_TIMEFRAME,
+  });
+  const row = data[0];
   if (!row) return null;
   const ts = Array.isArray(row.candle_timestamps) ? row.candle_timestamps[0] : row.candle_timestamps;
   const iso = ts?.close_time?.trim();

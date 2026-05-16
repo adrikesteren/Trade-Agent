@@ -25,6 +25,7 @@ import {
 } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
 import { enqueueSignalsCatalogCloseAfterIncremental } from "@/lib/agents/signal/services/signals-catalog-close-enqueue.service";
 import { resolveLatestCatalogCandleCloseIso } from "@/lib/agents/signal/services/latest-catalog-close-for-signals-resolve.service";
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
 
 export type EurCandleSweepBody = {
   marketOffset?: number;
@@ -122,13 +123,13 @@ async function resolveChunkTiming(
     body.candleTimestampId &&
     body.targetCloseTimeIso
   ) {
-    const { data: tsHit, error: tsErr } = await admin
-      .schema("catalog")
-      .from("candle_timestamps")
-      .select("id")
-      .eq("id", body.candleTimestampId)
-      .maybeSingle();
-    if (!tsErr && tsHit) {
+    let tsHit: { id: string } | null = null;
+    try {
+      tsHit = await CandleTimestampsSelector.selectById(admin, body.candleTimestampId);
+    } catch {
+      tsHit = null;
+    }
+    if (tsHit) {
       return {
         syncMode: "incremental",
         candleTimestampId: body.candleTimestampId,

@@ -11,6 +11,7 @@ import type { CandleRowJson } from "@/lib/markets/chart-types";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchAllMarketStorageCandles, mapCatalogCandleRowToJson } from "@/lib/markets/fetch-market-chart-candles";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -186,14 +187,16 @@ export default async function MarketDetailPage({ params }: PageProps) {
         : String(market.metadata);
 
   const metaByCandleId = new Map<string, { close_time: string; timeframe: string }>();
-  const { data: barRowsForSignals } = await supabase
-    .schema("catalog")
-    .from("candles")
-    .select("id, timeframe, candle_timestamps ( close_time )")
-    .eq("market_id", id)
-    .order("close_time", { ascending: false, foreignTable: "candle_timestamps" })
-    .limit(2500);
-  for (const br of barRowsForSignals ?? []) {
+  let barRowsForSignals: Awaited<ReturnType<typeof CandlesSelector.selectIdTimeframeCloseForMarketLatest>> = [];
+  try {
+    barRowsForSignals = await CandlesSelector.selectIdTimeframeCloseForMarketLatest(supabase, {
+      marketId: id,
+      limit: 2500,
+    });
+  } catch (e) {
+    console.error("market detail: bar metadata fetch:", e instanceof Error ? e.message : String(e));
+  }
+  for (const br of barRowsForSignals) {
     const bid = String((br as { id: string }).id ?? "").trim();
     if (!bid) continue;
     const ct = unwrapMarketSignal((br as { candle_timestamps?: unknown }).candle_timestamps);

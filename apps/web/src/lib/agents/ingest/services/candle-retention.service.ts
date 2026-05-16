@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as CandleTimestampsSelector from "@/lib/selectors/candle-timestamps-selector";
+
 /** How far back we keep closed candles (wall clock, UTC) for bar counts / non-empty sync floors. */
 export const CANDLE_RETENTION_HOURS = 72; // 3 days — lighter on DB/disk for dev
 
@@ -45,14 +47,5 @@ export async function deleteExpiredCandleTimestamps(
   maxAgeHours = CANDLE_TIMESTAMP_TTL_HOURS,
 ): Promise<void> {
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000).toISOString();
-
-  const { error } = await supabase
-    .schema("catalog")
-    .from("candle_timestamps")
-    .delete()
-    .lt("close_time", cutoff);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await CandleTimestampsSelector.deleteOlderThanCloseTime(supabase, cutoff);
 }

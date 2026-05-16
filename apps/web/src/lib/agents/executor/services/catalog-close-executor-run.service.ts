@@ -26,6 +26,7 @@ import {
   fetchMarketAssetIds,
   type ExecutorRow,
 } from "./executors-lookup.service";
+import * as CandlesSelector from "@/lib/selectors/candles-selector";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
@@ -109,15 +110,12 @@ async function fetchCandlesForMarket(
   admin: SupabaseClient,
   args: { marketId: string; timeframe: string; barLimit: number },
 ): Promise<CandleRow[]> {
-  const { data, error } = await admin
-    .schema("catalog")
-    .from("candles")
-    .select("id, open, high, low, close, volume, candle_timestamps ( open_time, close_time )")
-    .eq("market_id", args.marketId)
-    .eq("timeframe", args.timeframe)
-    .limit(args.barLimit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as CandleRow[];
+  const data = await CandlesSelector.selectOhlcvWithOpenCloseForMarket(admin, {
+    marketId: args.marketId,
+    timeframe: args.timeframe,
+    limit: args.barLimit,
+  });
+  return data as CandleRow[];
 }
 
 function parseProposedBuy(payload: Record<string, unknown> | null): { symbol: string; notionalEur: number } | null {
