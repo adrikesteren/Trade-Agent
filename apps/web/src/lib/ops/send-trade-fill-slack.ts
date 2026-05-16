@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+
 export type TradeFillSlackSource = "executor-catalog-close" | "bitvavo-reconcile";
 
 export type TradeFillSlackPayload = {
@@ -58,12 +60,11 @@ export async function fetchAssetDisplayNameByMarketId(
     const chunk = 200;
     for (let i = 0; i < ids.length; i += chunk) {
       const part = ids.slice(i, i + chunk);
-      const { data, error } = await admin.schema("catalog").from("assets").select("id, name, code").in("id", part);
-      if (error) throw new Error(error.message);
-      for (const r of data ?? []) {
-        const nm = String((r as { name?: string | null }).name ?? "").trim();
-        const code = String((r as { code?: string | null }).code ?? "").trim();
-        byAssetId.set((r as { id: string }).id, nm || code || "—");
+      const data = await AssetsSelector.selectIdCodeNameByIds(admin, part);
+      for (const r of data) {
+        const nm = String(r.name ?? "").trim();
+        const code = String(r.code ?? "").trim();
+        byAssetId.set(r.id, nm || code || "—");
       }
     }
   }

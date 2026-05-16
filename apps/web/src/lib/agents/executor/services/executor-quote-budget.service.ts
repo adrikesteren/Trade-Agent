@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { primaryUnitsToQuoteUnits } from "@/lib/catalog/primary-to-quote";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 /**
  * Resolve the per-trade notional for an executor + quote asset, expressed in **quote-asset units**.
@@ -60,15 +61,10 @@ export async function fetchExecutorQuoteBudgetInQuoteUnits(
   }
 
   // Read both dollar_values for triangulation
-  const { data: dvRows, error: dvErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, dollar_value")
-    .in("id", [primaryAssetId, quoteAssetId]);
-  if (dvErr) throw new Error(dvErr.message);
+  const dvRows = await AssetsSelector.selectIdDollarValueByIds(admin, [primaryAssetId, quoteAssetId]);
 
   const byId = new Map<string, number | null>();
-  for (const row of (dvRows ?? []) as { id: string; dollar_value: unknown }[]) {
+  for (const row of dvRows) {
     const raw = row.dollar_value;
     const n = raw == null ? null : typeof raw === "number" ? raw : Number.parseFloat(String(raw));
     byId.set(String(row.id), Number.isFinite(n) && (n as number) > 0 ? (n as number) : null);

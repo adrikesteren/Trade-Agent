@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+
 import { fetchExchangeIdByCode } from "./executors-lookup.service";
 
 /** Replay + candle ingest use this quote (Bitvavo EUR pairs). */
@@ -42,15 +44,10 @@ export async function fetchHistoricalExecutorPaperMarket(
   const quoteIds = [...new Set(list.map((m) => m.quote_asset_id).filter(Boolean))];
   if (quoteIds.length === 0) return null;
 
-  const { data: assets, error: aErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind")
-    .in("id", quoteIds);
-  if (aErr) throw new Error(aErr.message);
+  const assets = await AssetsSelector.selectIdCodeKindByIds(admin, quoteIds);
 
   const byQuoteId = new Map(
-    (assets ?? []).map((r) => [String((r as { id: string }).id), r as { id: string; code: string; kind: string }]),
+    assets.map((r) => [String(r.id), r as { id: string; code: string; kind: string }]),
   );
 
   const eurMkts = list.filter((m) => String(byQuoteId.get(m.quote_asset_id)?.code ?? "").toUpperCase() === "EUR");

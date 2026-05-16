@@ -11,6 +11,7 @@ import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferenc
 import { isFiatQuoteCurrencyCode } from "@/lib/markets/fiat-quote-currency-codes";
 import { isRelayWorkerEnqueueConfigured } from "@/lib/relay/relay-symbol-close-pipeline-client";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
@@ -28,9 +29,6 @@ import { notFound } from "next/navigation";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-const ASSET_CG_FIELDS =
-  "coingecko_fetched_at, coingecko_coin_id, coingecko_price_usd, coingecko_market_cap_usd, coingecko_fdv_usd, coingecko_total_volume_usd, coingecko_high_24h_usd, coingecko_low_24h_usd, coingecko_price_change_24h_usd, coingecko_price_change_24h_pct, coingecko_price_change_7d_pct, coingecko_market_cap_rank, coingecko_circulating_supply, coingecko_total_supply, coingecko_max_supply, coingecko_ath_usd, coingecko_ath_change_pct";
-
 export default async function AssetDetailPage({ params }: PageProps) {
   const { slug: slugParam } = await params;
   const slug = normalizeCatalogAssetRouteSlug(slugParam);
@@ -42,26 +40,25 @@ export default async function AssetDetailPage({ params }: PageProps) {
   const prefs = await getUserLocalePreferences();
   const formatDt = (v: string | number | Date) => formatDatetime(v, prefs);
 
-  const fields = `id, code, kind, name, metadata, created_at, ${ASSET_CG_FIELDS}`;
-  let assetQuery = supabase.schema("catalog").from("assets").select(fields);
-  if (isCatalogAssetDetailRouteUuid(slug)) {
-    assetQuery = assetQuery.eq("id", slug);
-  } else {
-    const code = slug.toUpperCase();
-    if (isFiatQuoteCurrencyCode(code)) {
-      assetQuery = assetQuery.eq("code", code).eq("kind", "fiat");
+  let asset: Awaited<ReturnType<typeof AssetsSelector.selectDetailById>>;
+  try {
+    if (isCatalogAssetDetailRouteUuid(slug)) {
+      asset = await AssetsSelector.selectDetailById(supabase, slug);
     } else {
-      assetQuery = assetQuery.eq("code", code).in("kind", ["crypto", "stock"]);
+      const code = slug.toUpperCase();
+      asset = isFiatQuoteCurrencyCode(code)
+        ? await AssetsSelector.selectDetailByCodeFiat(supabase, code)
+        : await AssetsSelector.selectDetailByCodeForKinds(supabase, code, ["crypto", "stock"]);
     }
-  }
-
-  const { data: asset, error } = await assetQuery.maybeSingle();
-
-  if (error || !asset) {
+  } catch {
     notFound();
   }
 
-  const assetId = asset.id as string;
+  if (!asset) {
+    notFound();
+  }
+
+  const assetId = asset.id;
 
   const { data: markets, count: marketCount } = await supabase
     .schema("catalog")

@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+
 const FRANKFURTER_LATEST = "https://api.frankfurter.app/v1/latest";
 const TO_PARAM_CHUNK = 40;
 
@@ -12,10 +14,12 @@ const TO_PARAM_CHUNK = 40;
  */
 export async function syncFiatAssetDollarValues(admin: SupabaseClient): Promise<{ updated: number }> {
   try {
-    const { data: fiats, error } = await admin.schema("catalog").from("assets").select("id, code").eq("kind", "fiat");
-    if (error) return { updated: 0 };
-
-    const rows = (fiats ?? []) as { id: string; code: string }[];
+    let rows: Awaited<ReturnType<typeof AssetsSelector.selectAllFiats>>;
+    try {
+      rows = await AssetsSelector.selectAllFiats(admin);
+    } catch {
+      return { updated: 0 };
+    }
     if (!rows.length) return { updated: 0 };
 
     let updated = 0;
@@ -24,8 +28,12 @@ export async function syncFiatAssetDollarValues(admin: SupabaseClient): Promise<
       const code = String(row.code ?? "").trim().toUpperCase();
       if (!code) continue;
       if (code === "USD") {
-        const { error: upErr } = await admin.schema("catalog").from("assets").update({ dollar_value: 1 }).eq("id", row.id);
-        if (!upErr) updated += 1;
+        try {
+          await AssetsSelector.updateDollarValueById(admin, row.id, 1);
+          updated += 1;
+        } catch {
+          /* skip */
+        }
       }
     }
 
@@ -53,12 +61,12 @@ export async function syncFiatAssetDollarValues(admin: SupabaseClient): Promise<
       const rate = rateByCode.get(code);
       if (rate == null || !Number.isFinite(rate) || rate <= 0) continue;
       const dollarValue = 1 / rate;
-      const { error: upErr } = await admin
-        .schema("catalog")
-        .from("assets")
-        .update({ dollar_value: dollarValue })
-        .eq("id", row.id);
-      if (!upErr) updated += 1;
+      try {
+        await AssetsSelector.updateDollarValueById(admin, row.id, dollarValue);
+        updated += 1;
+      } catch {
+        /* skip */
+      }
     }
 
     return { updated };

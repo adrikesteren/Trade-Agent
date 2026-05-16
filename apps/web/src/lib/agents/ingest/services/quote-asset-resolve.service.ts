@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isFiatQuoteCurrencyCode } from "@/lib/markets/fiat-quote-currency-codes";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 /**
  * Load `catalog.assets.id` for Bitvavo-style quote symbols (fiat ISO vs crypto code).
@@ -14,16 +15,10 @@ export async function fetchQuoteAssetIdsByCodes(
   const out = new Map<string, string>();
   if (upper.length === 0) return out;
 
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind")
-    .in("code", upper);
-
-  if (error) throw new Error(error.message);
+  const data = await AssetsSelector.selectByCodes(supabase, upper);
 
   const byCode = new Map<string, { id: string; kind: string }[]>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     const code = String(row.code).toUpperCase();
     const list = byCode.get(code) ?? [];
     list.push({ id: row.id as string, kind: String(row.kind) });

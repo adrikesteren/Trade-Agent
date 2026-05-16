@@ -1,4 +1,5 @@
 import { cache } from "react";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_USER_LOCALE_PREFERENCES } from "./defaults";
 import type { UserDecimalFormat, UserDateFormat, UserLocalePreferences, UserTimeFormat, UserTimezone } from "./types";
@@ -75,14 +76,14 @@ export const getUserLocalePreferences = cache(async (): Promise<UserLocalePrefer
     return { ...base, primary_asset: null };
   }
 
-  const { data: pa, error: paErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, dollar_value")
-    .eq("id", pid)
-    .maybeSingle();
+  let pa: Awaited<ReturnType<typeof AssetsSelector.selectLocaleById>> = null;
+  try {
+    pa = await AssetsSelector.selectLocaleById(supabase, pid);
+  } catch {
+    return { ...base, primary_asset: null };
+  }
 
-  if (paErr || !pa || String(pa.kind) !== "fiat") {
+  if (!pa || String(pa.kind) !== "fiat") {
     return { ...base, primary_asset: null };
   }
 

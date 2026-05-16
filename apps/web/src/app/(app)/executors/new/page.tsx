@@ -9,6 +9,7 @@ import { executorRowToFormInitial } from "@/app/(app)/executors/executor-row-to-
 import { fetchQuoteAssetOptionsByExchange } from "@/app/(app)/executors/quote-asset-options";
 import { fetchExchangeCapabilitiesById } from "@/app/(app)/executors/exchange-capabilities";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -17,18 +18,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[]> {
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("kind", "crypto")
-    .order("code", { ascending: true })
-    .limit(400);
-  if (error) {
-    console.error("assets list:", error.message);
+  let data: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByKindOrderedLimited>>;
+  try {
+    data = await AssetsSelector.selectIdCodeByKindOrderedLimited(supabase, "crypto", 400);
+  } catch (e) {
+    console.error("assets list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string }[]).map((a) => ({ id: a.id, code: a.code }));
+  return data.map((a) => ({ id: a.id, code: a.code }));
 }
 
 async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeOption[]> {

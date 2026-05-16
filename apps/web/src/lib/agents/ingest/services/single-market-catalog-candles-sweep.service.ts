@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { barsForRetention } from "@/lib/agents/ingest/services/candle-retention.service";
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /**
@@ -30,15 +31,8 @@ export async function sweepBitvavoSingleMarketCatalogCandles(
     return { candleRowsUpserted: 0, marketSymbol: String(mrow.market_symbol) };
   }
 
-  const { data: quoteRow, error: qErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", mrow.quote_asset_id as string)
-    .maybeSingle();
-
-  if (qErr) throw new Error(qErr.message);
-  const quote = String(quoteRow?.code ?? "").toUpperCase();
+  const quoteCode = await AssetsSelector.selectCodeById(supabase, mrow.quote_asset_id as string);
+  const quote = String(quoteCode ?? "").toUpperCase();
   if (!quote) {
     throw new Error("market missing quote asset code");
   }

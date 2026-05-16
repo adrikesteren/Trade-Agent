@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { coingeckoFetchMarketsByIds, type CoinGeckoMarketRow } from "@/lib/agents/ingest/services/coingecko-client.service";
 import { syncFiatAssetDollarValues } from "@/lib/agents/ingest/services/fiat-dollar-values-sync.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 function parsePositiveInt(envVal: string | undefined, fallback: number): number {
   if (envVal === undefined || envVal === "") return fallback;
@@ -61,18 +62,7 @@ export async function syncCoingeckoAssetMetricsResolvePhase(supabase: SupabaseCl
   stillMissingCoingeckoId: number;
   searchFailures: string[];
 }> {
-  const { data: assets, error: selErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, coingecko_coin_id")
-    .eq("kind", "crypto")
-    .order("code", { ascending: true });
-
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
-
-  const rows = (assets ?? []) as AssetRow[];
+  const rows = (await AssetsSelector.selectAllCryptoForMetricsSync(supabase)) as AssetRow[];
   const idByCoingecko = new Map<string, string>();
   let missingCoinId = 0;
 
@@ -111,21 +101,12 @@ export async function buildCoingeckoIdMapForAssetIds(
     return { idByCoingecko: new Map(), stillMissingCoingeckoId: 0 };
   }
 
-  const { data: assets, error: selErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, coingecko_coin_id")
-    .eq("kind", "crypto")
-    .in("id", unique);
-
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
+  const assets = await AssetsSelector.selectCryptoCoinIdsByIds(supabase, unique);
 
   const idByCoingecko = new Map<string, string>();
   let stillMissingCoingeckoId = 0;
 
-  for (const a of (assets ?? []) as AssetRow[]) {
+  for (const a of assets) {
     const cid = typeof a.coingecko_coin_id === "string" ? a.coingecko_coin_id.trim() : "";
     if (cid) {
       idByCoingecko.set(cid, a.id);
@@ -164,8 +145,7 @@ export async function syncCoingeckoAssetMetricsMarketsPhase(
     const chunk = work.slice(i, i + MARKETS_DB_CONCURRENCY);
     await Promise.all(
       chunk.map(async ({ assetId, patch }) => {
-        const { error: upErr } = await supabase.schema("catalog").from("assets").update(patch).eq("id", assetId);
-        if (upErr) throw new Error(upErr.message);
+        await AssetsSelector.updateById(supabase, assetId, patch as Record<string, unknown>);
       }),
     );
     assetsUpdated += chunk.length;

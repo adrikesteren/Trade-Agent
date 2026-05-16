@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { bulkUpsertCandleTimestampsForWindow } from "@/lib/agents/ingest/services/candle-sync-window.service";
 import { timeframeDurationMs } from "@/lib/agents/ingest/services/eur-candle-timestamp-window.service";
 import { syncBitvavoCandlesChunk } from "@/lib/agents/ingest/services/bitvavo-candles-chunk-sync.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 import { computeHistoricalCandleWindow } from "./historical-candle-window.service";
 
@@ -48,14 +49,8 @@ export async function ingestHistoricalCandles(
   if (mErr) throw new Error(mErr.message);
   if (!mrow) throw new Error("market not found");
 
-  const { data: quoteRow, error: qErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", mrow.quote_asset_id as string)
-    .maybeSingle();
-  if (qErr) throw new Error(qErr.message);
-  const quote = String(quoteRow?.code ?? args.quote).toUpperCase();
+  const quoteCode = await AssetsSelector.selectCodeById(admin, mrow.quote_asset_id as string);
+  const quote = String(quoteCode ?? args.quote).toUpperCase();
   if (!quote) {
     throw new Error("market missing quote asset code");
   }

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /** Bitvavo pairs use `BASE-QUOTE` (e.g. ETH-BTC, FUN-EUR). */
@@ -52,26 +53,12 @@ export async function ensureMarket(supabase: SupabaseClient, params: { exchangeC
     return { ok: false, reason: "missing_quote_asset", exchangeId, quote };
   }
 
-  const { data: assetRow, error: assetErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .upsert(
-      {
-        kind: "crypto" as const,
-        code: base,
-        name: base,
-        metadata: {},
-      },
-      { onConflict: "kind,code" },
-    )
-    .select("id")
-    .single();
-
-  if (assetErr || !assetRow) {
-    throw new Error(assetErr?.message ?? "asset upsert failed");
-  }
-
-  const assetId = assetRow.id as string;
+  const assetId = await AssetsSelector.upsertOneByKindCodeReturningId(supabase, {
+    kind: "crypto" as const,
+    code: base,
+    name: base,
+    metadata: {},
+  });
 
   const { data: row, error: mErr } = await supabase
     .schema("catalog")

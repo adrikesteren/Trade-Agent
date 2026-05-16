@@ -4,6 +4,7 @@ import {
   fetchBitvavoAssetData as fetchBitvavoAssetsJson,
   type BitvavoAssetDataRow,
 } from "@/lib/bitvavo/public/assets";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 export type { BitvavoAssetDataRow };
 
@@ -92,19 +93,10 @@ export async function syncBitvavoAssetData(
 
   const codes = rows.map((r) => String(r.symbol).toUpperCase());
 
-  const { data: assetRows, error: selErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, metadata")
-    .eq("kind", "crypto")
-    .in("code", codes);
-
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
+  const assetRows = await AssetsSelector.selectCryptoIdCodeMetaByCodes(supabase, codes);
 
   const codeToAsset = new Map(
-    (assetRows ?? []).map((a) => [String(a.code).toUpperCase(), a as { id: string; code: string; metadata: unknown }]),
+    assetRows.map((a) => [String(a.code).toUpperCase(), a as { id: string; code: string; metadata: unknown }]),
   );
 
   const work: { id: string; name: string; metadata: Record<string, unknown> }[] = [];
@@ -131,12 +123,10 @@ export async function syncBitvavoAssetData(
     const chunk = work.slice(i, i + UPDATE_CONCURRENCY);
     await Promise.all(
       chunk.map(async (w) => {
-        const { error: upErr } = await supabase
-          .schema("catalog")
-          .from("assets")
-          .update({ name: w.name, metadata: w.metadata })
-          .eq("id", w.id);
-        if (upErr) throw new Error(upErr.message);
+        await AssetsSelector.updateNameAndMetadataById(supabase, w.id, {
+          name: w.name,
+          metadata: w.metadata,
+        });
       }),
     );
     assetsUpdated += chunk.length;
@@ -182,17 +172,8 @@ export async function upsertCatalogCryptoAssetsFromBitvavo(
 
   for (let i = 0; i < codes.length; i += UPSERT_CODES_CHUNK) {
     const slice = codes.slice(i, i + UPSERT_CODES_CHUNK);
-    const { data, error } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("code, metadata")
-      .eq("kind", "crypto")
-      .in("code", slice);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-    for (const row of data ?? []) {
+    const data = await AssetsSelector.selectCryptoCodeMetaByCodes(supabase, slice);
+    for (const row of data) {
       codeToExistingMeta.set(String(row.code).toUpperCase(), row.metadata);
     }
   }
@@ -219,12 +200,7 @@ export async function upsertCatalogCryptoAssetsFromBitvavo(
 
   for (let i = 0; i < upsertPayload.length; i += UPSERT_ROWS_CHUNK) {
     const chunk = upsertPayload.slice(i, i + UPSERT_ROWS_CHUNK);
-    const { error: upErr } = await supabase.schema("catalog").from("assets").upsert(chunk, {
-      onConflict: "kind,code",
-    });
-    if (upErr) {
-      throw new Error(upErr.message);
-    }
+    await AssetsSelector.upsertManyByKindCode(supabase, chunk);
   }
 
   return {

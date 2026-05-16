@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 /** Escape `%`, `_`, and `\` for use as a literal in PostgREST `ilike` without wildcards. */
@@ -76,15 +77,7 @@ export async function resolvePrimaryMarketByCodes(
   const exchangeCode = String(exchange.code);
 
   const assetPattern = escapeIlikeExactPattern(assetIn);
-  const { data: assetRows, error: assetErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("kind", "crypto")
-    .ilike("code", assetPattern);
-
-  if (assetErr) throw new Error(assetErr.message);
-  const assets = (assetRows ?? []) as { id: string; code: string }[];
+  const assets = await AssetsSelector.selectCryptoIdCodeByCodeIlike(supabase, assetPattern);
   if (assets.length === 0) {
     throw new ResolvePrimaryMarketError("unknown_asset_code", `No crypto asset matches code: ${assetIn}`);
   }

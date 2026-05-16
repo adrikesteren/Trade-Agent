@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
+
 import type { AssetOption } from "./executor-form";
 
 export type QuoteAssetOptionsByExchange = Record<string, AssetOption[]>;
@@ -37,18 +39,16 @@ export async function fetchQuoteAssetOptionsByExchange(
   const allQuoteAssetIds = [...new Set([...byExchange.values()].flatMap((s) => [...s]))];
   if (!allQuoteAssetIds.length) return {};
 
-  const { data: arows, error: aErr } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .in("id", allQuoteAssetIds);
-  if (aErr) {
-    console.error("quote-asset-options assets:", aErr.message);
+  let arows: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>>;
+  try {
+    arows = await AssetsSelector.selectIdCodeByIds(supabase, allQuoteAssetIds);
+  } catch (e) {
+    console.error("quote-asset-options assets:", e instanceof Error ? e.message : String(e));
     return {};
   }
 
   const codeById = new Map<string, string>();
-  for (const a of (arows ?? []) as { id: string; code: string }[]) {
+  for (const a of arows) {
     codeById.set(String(a.id), String(a.code ?? ""));
   }
 

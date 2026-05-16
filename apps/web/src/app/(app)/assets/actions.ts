@@ -11,6 +11,7 @@ import {
   relayMaxRetries,
   toRelayOriginAndPath,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { JOB_IDENTIFIER_SKIP_AUTO_COINGECKO_COIN_ID } from "@/lib/tasks/constants";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -36,16 +37,8 @@ export async function setAssetCoingeckoCoinId(assetId: string, coinIdRaw: string
   const coingecko_coin_id = trimmed === "" ? null : trimmed;
 
   const admin = createServiceRoleClient();
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, metadata")
-    .eq("id", assetId)
-    .maybeSingle();
+  const row = await AssetsSelector.selectEditById(admin, assetId);
 
-  if (selErr) {
-    throw new Error(selErr.message);
-  }
   if (!row) {
     throw new Error("Asset not found.");
   }
@@ -60,15 +53,10 @@ export async function setAssetCoingeckoCoinId(assetId: string, coinIdRaw: string
     delete meta.coingecko_id;
   }
 
-  const { error: upErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .update({ coingecko_coin_id, metadata: meta })
-    .eq("id", assetId);
-
-  if (upErr) {
-    throw new Error(upErr.message);
-  }
+  await AssetsSelector.updateCoingeckoCoinIdAndMetadataById(admin, assetId, {
+    coingecko_coin_id,
+    metadata: meta,
+  });
 
   const codeSeg = encodeURIComponent(String(row.code ?? "").trim());
   revalidatePath(`/assets/${assetId}`);
@@ -107,15 +95,11 @@ export async function enqueueFindCoingeckoIdForAssetViaRelay(
   }
 
   const admin = createServiceRoleClient();
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, coingecko_coin_id")
-    .eq("id", assetId)
-    .maybeSingle();
-
-  if (selErr) {
-    return { ok: false, error: selErr.message };
+  let row: Awaited<ReturnType<typeof AssetsSelector.selectFindCoinIdRowById>>;
+  try {
+    row = await AssetsSelector.selectFindCoinIdRowById(admin, assetId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!row) {
     return { ok: false, error: "Asset not found." };
@@ -215,26 +199,23 @@ export async function deleteCatalogAsset(assetId: string): Promise<DeleteCatalog
     };
   }
 
-  const { data: row, error: selErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (selErr) {
-    return { ok: false, error: selErr.message };
+  let row: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeById>>;
+  try {
+    row = await AssetsSelector.selectIdCodeById(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!row) {
     return { ok: false, error: "Asset not found." };
   }
 
-  const { data: deleted, error: delErr } = await admin.schema("catalog").from("assets").delete().eq("id", id).select("id");
-
-  if (delErr) {
-    return { ok: false, error: delErr.message };
+  let deleted: { id: string }[];
+  try {
+    deleted = await AssetsSelector.deleteByIdReturningIds(admin, id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  if (!deleted?.length) {
+  if (!deleted.length) {
     return { ok: false, error: "Delete had no effect." };
   }
 

@@ -28,6 +28,7 @@ import { fetchWalletBalanceForAsset } from "@/lib/agents/executor/services/execu
 import { fetchHistoricalExecutorPaperMarket } from "@/lib/agents/executor/services/historical-paper-market.service";
 import { resolveQuoteAssetId } from "@/lib/agents/ingest/services/quote-asset-resolve.service";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -47,18 +48,14 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 async function fetchAssetOptions(supabase: SupabaseClient): Promise<AssetOption[]> {
-  const { data, error } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code")
-    .in("kind", ["crypto", "fiat"])
-    .order("code", { ascending: true })
-    .limit(400);
-  if (error) {
-    console.error("assets list:", error.message);
+  let data: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByKindsOrderedLimited>>;
+  try {
+    data = await AssetsSelector.selectIdCodeByKindsOrderedLimited(supabase, ["crypto", "fiat"], 400);
+  } catch (e) {
+    console.error("assets list:", e instanceof Error ? e.message : String(e));
     return [];
   }
-  return ((data ?? []) as { id: string; code: string }[]).map((a) => ({ id: a.id, code: a.code }));
+  return data.map((a) => ({ id: a.id, code: a.code }));
 }
 
 async function fetchExchangeOptions(supabase: SupabaseClient): Promise<ExchangeOption[]> {
@@ -536,12 +533,13 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const dollarIdList = [...dollarIdSet].filter(Boolean);
   const dollarById = new Map<string, number | null>();
   if (dollarIdList.length) {
-    const { data: dvRows } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, dollar_value")
-      .in("id", dollarIdList);
-    for (const row of (dvRows ?? []) as { id: string; dollar_value: unknown }[]) {
+    let dvRows: Awaited<ReturnType<typeof AssetsSelector.selectIdDollarValueByIds>> = [];
+    try {
+      dvRows = await AssetsSelector.selectIdDollarValueByIds(supabase, dollarIdList);
+    } catch {
+      /* preserve original soft-fail behavior — dollarById stays empty */
+    }
+    for (const row of dvRows) {
       dollarById.set(row.id, parseDollarCell(row.dollar_value));
     }
   }

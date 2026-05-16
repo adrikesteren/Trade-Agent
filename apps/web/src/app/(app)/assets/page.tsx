@@ -11,6 +11,7 @@ import {
 import { formatUsdMetric } from "@/lib/format-usd-metric";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -43,24 +44,24 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
   const supabase = await createClient();
   const prefs = await getUserLocalePreferences();
 
-  const { count: totalRaw, error: countError } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("*", { count: "exact", head: true });
-  const totalCount = totalRaw ?? 0;
+  let totalCount = 0;
+  let countErrorMessage: string | null = null;
+  try {
+    totalCount = await AssetsSelector.countAll(supabase);
+  } catch (e) {
+    countErrorMessage = e instanceof Error ? e.message : String(e);
+  }
   const pages = totalPages(totalCount, pageSize);
   const page = clampPage(pageRaw, pages);
   const { from, to } = rangeForPage(page, pageSize);
 
-  const { data: rows, error } = await supabase
-    .schema("catalog")
-    .from("assets")
-    .select("id, code, kind, name, coingecko_market_cap_usd, coingecko_total_volume_usd")
-    .order("coingecko_market_cap_usd", { ascending: false, nullsFirst: false })
-    .order("code", { ascending: true })
-    .range(from, to);
-
-  const sortedRows = (rows ?? []) as AssetRow[];
+  let sortedRows: AssetRow[] = [];
+  let error: { message: string } | null = null;
+  try {
+    sortedRows = (await AssetsSelector.selectAllPaginatedOrderedByMcap(supabase, { from, to })) as AssetRow[];
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
+  }
 
   const sortLineParts = [
     `${totalCount} total`,
@@ -68,8 +69,8 @@ export default async function AssetsIndexPage({ searchParams }: PageProps) {
     "Sorted by Market Cap",
     `${pageSize} per page`,
   ];
-  if (countError) {
-    sortLineParts.push(`Count error: ${countError.message}`);
+  if (countErrorMessage) {
+    sortLineParts.push(`Count error: ${countErrorMessage}`);
   }
 
   return (

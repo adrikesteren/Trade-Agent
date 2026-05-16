@@ -6,6 +6,7 @@ import { ObjectListViewHeader } from "@/components/object-list-view-header";
 import { formatDatetime, formatDecimal } from "@/lib/locale/format";
 import { getUserLocalePreferences } from "@/lib/locale/get-user-locale-preferences";
 import { objectRegistry } from "@/lib/objects/registry";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import { createClient } from "@/lib/supabase/server";
 import {
   Alert,
@@ -79,12 +80,13 @@ export default async function ExecutorQuoteAssetBudgetsRelatedPage({ params }: P
   const assetIds = [...new Set(list.map((r) => r.quote_asset_id))].filter(Boolean);
   const codeById = new Map<string, string>();
   if (assetIds.length) {
-    const { data: assets } = await supabase
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .in("id", assetIds);
-    for (const a of (assets ?? []) as { id: string; code: string }[]) {
+    let assets: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>> = [];
+    try {
+      assets = await AssetsSelector.selectIdCodeByIds(supabase, assetIds);
+    } catch {
+      /* preserve original soft-fail behavior — codeById stays empty */
+    }
+    for (const a of assets) {
       codeById.set(a.id, a.code);
     }
   }

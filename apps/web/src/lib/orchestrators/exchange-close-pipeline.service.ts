@@ -14,6 +14,7 @@ import {
   toRelayOriginAndPath,
   toRelayOriginAndPaths,
 } from "@/lib/relay/relay-symbol-close-pipeline-client";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 
 import type { RelayClient } from "@adrikesteren/relay-client";
@@ -69,17 +70,15 @@ async function fetchAssetIdToCodeMap(
   const map = new Map<string, string>();
   for (let i = 0; i < assetIds.length; i += ASSET_ID_IN_CHUNK) {
     const slice = assetIds.slice(i, i + ASSET_ID_IN_CHUNK);
-    const { data: aRows, error: aErr } = await admin
-      .schema("catalog")
-      .from("assets")
-      .select("id, code")
-      .in("id", slice);
-    if (aErr) {
-      return { ok: false, message: aErr.message };
+    let aRows: Awaited<ReturnType<typeof AssetsSelector.selectIdCodeByIds>>;
+    try {
+      aRows = await AssetsSelector.selectIdCodeByIds(admin, slice);
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
-    for (const r of aRows ?? []) {
-      const id = String((r as { id: string }).id).trim();
-      const c = String((r as { code: string }).code).trim();
+    for (const r of aRows) {
+      const id = String(r.id).trim();
+      const c = String(r.code).trim();
       if (id && c) map.set(id, c);
     }
   }

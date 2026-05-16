@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CATALOG_STORAGE_TIMEFRAME } from "@/lib/markets/chart-types";
 import { fetchExchangeIdByCode } from "@/lib/agents/executor/services/executors-lookup.service";
+import * as AssetsSelector from "@/lib/selectors/assets-selector";
 
 import { ingestHistoricalCandles } from "@/lib/agents/ingest/services/historical-candles-ingest.service";
 
@@ -86,14 +87,8 @@ export async function runMarketBackfillCandles(
     throw new Error("Backfill candles currently only supports Bitvavo markets.");
   }
 
-  const { data: quoteRow, error: qErr } = await admin
-    .schema("catalog")
-    .from("assets")
-    .select("code")
-    .eq("id", market.quote_asset_id)
-    .maybeSingle();
-  if (qErr) throw new Error(qErr.message);
-  const quote = String(quoteRow?.code ?? "").trim().toUpperCase();
+  const quoteCode = await AssetsSelector.selectCodeById(admin, market.quote_asset_id);
+  const quote = String(quoteCode ?? "").trim().toUpperCase();
   if (!quote) {
     throw new Error("Market is missing a quote asset code.");
   }
