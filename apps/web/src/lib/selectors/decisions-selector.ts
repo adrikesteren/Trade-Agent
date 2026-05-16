@@ -2,17 +2,11 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Embedded signals projection (candle_id join used to resolve bar_close_time). */
-export type DecisionEmbeddedSignals =
-  | { candle_id?: string | null }
-  | { candle_id?: string | null }[]
-  | null;
-
 /** Narrow row used by the executor catalog-close run (gating + payload + approval state). */
 export type DecisionRunRow = {
   id: string;
   user_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
@@ -21,26 +15,25 @@ export type DecisionRunRow = {
 /** Narrow id-only row used by the historical wipe service. */
 export type DecisionIdRow = { id: string };
 
-/** List-view row (trade-decisions list page) — embeds `signals(candle_id)` for bar-close resolution. */
+/** List-view row (trade-decisions list page). `candle_id` lives on decisions directly (Plan 2). */
 export type DecisionListViewRow = {
   id: string;
   executor_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
   position_side: string;
   decision_payload: Record<string, unknown> | null;
   created_at: string;
-  signals?: DecisionEmbeddedSignals;
 };
 
-/** Detail-page row (trade-decisions/[id]) — wide projection incl. risk_snapshot + embedded signals. */
+/** Detail-page row (trade-decisions/[id]) — wide projection incl. risk_snapshot + candle_id. */
 export type DecisionDetailRow = {
   id: string;
   user_id: string;
   executor_id: string;
-  signal_id: string | null;
+  candle_id: string;
   approved: boolean;
   reason_codes: string[] | null;
   timeframe: string;
@@ -48,16 +41,14 @@ export type DecisionDetailRow = {
   decision_payload: Record<string, unknown> | null;
   risk_snapshot: Record<string, unknown> | null;
   created_at: string;
-  signals?: DecisionEmbeddedSignals;
 };
 
-/** Executor-detail trade-decisions pack row (narrow projection with embedded signals). */
+/** Executor-detail trade-decisions pack row (narrow projection with candle_id). */
 export type DecisionExecutorListRow = {
   id: string;
-  signal_id: string | null;
+  candle_id: string;
   approved: boolean;
   created_at: string;
-  signals?: DecisionEmbeddedSignals;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -65,22 +56,23 @@ export type DecisionExecutorListRow = {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * `select("id, user_id, signal_id, approved, timeframe, decision_payload")
- *   .eq("user_id", x).eq("executor_id", y).in("signal_id", ids)` — gating-pool
- * lookup used by the catalog-close executor run.
+ * `select("id, user_id, candle_id, approved, timeframe, decision_payload")
+ *   .eq("user_id", x).eq("executor_id", y).eq("candle_id", c)` — gating-pool
+ * lookup used by the catalog-close executor run. Plan 2: decisions are now
+ * keyed by candle (not signal), so the executor reads one row per
+ * (user, executor, candle, position_side).
  */
-export async function selectRunRowsForExecutorAndSignals(
+export async function selectRunRowsForExecutorAndCandle(
   client: SupabaseClient,
-  args: { userId: string; executorId: string; signalIds: string[] },
+  args: { userId: string; executorId: string; candleId: string },
 ): Promise<DecisionRunRow[]> {
-  if (args.signalIds.length === 0) return [];
   const { data, error } = await client
     .schema("trading")
     .from("decisions")
-    .select("id, user_id, signal_id, approved, timeframe, decision_payload")
+    .select("id, user_id, candle_id, approved, timeframe, decision_payload")
     .eq("user_id", args.userId)
     .eq("executor_id", args.executorId)
-    .in("signal_id", args.signalIds);
+    .eq("candle_id", args.candleId);
   if (error) throw new Error(error.message);
   return (data ?? []) as DecisionRunRow[];
 }
@@ -113,7 +105,7 @@ export async function selectIdsForHistoricalWipe(
 }
 
 /**
- * `select("…, signals(candle_id)") .order(created_at desc) .limit(N)` — trade-decisions list
+ * `select("…, candle_id") .order(created_at desc) .limit(N)` — trade-decisions list
  * view fetch. Caller may narrow by executor via `executorIdFilter`.
  */
 export async function selectListViewRecent(
@@ -124,7 +116,7 @@ export async function selectListViewRecent(
     .schema("trading")
     .from("decisions")
     .select(
-      "id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, created_at, signals ( candle_id )",
+      "id, executor_id, candle_id, approved, reason_codes, timeframe, position_side, decision_payload, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(args.limit);
@@ -137,7 +129,7 @@ export async function selectListViewRecent(
 }
 
 /**
- * `select("id, signal_id, approved, created_at, signals(candle_id)", { count: "exact" })
+ * `select("id, candle_id, approved, created_at", { count: "exact" })
  *   .eq("executor_id", id) .order(created_at desc) .limit(N)` — executor detail
  * page trade-decisions pack. Returns `{ data, count, error }` so the caller can
  * destructure exactly like the inline pack call it replaces.
@@ -149,7 +141,7 @@ export async function selectExecutorRecentWithCount(
   const { data, count, error } = await client
     .schema("trading")
     .from("decisions")
-    .select("id, signal_id, approved, created_at, signals ( candle_id )", {
+    .select("id, candle_id, approved, created_at", {
       count: "exact",
     })
     .eq("executor_id", args.executorId)
@@ -163,7 +155,7 @@ export async function selectExecutorRecentWithCount(
 }
 
 /**
- * `select("…wide…, signals(candle_id)") .eq("id", id) .maybeSingle()` — trade-decision
+ * `select("…wide…, candle_id") .eq("id", id) .maybeSingle()` — trade-decision
  * detail page lookup.
  */
 export async function selectDetailById(
@@ -174,7 +166,7 @@ export async function selectDetailById(
     .schema("trading")
     .from("decisions")
     .select(
-      "id, user_id, executor_id, signal_id, approved, reason_codes, timeframe, position_side, decision_payload, risk_snapshot, created_at, signals ( candle_id )",
+      "id, user_id, executor_id, candle_id, approved, reason_codes, timeframe, position_side, decision_payload, risk_snapshot, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -187,20 +179,62 @@ export async function selectDetailById(
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * `upsert(row, { onConflict: "user_id,executor_id,signal_id,position_side" })` —
+ * `upsert(row, { onConflict: "user_id,executor_id,candle_id,position_side" })` —
  * primary mediator decision write. Caller composes the full row (decision payload,
  * risk snapshot, gating columns) — selector keeps the conflict key co-located so
  * every write target reaches the same unique constraint.
  */
-export async function upsertOneByExecutorSignalSide(
+export async function upsertOneByExecutorCandleSide(
   client: SupabaseClient,
   row: Record<string, unknown>,
 ): Promise<void> {
   const { error } = await client
     .schema("trading")
     .from("decisions")
-    .upsert(row, { onConflict: "user_id,executor_id,signal_id,position_side" });
+    .upsert(row, { onConflict: "user_id,executor_id,candle_id,position_side" });
   if (error) throw new Error(error.message);
+}
+
+/**
+ * `insert(row).select("id").single()` — single-row insert returning the new
+ * decision id. Used by mediator code paths that need the id immediately
+ * (e.g. to insert paired junction rows into `trading.signal_decisions`).
+ */
+export async function insertOneReturningId(
+  client: SupabaseClient,
+  row: Record<string, unknown>,
+): Promise<string> {
+  const { data, error } = await client
+    .schema("trading")
+    .from("decisions")
+    .insert(row)
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  const id = (data as { id: string } | null)?.id;
+  if (!id) throw new Error("decisions insert returned no id");
+  return id;
+}
+
+/**
+ * `upsert(row, { onConflict: …, ignoreDuplicates: false }).select("id").single()` —
+ * upsert variant that returns the resulting decision id (new or existing). Used
+ * by mediator paths that need to write paired junction rows after the upsert.
+ */
+export async function upsertOneByExecutorCandleSideReturningId(
+  client: SupabaseClient,
+  row: Record<string, unknown>,
+): Promise<string> {
+  const { data, error } = await client
+    .schema("trading")
+    .from("decisions")
+    .upsert(row, { onConflict: "user_id,executor_id,candle_id,position_side" })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  const id = (data as { id: string } | null)?.id;
+  if (!id) throw new Error("decisions upsert returned no id");
+  return id;
 }
 
 /** `delete() .in("id", ids)` — chunked id-list delete used by the historical wipe service. */

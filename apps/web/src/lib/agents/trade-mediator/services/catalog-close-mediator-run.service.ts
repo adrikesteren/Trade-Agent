@@ -30,6 +30,7 @@ import * as ExchangesSelector from "@/lib/selectors/exchanges-selector";
 import * as ExecutorMovingFloorsSelector from "@/lib/selectors/executor-moving-floors-selector";
 import * as MarketsSelector from "@/lib/selectors/markets-selector";
 import * as PositionsSelector from "@/lib/selectors/positions-selector";
+import * as SignalDecisionsSelector from "@/lib/selectors/signal-decisions-selector";
 import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 export type MediatorCatalogCloseBody = {
@@ -185,6 +186,7 @@ export function buildQuoteAssetNotAllowedSkipDecision(args: {
   ownerId: string;
   executor: { id: string; name: string; exchange_id: string };
   timeframe: string;
+  candleId: string;
   primarySignalId: string;
   matched: { id: string; intent: string; agent_slug: string }[];
   marketSymbol: string;
@@ -199,7 +201,7 @@ export function buildQuoteAssetNotAllowedSkipDecision(args: {
     user_id: args.ownerId,
     executor_id: args.executor.id,
     timeframe: args.timeframe,
-    signal_id: args.primarySignalId,
+    candle_id: args.candleId,
     approved: false,
     reason_codes: ["quote_asset_not_allowed"],
     risk_snapshot: args.riskSnap,
@@ -502,6 +504,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               ownerId,
               executor: { id: ex.id, name: ex.name, exchange_id: ex.exchange_id },
               timeframe,
+              candleId: bar.candleId,
               primarySignalId: matched[0].id,
               matched: matched.map((r) => ({ id: r.id, intent: r.intent, agent_slug: agentSlugFromRow(r) })),
               marketSymbol,
@@ -512,11 +515,28 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               signalsSyncRunId: body.signalsSyncRunId,
               mediatorPipelineSyncRunId: body.mediatorPipelineSyncRunId,
             });
+            let skipDecisionId: string;
             try {
-              await DecisionsSelector.upsertOneByExecutorSignalSide(admin, skipRow);
+              skipDecisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(admin, skipRow);
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
               throw new Error(`${marketSymbol}: decisions skip upsert: ${msg}`);
+            }
+            try {
+              await SignalDecisionsSelector.insertMany(
+                admin,
+                matched.map((r) => ({
+                  decision_id: skipDecisionId,
+                  signal_id: r.id,
+                  score: 1.0,
+                  reasons: { reasonCode: "quote_asset_not_allowed", intent: r.intent, agent_id: agentSlugFromRow(r) },
+                })),
+              );
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (!/duplicate|unique/i.test(msg)) {
+                console.error(`[mediator/catalog-close] ${marketSymbol}: junction insert: ${msg}`);
+              }
             }
             decisionsUpserted += 1;
           }
@@ -637,7 +657,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           user_id: ownerId,
           executor_id: ex.id,
           timeframe,
-          signal_id: primarySignalId,
+          candle_id: bar.candleId,
           approved: decision.approved,
           reason_codes: reasonCodesWithRegime,
           risk_snapshot: decision.riskSnapshot,
@@ -665,11 +685,28 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
           },
         };
 
+        let decisionId: string;
         try {
-          await DecisionsSelector.upsertOneByExecutorSignalSide(admin, decisionRow);
+          decisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(admin, decisionRow);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           throw new Error(`${marketSymbol}: decisions upsert: ${msg}`);
+        }
+        try {
+          await SignalDecisionsSelector.insertMany(
+            admin,
+            matched.map((r) => ({
+              decision_id: decisionId,
+              signal_id: r.id,
+              score: 1.0,
+              reasons: { intent: r.intent, agent_id: agentSlugFromRow(r) },
+            })),
+          );
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!/duplicate|unique/i.test(msg)) {
+            console.error(`[mediator/catalog-close] ${marketSymbol}: junction insert: ${msg}`);
+          }
         }
         decisionsUpserted += 1;
 
@@ -689,6 +726,7 @@ export async function runMediatorCatalogClose(body: MediatorCatalogCloseBody): P
               marketSymbol,
               timeframe,
               closeTimeIso,
+              candleId: bar.candleId,
               regimeSignalId: regimeSignal.id,
               regimeSignalMetadata: regimeSignal.metadata ?? null,
               allowedSides,

@@ -6,6 +6,7 @@ const baseArgs = {
   ownerId: "user-1",
   executor: { id: "exec-1", name: "Default", exchange_id: "exch-bitvavo" },
   timeframe: "15m",
+  candleId: "candle-1",
   primarySignalId: "sig-1",
   matched: [
     { id: "sig-1", intent: "ENTER", agent_slug: "ma-cross" },
@@ -35,9 +36,9 @@ describe("buildQuoteAssetNotAllowedSkipDecision", () => {
     expect(payload.resolvedIntent).toBe("HOLD");
   });
 
-  it("uses the primary signal id and includes all matched signal ids in the payload", () => {
+  it("stamps the candle id and includes all matched signal ids in the payload", () => {
     const row = buildQuoteAssetNotAllowedSkipDecision(baseArgs);
-    expect(row.signal_id).toBe("sig-1");
+    expect(row.candle_id).toBe("candle-1");
     const payload = row.decision_payload as Record<string, unknown>;
     expect(payload.signalIds).toEqual(["sig-1", "sig-2"]);
     expect(payload.signalsIn).toEqual([

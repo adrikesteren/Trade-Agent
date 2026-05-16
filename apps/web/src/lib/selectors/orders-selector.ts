@@ -2,20 +2,16 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Embedded signals projection (decisions → signals → candle_id), used to resolve `market_id`/`bar_close`. */
-export type OrderEmbeddedDecisionSignals =
-  | {
-      signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-    }
-  | {
-      signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-    }[]
+/** Embedded decisions projection (decisions.candle_id), used to resolve `market_id`/`bar_close`. */
+export type OrderEmbeddedDecisionCandle =
+  | { candle_id?: string | null }
+  | { candle_id?: string | null }[]
   | null;
 
 /** Narrow id-only row used by the historical wipe service. */
 export type OrderIdRow = { id: string };
 
-/** Bitvavo-reconcile row (with embedded `decisions → signals(candle_id)` for market resolution). */
+/** Bitvavo-reconcile row (with embedded `decisions.candle_id` for market resolution). */
 export type OrderReconcileRow = {
   id: string;
   user_id: string;
@@ -26,7 +22,7 @@ export type OrderReconcileRow = {
   quantity: string | number | null;
   side: string;
   decision_id: string | null;
-  decisions?: OrderEmbeddedDecisionSignals;
+  decisions?: OrderEmbeddedDecisionCandle;
 };
 
 /** Trade-decision detail page row (narrow projection by `decision_id`). */
@@ -38,7 +34,7 @@ export type OrderForDecisionRow = {
   created_at: string;
 };
 
-/** Executor detail page list row (with embedded `decisions → signals(candle_id)`). */
+/** Executor detail page list row (with embedded `decisions.candle_id`). */
 export type OrderExecutorListRow = {
   id: string;
   side: string;
@@ -46,10 +42,10 @@ export type OrderExecutorListRow = {
   notional_eur: string | number | null;
   status: string;
   created_at: string;
-  decisions?: OrderEmbeddedDecisionSignals;
+  decisions?: OrderEmbeddedDecisionCandle;
 };
 
-/** Orders detail page row (wide, with embedded `decisions → signals(candle_id)`). */
+/** Orders detail page row (wide, with embedded `decisions.candle_id`). */
 export type OrderDetailRow = {
   id: string;
   decision_id: string | null;
@@ -63,10 +59,10 @@ export type OrderDetailRow = {
   external_id: string | null;
   created_at: string;
   updated_at: string | null;
-  decisions?: OrderEmbeddedDecisionSignals;
+  decisions?: OrderEmbeddedDecisionCandle;
 };
 
-/** Orders list-view row (with embedded `decisions → signals(candle_id)`). */
+/** Orders list-view row (with embedded `decisions.candle_id`). */
 export type OrderListViewRow = {
   id: string;
   decision_id: string | null;
@@ -79,7 +75,7 @@ export type OrderListViewRow = {
   paper: boolean;
   external_id: string | null;
   created_at: string;
-  decisions?: OrderEmbeddedDecisionSignals;
+  decisions?: OrderEmbeddedDecisionCandle;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -87,7 +83,7 @@ export type OrderListViewRow = {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * `select("id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( signals ( candle_id ) )")
+ * `select("id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( candle_id )")
  *   .eq("paper", false) .in("status", ["pending","open"]) .not("external_id", "is", null)
  *   .order("created_at") .limit(N)` — Bitvavo reconcile batch.
  */
@@ -99,7 +95,7 @@ export async function selectLiveOpenForReconcile(
     .schema("trading")
     .from("orders")
     .select(
-      "id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( signals ( candle_id ) )",
+      "id, user_id, executor_id, external_id, status, notional_eur, quantity, side, decision_id, decisions ( candle_id )",
     )
     .eq("paper", false)
     .in("status", ["pending", "open"])
@@ -135,7 +131,7 @@ export async function selectForDecisionWithCount(
 }
 
 /**
- * `select("id, side, quantity, notional_eur, status, created_at, decisions ( signals ( candle_id ) )",
+ * `select("id, side, quantity, notional_eur, status, created_at, decisions ( candle_id )",
  *   { count: "exact" }) .eq("executor_id", id) .order(created_at desc) .limit(N)` — executor
  * detail page orders pack. Returns `{ data, count, error }` so callers can destructure like
  * the inline pack call it replaces.
@@ -148,7 +144,7 @@ export async function selectExecutorRecentWithCount(
     .schema("trading")
     .from("orders")
     .select(
-      "id, side, quantity, notional_eur, status, created_at, decisions ( signals ( candle_id ) )",
+      "id, side, quantity, notional_eur, status, created_at, decisions ( candle_id )",
       { count: "exact" },
     )
     .eq("executor_id", args.executorId)
@@ -162,7 +158,7 @@ export async function selectExecutorRecentWithCount(
 }
 
 /**
- * `select("…wide…, decisions ( signals ( candle_id ) )") .eq("id", id) .maybeSingle()` —
+ * `select("…wide…, decisions ( candle_id )") .eq("id", id) .maybeSingle()` —
  * orders detail page lookup.
  */
 export async function selectDetailById(
@@ -173,7 +169,7 @@ export async function selectDetailById(
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( signals ( candle_id ) )",
+      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, updated_at, decisions ( candle_id )",
     )
     .eq("id", id)
     .maybeSingle();
@@ -232,7 +228,7 @@ export async function countListView(
 }
 
 /**
- * Orders list page rows — `select("…list-view…, decisions ( signals ( candle_id ) )")
+ * Orders list page rows — `select("…list-view…, decisions ( candle_id )")
  *   .order(created_at desc) .range(from, to)`. Caller may narrow by executor via
  * `executorIdFilter`.
  */
@@ -244,7 +240,7 @@ export async function selectListViewPaginated(
     .schema("trading")
     .from("orders")
     .select(
-      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( signals ( candle_id ) )",
+      "id, decision_id, executor_id, side, position_side, quantity, notional_eur, status, paper, external_id, created_at, decisions ( candle_id )",
     )
     .order("created_at", { ascending: false })
     .range(args.from, args.to);

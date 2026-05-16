@@ -158,11 +158,10 @@ type OrderRowDb = {
   notional_eur: string | number | null;
   status: string;
   created_at: string;
-  decisions?: {
-    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-  } | {
-    signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-  }[] | null;
+  decisions?:
+    | { candle_id?: string | null }
+    | { candle_id?: string | null }[]
+    | null;
 };
 
 type OrderRow = {
@@ -178,8 +177,7 @@ type OrderRow = {
 
 function normalizeExecutorOrderRow(r: OrderRowDb, candleById: Map<string, CatalogCandleBar>): OrderRow {
   const td = unwrapOne(r.decisions);
-  const sig = unwrapOne(td?.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(td?.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
   return {
@@ -207,30 +205,28 @@ type WalletAssetBalanceRow = WalletAssetBalanceSelector.WalletAssetBalanceListRo
 
 type TradeDecisionRowDb = {
   id: string;
-  signal_id: string | null;
+  candle_id: string;
   approved: boolean;
   created_at: string;
-  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
 };
 
 type TradeDecisionRow = {
   id: string;
   market_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   created_at: string;
   bar_close_iso: string | null;
 };
 
 function normalizeExecutorTradeDecisionRow(r: TradeDecisionRowDb, candleById: Map<string, CatalogCandleBar>): TradeDecisionRow {
-  const sig = unwrapOne(r.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(r.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const barClose = candle?.close_time && candle.close_time.trim() ? candle.close_time.trim() : null;
   return {
     id: r.id,
     market_id: candle?.market_id ? candle.market_id.trim() : "",
-    signal_id: String(r.signal_id ?? "").trim(),
+    candle_id: r.candle_id,
     approved: r.approved,
     created_at: r.created_at,
     bar_close_iso: barClose,
@@ -481,13 +477,9 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
   const candleIdsForEmbed = [
     ...ordRowsRaw.map((r) => {
       const td = unwrapOne(r.decisions);
-      const sig = unwrapOne(td?.signals);
-      return String(sig?.candle_id ?? "").trim();
+      return String(td?.candle_id ?? "").trim();
     }),
-    ...tdRowsRaw.map((r) => {
-      const sig = unwrapOne(r.signals);
-      return String(sig?.candle_id ?? "").trim();
-    }),
+    ...tdRowsRaw.map((r) => String(r.candle_id ?? "").trim()),
   ].filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIdsForEmbed);
 
@@ -910,7 +902,7 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                 <RecordRelatedList
                   title="Trade decisions"
                   icon={<ListViewObjectIcon letter="T" />}
-                  description="Id, signal, market, approved, bar close. Sorted by bar close (newest first)."
+                  description="Id, market, approved, bar close. Sorted by bar close (newest first)."
                   items={tradeDecisionsRaw}
                   getKey={(r) => r.id}
                   totalCount={tradeDecisionTotal}
@@ -920,19 +912,11 @@ export default async function ExecutorDetailPage({ params, searchParams }: Execu
                     const mLabel = row.market_id
                       ? (symMap.get(row.market_id) ?? `${row.market_id.slice(0, 8)}…`)
                       : "—";
-                    const sid = row.signal_id;
                     return (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8125rem]">
                         <Link href={`/trade-decisions/${row.id}`} className="bk-link shrink-0 font-mono" title={row.id}>
                           {shortId(row.id)}
                         </Link>
-                        {sid ? (
-                          <Link href={`/signals/${sid}`} className="bk-link shrink-0 font-mono" title={sid}>
-                            {shortId(sid)}
-                          </Link>
-                        ) : (
-                          <span className="bk-text-muted shrink-0 text-[0.75rem]">—</span>
-                        )}
                         {row.market_id ? (
                           <Link href={`/markets/${row.market_id}`} className="bk-link shrink-0 font-mono">
                             {mLabel}

@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import * as DecisionsSelector from "@/lib/selectors/decisions-selector";
 import * as PositionsSelector from "@/lib/selectors/positions-selector";
 import * as SignalAgentsSelector from "@/lib/selectors/signal-agents-selector";
+import * as SignalDecisionsSelector from "@/lib/selectors/signal-decisions-selector";
 import * as SignalsSelector from "@/lib/selectors/signals-selector";
 
 import { detectRegimeFlip, type RegimePoint, type RegimeLabel } from "./regime-flip-detect.service";
@@ -98,6 +99,8 @@ export type EvaluateAndEmitSarArgs = {
   marketSymbol: string;
   timeframe: string;
   closeTimeIso: string;
+  /** The catalog candle this bar resolves to (Plan 2: decisions are keyed by candle). */
+  candleId: string;
   /** The regime classifier signal row matched for this bar (id + metadata.regime). */
   regimeSignalId: string;
   regimeSignalMetadata: Record<string, unknown> | null;
@@ -123,8 +126,9 @@ export type EvaluateAndEmitSarResult = {
 /**
  * Mediator entry point for SAR (Stop-and-Reverse). Side-effecting: when a
  * regime flip is confirmed, this writes 0-2 paired decisions in
- * `trading.decisions` keyed on the regime classifier `signal_id` with
- * different `position_side` values (allowed by P3/M10 widened uniqueness).
+ * `trading.decisions` keyed on the bar's `candle_id` with different
+ * `position_side` values (allowed by Plan 2 widened uniqueness), plus the
+ * matching junction rows in `trading.signal_decisions`.
  *
  * Always returns; never throws on no-op (no flip → returns 0 decisions).
  */
@@ -186,7 +190,7 @@ export async function evaluateAndEmitSar(args: EvaluateAndEmitSarArgs): Promise<
       user_id: args.userId,
       executor_id: args.executorId,
       timeframe: args.timeframe,
-      signal_id: args.regimeSignalId,
+      candle_id: args.candleId,
       approved: true,
       reason_codes: [proposal.reason],
       risk_snapshot: args.riskSnapshot,
@@ -215,14 +219,34 @@ export async function evaluateAndEmitSar(args: EvaluateAndEmitSarArgs): Promise<
       },
     };
 
+    let decisionId: string;
     try {
-      await DecisionsSelector.upsertOneByExecutorSignalSide(args.admin, sarRow);
+      decisionId = await DecisionsSelector.upsertOneByExecutorCandleSideReturningId(args.admin, sarRow);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(
         `[mediator/sar] ${args.marketSymbol} ${args.executorName} ${proposal.intent} ${proposal.positionSide}: ${msg}`,
       );
       continue;
+    }
+
+    // Plan 2: signal linkage moves to the junction table. SAR matches one
+    // regime classifier signal per emitted decision, with score=1.0 (matches
+    // the legacy 1:N semantics under the new M:N shape).
+    try {
+      await SignalDecisionsSelector.insertMany(args.admin, [
+        { decision_id: decisionId, signal_id: args.regimeSignalId, score: 1.0, reasons: { reasonCode: proposal.reason } },
+      ]);
+    } catch (e) {
+      // Junction insert failing after the parent decision succeeded is logged
+      // but not surfaced — the duplicate-key path is expected on rerun and
+      // the decision row alone already carries the audit trail in its payload.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/duplicate|unique/i.test(msg)) {
+        console.error(
+          `[mediator/sar] ${args.marketSymbol} ${args.executorName} junction insert: ${msg}`,
+        );
+      }
     }
     written += 1;
   }

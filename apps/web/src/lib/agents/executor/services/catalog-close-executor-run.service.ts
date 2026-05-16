@@ -188,7 +188,7 @@ export function exitFirstRank(payload: Record<string, unknown> | null): 0 | 1 {
 type DecisionRow = {
   id: string;
   user_id: string;
-  signal_id: string;
+  candle_id: string;
   approved: boolean;
   timeframe: string;
   decision_payload: Record<string, unknown> | null;
@@ -497,13 +497,15 @@ export async function runExecutorCatalogClose(body: ExecutorCatalogCloseBody): P
         userId: ownerId,
         candleId: barPx.candleId,
       });
-      const signalIds = [...new Set(sigRows.map((r) => String(r.id)))];
-      if (!signalIds.length) continue;
+      // Plan 2: decisions are keyed by candle now (not signal). We still gate
+      // on "at least one signal for this user/candle existed" to skip bars
+      // that the signal pipeline hasn't processed yet.
+      if (!sigRows.length) continue;
 
-      const decList = await DecisionsSelector.selectRunRowsForExecutorAndSignals(admin, {
+      const decList = await DecisionsSelector.selectRunRowsForExecutorAndCandle(admin, {
         userId: ownerId,
         executorId: ex.id,
-        signalIds,
+        candleId: barPx.candleId,
       });
 
       const candidates = decList as DecisionRow[];

@@ -36,7 +36,7 @@ import Link from "next/link";
 type DecisionRow = {
   id: string;
   executor_id: string;
-  signal_id: string;
+  candle_id: string;
   market_id: string;
   approved: boolean;
   reason_codes: string[] | null;
@@ -47,9 +47,7 @@ type DecisionRow = {
   created_at: string;
 };
 
-type DecisionRowDb = Omit<DecisionRow, "market_id" | "close_time"> & {
-  signals?: { candle_id?: string | null } | { candle_id?: string | null }[] | null;
-};
+type DecisionRowDb = Omit<DecisionRow, "market_id" | "close_time">;
 
 type CatalogMarketRow = {
   id: string;
@@ -88,35 +86,28 @@ function formatReasonCodes(codes: string[] | null | undefined): string {
   return codes.join(", ");
 }
 
-function unwrapOne<T>(raw: T | T[] | null | undefined): T | null {
-  if (raw == null) return null;
-  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
-}
-
 function normalizeTradeDecisionRow(r: DecisionRowDb, candleById: Map<string, CatalogCandleBar>): DecisionRow {
-  const { signals: _sig, ...base } = r;
-  const p = base.decision_payload;
+  const p = r.decision_payload;
   const barFromPayload =
     p && typeof p === "object" && typeof (p as Record<string, unknown>).barCloseTimeIso === "string"
       ? String((p as Record<string, unknown>).barCloseTimeIso).trim()
       : "";
-  const sig = unwrapOne(r.signals);
-  const cid = String(sig?.candle_id ?? "").trim();
+  const cid = String(r.candle_id ?? "").trim();
   const candle = cid ? candleById.get(cid) : undefined;
   const closeFromCandle = candle?.close_time ? candle.close_time.trim() : "";
   const marketId = candle?.market_id ? candle.market_id.trim() : "";
   return {
-    id: base.id,
-    executor_id: base.executor_id,
-    signal_id: base.signal_id,
+    id: r.id,
+    executor_id: r.executor_id,
+    candle_id: r.candle_id,
     market_id: marketId,
-    approved: base.approved,
-    reason_codes: base.reason_codes,
-    timeframe: base.timeframe,
-    position_side: String((base as { position_side?: string | null }).position_side ?? "long"),
-    decision_payload: base.decision_payload,
-    created_at: base.created_at,
-    close_time: barFromPayload || closeFromCandle || base.created_at,
+    approved: r.approved,
+    reason_codes: r.reason_codes,
+    timeframe: r.timeframe,
+    position_side: String((r as { position_side?: string | null }).position_side ?? "long"),
+    decision_payload: r.decision_payload,
+    created_at: r.created_at,
+    close_time: barFromPayload || closeFromCandle || r.created_at,
   };
 }
 
@@ -209,9 +200,7 @@ export async function TradeDecisionsListView({
   }
 
   const rawDb = (rows ?? []) as DecisionRowDb[];
-  const candleIds = rawDb
-    .map((r) => String(unwrapOne(r.signals)?.candle_id ?? "").trim())
-    .filter(Boolean);
+  const candleIds = rawDb.map((r) => String(r.candle_id ?? "").trim()).filter(Boolean);
   const candleById = await fetchCatalogCandlesByIds(supabase, candleIds);
   const raw = rawDb.map((r) => normalizeTradeDecisionRow(r, candleById));
   const deduped = dedupeTradeDecisionsForListView(raw);
